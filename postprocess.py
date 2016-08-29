@@ -18,26 +18,7 @@ def parse_file(path):
         parser.readfp(config_file)
     return parser
 
-def scatter3d(x,y,z, cs, colorsMap='jet'):
-    cm = plt.get_cmap(colorsMap)
-    cNorm = matplotlib.colors.Normalize(vmin=min(cs), vmax=max(cs))
-    scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
-    fig = plt.figure(figsize=(8,6))
-    ax = Axes3D(fig)
-    ax.scatter(x, y, z, c=scalarMap.to_rgba(cs))
-    scalarMap.set_array(cs)
-    fig.colorbar(scalarMap)
-    print(cs)
-    #fig = plt.figure(figsize=(8,6)) 
-    #ax = fig.add_subplot(111,projection='3d')
-    #colors = cm.hsv(E_mag/max(E_mag))
-    #colmap = cm.ScalarMappable(cmap=cm.hsv)
-    #colmap.set_array(E_mag)
-    #yg = ax.scatter(xs, ys, zs, c=colors, marker='o')
-    #cb = fig.colorbar(colmap)
-    #ax.set_xlabel('X Label')
-    #ax.set_ylabel('Y Label')
-    plt.show()
+
 
 class PostProcess(object):
 
@@ -45,6 +26,7 @@ class PostProcess(object):
         self.gconf = global_conf
         simdirs = [x[0] for x in os.walk(self.gconf.get('General','basedir'))]
         self.sims = [parse_file(os.path.join(simdir,'sim_conf.ini')) for simdir in simdirs[1:]]
+        self.sim = None
         
 
     def get_data(self):
@@ -56,7 +38,7 @@ class PostProcess(object):
         e_data = np.loadtxt(e_path)
         h_data = np.loadtxt(h_path)
         self.pos_inds,self.e_data = np.array_split(e_data,[3],axis=1)
-        self.h_data = np.array_split(e_data,[3],axis=1)[-1] 
+        self.h_data = np.array_split(h_data,[3],axis=1)[-1] 
 
     def get_scalar_quantity(self,quantity):
         try:
@@ -64,8 +46,6 @@ class PostProcess(object):
         except KeyError:
             print() 
             print("You have attempted to calculate and unsupported quantity!!")
-            print("Please modify your global config file to choose from the following options")
-            print(self.quantities.keys())
             quit()
         return val_vec 
     
@@ -116,7 +96,35 @@ class PostProcess(object):
         return H_mag
 
     
-    
+    def scatter3d(self,x,y,z,cs,labels,ptype,colorsMap='jet'):
+        """A general utility method for scatter plots in 3D"""
+        #fig = plt.figure(figsize=(8,6)) 
+        #ax = fig.add_subplot(111,projection='3d')
+        #colors = cm.hsv(E_mag/max(E_mag))
+        #colmap = cm.ScalarMappable(cmap=cm.hsv)
+        #colmap.set_array(E_mag)
+        #yg = ax.scatter(xs, ys, zs, c=colors, marker='o')
+        #cb = fig.colorbar(colmap)
+        cm = plt.get_cmap(colorsMap)
+        cNorm = matplotlib.colors.Normalize(vmin=min(cs), vmax=max(cs))
+        scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
+        fig = plt.figure(figsize=(9,7))
+        #ax = Axes3D(fig)
+        ax = fig.add_subplot(111,projection='3d')
+        ax.scatter(x, y, z, c=scalarMap.to_rgba(cs))
+        scalarMap.set_array(cs)
+        cb = fig.colorbar(scalarMap)
+        cb.set_label(labels[-1])
+        ax.set_xlabel(labels[0])
+        ax.set_ylabel(labels[1])
+        ax.set_zlabel(labels[2])
+        fig.suptitle(os.path.basename(self.sim.get('General','sim_dir')))
+        if self.gconf.get('General','save_plots'):
+            name = labels[-1]+'_'+ptype+'.pdf'
+            path = os.path.join(self.sim.get('General','sim_dir'),name)
+            fig.savefig(path)
+        if self.gconf.get('General','show_plots'):
+            plt.show()
     
     def full_3d(self,quantity):
         """Generates a full 3D plot of a specified scalar quantity"""
@@ -130,9 +138,9 @@ class PostProcess(object):
         zpos = self.pos_inds[:,2] 
         # Get the scalar
         scalar = self.get_scalar_quantity(quantity)
-        print(scalar)
+        labels = ('X [um]','Y [um]','Z [um]',quantity)
         # Now plot! 
-        scatter3d(xpos,ypos,zpos,scalar)
+        self.scatter3d(xpos,ypos,zpos,scalar,labels,'full_3d')
         
     def planes_3d(self,quantity,xplane,yplane):
         """Plots some scalar quantity in 3D but only along specified x-z and y-z planes"""
@@ -143,19 +151,14 @@ class PostProcess(object):
         dy = period/self.gconf.getfloat('General','y_samples')
         # Get the scalar values
         scalar = self.get_scalar_quantity(quantity) 
-        print(scalar)
         # Filter out any undesired data that isn't on the planes
         mat = np.column_stack((self.pos_inds[:,0],self.pos_inds[:,1],self.pos_inds[:,2],scalar))
         planes = np.array([row for row in mat if row[0] == xplane or row[1] == yplane])
-        print planes.shape
-        print(planes)
         planes[:,0] = planes[:,0]*dx
         planes[:,1] = planes[:,1]*dy
+        labels = ('X [um]','Y [um]','Z [um]',quantity)
         # Now plot!
-        scatter3d(planes[:,0],planes[:,1],planes[:,2],planes[:,3])
-
-#plots = {'full_threeD':PostProcess.full_threeD,'threeD_planes':PostProcess.threeD_planes}
-#quantities = {'normE':PostProcess.normE,'normH':PostProcess.normH}
+        self.scatter3d(planes[:,0],planes[:,1],planes[:,2],planes[:,3],labels,'planes_3d')
 
 def main():
     parser = ap.ArgumentParser(description="""A wrapper around s4_sim.py to automate parameter
@@ -171,17 +174,29 @@ def main():
         quit()
    
     
+    # Create postprocessing object
     pp = PostProcess(conf) 
+    # Loop through each individual simulation
     for sim in pp.sims:
+        # Set it as the current sim and grab its data
         pp.sim = sim
         pp.get_data()
+        # For each plot we want, and the list of quantities to be plotted using that plot type
         for plot, quantities in pp.gconf.items('Postprocess'):
             print(quantities)
+            # For each group of arguments, grab the proper plot method bound to this instance of
+            # PostProcess using getattr() built-in. Unpack the arguments provided by the config
+            # file, and pass them in to the plot method. 
             for args in quantities.split(';'):
                 tmp = args.split(',')
                 print(tmp)
-                getattr(pp,plot)(*tmp)
-
+                try:
+                    getattr(pp,plot)(*tmp)
+                except KeyError:
+                    print()
+                    print("You have attempted to plot an unsupported plot type!")
+                    print()
+                    quit()
 
 if __name__ == '__main__':
     main()

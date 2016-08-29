@@ -8,7 +8,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.cm as cmx
 import argparse as ap
 import os
-import ConfigParser as confp 
+import configparser as confp 
 import glob
 
 def parse_file(path):

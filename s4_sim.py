@@ -8,7 +8,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.cm as cmx
 import argparse as ap
 import os
-import ConfigParser as confp 
+import configparser as confp 
 import glob
 
 def parse_file(path):
@@ -17,6 +17,12 @@ def parse_file(path):
     parser = confp.SafeConfigParser()
     with open(path,'r') as config_file:
         parser.readfp(config_file)
+    height = sum((parser.getfloat('Parameters','nw_height'),
+                  parser.getfloat('Parameters','substrate_t'),
+                  parser.getfloat('Parameters','ito_t')))
+    parser.set('Parameters','total_height',str(height))
+    with open(path,'w') as conf_file:
+        parser.write(conf_file)
     return parser
    
 def get_epsilon(freq,path):
@@ -127,7 +133,8 @@ def build_sim(conf):
     x_samp = conf.getint('General','x_samples')
     y_samp = conf.getint('General','y_samples')
     z_samp = conf.getint('General','z_samples')
-    for z in np.linspace(0,2.3,z_samp):
+    height = conf.getfloat('Parameters','total_height') 
+    for z in np.linspace(0,height,z_samp):
         sim.GetFieldsOnGrid(z,NumSamples=(x_samp,y_samp),
                             Format='FileAppend',BaseFilename=output_file)
 

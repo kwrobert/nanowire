@@ -3,7 +3,7 @@ import subprocess
 import itertools
 import argparse as ap
 import os
-import ConfigParser as confp 
+import configparser as confp 
 import glob
 
 def sh(cmd):
@@ -33,15 +33,15 @@ def parse_file(path):
     return parser
 
 def run_single_sim():
-    print "Running single sim"
+    print("Running single sim")
 
 def run_sweep(conf):
         
-    print "Running sweep"
+    print("Running sweep")
     # Get our variable parameters by splitting string in conf file and explanding into list
     optionValues = dict(conf.items("Variable Parameters"))
     print(optionValues)
-    for key, value in optionValues.iteritems():
+    for key, value in optionValues.items():
         # determine if we have floats or ints
         if value.find('.') != -1:
             type_converter = lambda x: float(x)
@@ -53,7 +53,7 @@ def run_sweep(conf):
             
             # Parse the range string
             dataRange = value.split(':')
-            dataMin,dataMax,dataStep = map(type_converter,dataRange)
+            dataMin,dataMax,dataStep = list(map(type_converter,dataRange))
 
             # construct the option list (handles ints and floats)
             vals = [dataMin]
@@ -65,11 +65,11 @@ def run_sweep(conf):
         else:
             # store the typed out values
             dataList = value.split(',')
-            dataList = map(type_converter,dataList)
+            dataList = list(map(type_converter,dataList))
             optionValues[key] = dataList
     
-    valuelist = optionValues.values()
-    keys = optionValues.keys()
+    valuelist = list(optionValues.values())
+    keys = list(optionValues.keys())
     # Consuming a list of lists/tuples where each inner list/tuple contains all the values for a
     # particular parameter, returns a list of tuples containing all the unique combos for that
     # parameter  
@@ -121,13 +121,13 @@ def run_sweep(conf):
         os.chdir(fullpath)
         print("Starting simulation for %s ...."%workdir)
         out, err = sim(script,"sim_conf.ini")
-        print out
-        print err
+        print(out)
+        print(err)
         print("Finished simulation for %s!"%workdir)
         os.chdir(basedir)
             
 def run_optimization(conf):
-    print "Running optimization"
+    print("Running optimization")
 
 def main():
 
@@ -140,17 +140,17 @@ def main():
     if os.path.isfile(args.config_file):
         conf = parse_file(os.path.abspath(args.config_file))
     else:
-        print "\n The file you specified does not exist! \n"
+        print("\n The file you specified does not exist! \n")
         quit()
 
     if not conf.options("Variable Parameters"):
         # No variable params, single sim
         run_single_sim(conf)
     # If the variable params have ranges specified, do a parameter sweep
-    elif all(zip(*conf.items("Variable Parameters"))[1]):
+    elif all(list(zip(*conf.items("Variable Parameters")))[1]):
         run_sweep(conf)
     # If we have specified variable params without ranges, we need to optimize them
-    elif not all(zip(*conf.items("Variable Parameters"))[1]):
+    elif not all(list(zip(*conf.items("Variable Parameters")))[1]):
         run_optimization(conf)
     else:
         print("Something isn't right")

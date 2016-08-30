@@ -9,26 +9,66 @@ import argparse as ap
 import os
 import configparser as confp 
 import glob
+import re
 
 def parse_file(path):
     """Parse the INI file provided at the command line"""
     
     parser = confp.SafeConfigParser()
+    # This preserves case sensitivity
+    parser.optionxform = str
     with open(path,'r') as config_file:
         parser.readfp(config_file)
     return parser
 
 
-
-class PostProcess(object):
+class Cruncher():
+    """Crunches all the raw data. Calculates quantities specified in the global config file and
+    either appends them to the existing data files or creates new ones as needed"""
 
     def __init__(self,global_conf):
+        print("This is THE CRUNCHER!!!!!")
         self.gconf = global_conf
         simdirs = [x[0] for x in os.walk(self.gconf.get('General','basedir'))]
         self.sims = [parse_file(os.path.join(simdir,'sim_conf.ini')) for simdir in simdirs[1:]]
+        # Sort on the sim dir to prevent weirdness when calculating convergence. Sorts by ascending
+        # param values and works for multiple variable params
+        self.sort_sims()
         self.sim = None
-        
 
+    def sort_sims(self):
+        """Sorts simulations by their parameters the way a human would. Called human sorting or
+        natural sorting. Thanks stackoverflow"""
+        def atoi(text):
+            return int(text) if text.isdigit() else text
+
+        def natural_keys(sim):
+            text = sim.get('General','sim_dir')
+            return [ atoi(c) for c in re.split('(\d+)', text) ]
+        self.sims.sort(key=natural_keys)
+
+    def crunch(self):
+        mse = False
+        for sim in self.sims:
+            # Set it as the current sim and grab its data
+            self.sim = sim
+            self.get_data()
+            # For each quantity 
+            for quant,args in self.gconf.items('Cruncher'):
+                # This is a special case because we need to compute error between sims and we need
+                # to make sure all our other quantities have been calculated before we can compare
+                # them
+                if quant == 'mean_squared_error':
+                    mse = True
+                else:
+                    if args:
+                        self.calculate(quant,args.split(','))
+                    else:
+                        self.calculate(quant,[])
+            self.write_data()
+        if mse:
+            self.mse_wrap(self.gconf.get('Cruncher','mean_squared_error'))
+    
     def get_data(self):
         """Gets the E and H data for this particular sim"""
         sim_path = self.sim.get('General','sim_dir')
@@ -40,14 +80,43 @@ class PostProcess(object):
         self.pos_inds,self.e_data = np.array_split(e_data,[3],axis=1)
         self.h_data = np.array_split(h_data,[3],axis=1)[-1] 
 
-    def get_scalar_quantity(self,quantity):
+    def calculate(self,quantity,args):
         try:
-            val_vec = getattr(self,quantity)()
+            getattr(self,quantity)(*args)
         except KeyError:
             print() 
-            print("You have attempted to calculate and unsupported quantity!!")
+            print("You have attempted to calculate an unsupported quantity!!")
             quit()
-        return val_vec 
+
+    def write_data(self):
+        """Writes the crunched data"""
+        # Get the current path
+        base = self.sim.get('General','sim_dir')
+        fname = self.sim.get('General','base_name')
+        epath = os.path.join(base,fname+'.E')
+        hpath = os.path.join(base,fname+'.H')
+        # Move the raw data
+        os.rename(epath,epath+".raw")
+        os.rename(hpath,hpath+".raw")
+        # Build the full matrices
+        full_emat = np.column_stack((self.pos_inds,self.e_data))
+        full_hmat = np.column_stack((self.pos_inds,self.h_data))
+        # Build the header strings for the matrices
+        eheader = ['x','y','z','Ex_real','Ey_real','Ez_real','Ex_imag','Ey_imag','Ez_imag']
+        hheader = ['x','y','z','Hx_real','Hy_real','Hz_real','Hx_imag','Hy_imag','Hz_imag']
+        for quant,args in self.gconf.items('Cruncher'):
+            # TODO: This is just terrible because it means any quantities NOT pertaining to the
+            # efield are not allowed to have a captial E in their name. Same for the H field. 
+            if 'E' in quant:
+                eheader.append(quant)
+            elif 'H' in quant:
+                hheader.append(quant)
+        # Write the matrices. TODO: Add a nice format string
+        #formatter = lambda x: "%22s"%x
+        #np.savetxt(epath,full_emat,header=''.join(map(formatter, eheader)))
+        #np.savetxt(hpath,full_hmat,header=''.join(map(formatter, hheader)))
+        np.savetxt(epath,full_emat,header=','.join(eheader))
+        np.savetxt(hpath,full_hmat,header=','.join(hheader))
     
     def normE(self):
         """Calculate and returns the norm of E"""
@@ -69,8 +138,7 @@ class PostProcess(object):
         Ey = self.e_data[:,1]
         Ez = self.e_data[:,2]
         E_mag = np.sqrt(Ex**2+Ey**2+Ez**2)
-        
-        return E_mag
+        self.e_data = np.column_stack((self.e_data,E_mag))
                                      
     def normH(self):
         """Calculate and returns the norm of H"""
@@ -92,18 +160,70 @@ class PostProcess(object):
         Hy = self.h_data[:,1]
         Hz = self.h_data[:,2]
         H_mag = np.sqrt(Hx**2+Hy**2+Hz**2)
-        
-        return H_mag
+        self.h_data = np.column_stack((self.h_data,H_mag))
 
+    def mse_wrap(self,quant):
+        """A wrapper to calculate the mean squared error of a quantity between simulations for a run
+        and write the results to a file"""
+        
+        with open(os.path.join(self.gconf.get('General','basedir'),'mse_%s.dat'%quant),'w') as errfile:
+            errors = []
+            for i in range(1,len(self.sims)):
+                sim1 = self.sims[i-1]
+                sim2 = self.sims[i]
+                epath1 = os.path.join(sim1.get('General','sim_dir'),sim1.get('General','base_name')+'.E')
+                hpath1 = os.path.join(sim1.get('General','sim_dir'),sim1.get('General','base_name')+'.H')
+                epath2 = os.path.join(sim2.get('General','sim_dir'),sim2.get('General','base_name')+'.E')
+                hpath2 = os.path.join(sim2.get('General','sim_dir'),sim2.get('General','base_name')+'.H')
+                with open(epath1,'r') as efile:
+                    eheads = efile.readlines()[0].strip('#\n').split(',')
+                with open(hpath1,'r') as hfile:
+                    hheads = hfile.readlines()[0].strip('#\n').split(',')
+                if quant in eheads:
+                    ind = eheads.index(quant)
+                    dat1 = np.loadtxt(epath1)
+                    dat2 = np.loadtxt(epath2)
+                    vec1 = dat1[:,ind]
+                    vec2 = dat2[:,ind]
+                    error = self.mean_squared_error(vec1,vec2)
+                    errors.append(error)
+                elif quant in hheads:
+                    ind = hheads.index(quant)
+                    dat1 = np.loadtxt(hpath1)
+                    dat2 = np.loadtxt(hpath2)
+                    vec1 = dat1[:,ind]
+                    vec2 = dat2[:,ind]
+                    error = self.mean_squared_error(vec1,vec2)
+                    errors.append(error)
+                else:
+                    print('The quantity for which you want to compute the error has not yet been \
+                            calculated')
+                    quit()
+                errfile.write('%s-%s,%f\n'%(os.path.basename(sim1.get('General','sim_dir')),os.path.basename(sim2.get('General','sim_dir')),error))
+        plt.figure()
+        plt.plot(range(len(errors)),errors)
+        plt.show()
+                
     def mean_squared_error(self,x,y):
         """Return the mean squared error between two equally sized sets of data"""
         if x.size != y.size:
             print("You have attempted to compare datasets with an unequal number of points!!!!")
             quit()
         else:
+            print(x)
+            print(y)
             mse = sum((x-y)**2)/x.size
+            print(mse)
             return mse
-    
+
+class Plotter():
+
+    def __init__(self,global_conf):
+        self.gconf = global_conf
+        simdirs = [x[0] for x in os.walk(self.gconf.get('General','basedir'))]
+        self.sims = [parse_file(os.path.join(simdir,'sim_conf.ini')) for simdir in simdirs[1:]]
+        self.sim = None
+        
     def convergence(self,quantity):
         """Calculates the convergence of a given quantity across all available simulations"""
         errors = []
@@ -251,8 +371,6 @@ class PostProcess(object):
         # Now plot!
         self.scatter3d(planes[:,0],planes[:,1],planes[:,2],planes[:,3],labels,'planes_3d')
     
-    
-
 
 def main():
     parser = ap.ArgumentParser(description="""A wrapper around s4_sim.py to automate parameter
@@ -268,33 +386,35 @@ def main():
         quit()
    
     
-    # Create postprocessing object
-    pp = PostProcess(conf) 
-    # Loop through each individual simulation
-    for sim in pp.sims:
-        # Set it as the current sim and grab its data
-        pp.sim = sim
-        pp.get_data()
-        # For each plot we want, and the list of quantities to be plotted using that plot type
-        for plot, quantities in pp.gconf.items('Postprocess'):
-            if plot != 'convergence':
-                print(quantities)
-                # For each group of arguments, grab the proper plot method bound to this instance of
-                # PostProcess using getattr() built-in. Unpack the arguments provided by the config
-                # file, and pass them in to the plot method. 
-                for args in quantities.split(';'):
-                    tmp = args.split(',')
-                    print(tmp)
-                    try:
-                        getattr(pp,plot)(*tmp)
-                    except KeyError:
-                        print()
-                        print("You have attempted to plot an unsupported plot type!")
-                        print()
-                        quit()
+    # Instantiate objects
+    crunchr = Cruncher(conf)
+    pltr = Plotter(conf) 
+    crunchr.crunch()
+    ## Loop through each individual simulation
+    #for sim in pp.sims:
+    #    # Set it as the current sim and grab its data
+    #    pp.sim = sim
+    #    pp.get_data()
+    #    # For each plot we want, and the list of quantities to be plotted using that plot type
+    #    for plot, quantities in pp.gconf.items('Postprocess'):
+    #        if plot != 'convergence':
+    #            print(quantities)
+    #            # For each group of arguments, grab the proper plot method bound to this instance of
+    #            # PostProcess using getattr() built-in. Unpack the arguments provided by the config
+    #            # file, and pass them in to the plot method. 
+    #            for args in quantities.split(';'):
+    #                tmp = args.split(',')
+    #                print(tmp)
+    #                try:
+    #                    getattr(pp,plot)(*tmp)
+    #                except KeyError:
+    #                    print()
+    #                    print("You have attempted to plot an unsupported plot type!")
+    #                    print()
+    #                    quit()
 
-    if pp.gconf.has_option('Postprocess','convergence'):
-        pp.convergence(pp.gconf.get('Postprocess','convergence'))
+    #if pp.gconf.has_option('Postprocess','convergence'):
+    #    pp.convergence(pp.gconf.get('Postprocess','convergence'))
 
 if __name__ == '__main__':
     main()

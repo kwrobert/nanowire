@@ -10,6 +10,34 @@ import os
 import configparser as confp 
 import glob
 import re
+import logging
+
+def configure_logger(level,logger_name,log_dir,logfile):
+    # Get numeric level safely
+    numeric_level = getattr(logging, level.upper(), None)
+    if not isinstance(numeric_level, int):
+        raise ValueError('Invalid log level: %s' % args.log_level)
+    # Set formatting
+    formatter = logging.Formatter('%(asctime)s [%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
+    # Get logger with name
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(numeric_level)
+    # Set up file handler
+    try:
+        os.makedirs(log_dir)
+    except OSError:
+        # Log dir already exists
+        pass
+    output_file = os.path.join(log_dir,logfile)
+    fhandler = logging.FileHandler(output_file)
+    fhandler.setFormatter(formatter)
+    logger.addHandler(fhandler)
+    # Create console handler
+    ch = logging.StreamHandler()
+    ch.setLevel(numeric_level)
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
+    return logger
 
 def parse_file(path):
     """Parse the INI file provided at the command line"""
@@ -24,15 +52,23 @@ def parse_file(path):
 class Processor():
     """Base data processor class that has some methods every other processor needs"""
     def __init__(self,global_conf):
-        print("Processor base init")
+        self.log = logging.getLogger('postprocess')
+        self.log.debug("Processor base init")
         self.gconf = global_conf
-        simdirs = [x[0] for x in os.walk(self.gconf.get('General','basedir'))]
-        self.sims = [parse_file(os.path.join(simdir,'sim_conf.ini')) for simdir in simdirs[1:]]
+        exclude = set(['logs'])
+        base = self.gconf.get('General','basedir')
+        simdirs = []
+        for adir in os.listdir(base):
+            if os.path.isdir(os.path.join(base,adir)) and adir != 'logs':
+                simdirs.append(os.path.join(base,adir))
+        self.sims = [parse_file(os.path.join(simdir,'sim_conf.ini')) for simdir in simdirs]
+        self.log.debug('Sims before sorting: %s',str(self.sims))
         # Sort on the sim dir to prevent weirdness when calculating convergence. Sorts by ascending
         # param values and works for multiple variable params
         self.sort_sims()
+        self.log.debug('Sims after sorting: %s',str(self.sims))
         self.sim = None
-    
+
     def sort_sims(self):
         """Sorts simulations by their parameters the way a human would. Called human sorting or
         natural sorting. Thanks stackoverflow"""
@@ -62,20 +98,26 @@ class Cruncher(Processor):
 
     def __init__(self,global_conf):
         super().__init__(global_conf)
-        print("This is THE CRUNCHER!!!!!")
+        self.log.debug("This is THE CRUNCHER!!!!!")
         
     def crunch(self):
         mse = False
+        self.log.info('Beginning data crunch ...')
+        # NOTE: Doesn't make sense to switch the order of these loops as in the Plotter class
+        # because we only want to write out data matrix once
         for sim in self.sims:
             # Set it as the current sim and grab its data
             self.sim = sim
             self.get_data()
+            self.log.info('Crunching data for %s',self.sim.get('General','sim_dir'))
             # For each quantity 
             for quant,args in self.gconf.items('Cruncher'):
                 # This is a special case because we need to compute error between sims and we need
                 # to make sure all our other quantities have been calculated before we can compare
                 # them
+                self.log.info('Computing %s with args %s',str(quant),str(args))
                 if quant == 'mean_squared_error':
+                    self.log.info('Will compute mean squared error')
                     mse = True
                 else:
                     if args:
@@ -171,7 +213,7 @@ class Cruncher(Processor):
     def mse_wrap(self,quant):
         """A wrapper to calculate the mean squared error of a quantity between simulations for a run
         and write the results to a file"""
-        
+        self.log.info('Computing mean squared error') 
         with open(os.path.join(self.gconf.get('General','basedir'),'mse_%s.dat'%quant),'w') as errfile:
             for i in range(1,len(self.sims)):
                 sim1 = self.sims[i-1]
@@ -222,7 +264,7 @@ class Plotter(Processor):
     """Plots all the things listed in the config file"""
     def __init__(self,global_conf):
         super().__init__(global_conf)
-        print("This is the plotter")
+        self.log.debug("This is the plotter")
     
     def get_data(self):
         super().get_data()
@@ -237,60 +279,88 @@ class Plotter(Processor):
             h_headers = hfile.readlines()[0].strip('#\n').split(',')
         self.e_lookup = {e_headers[ind]:ind for ind in range(len(e_headers))}
         self.h_lookup = {h_headers[ind]:ind for ind in range(len(h_headers))}
+        self.log.debug('Here is the E field header lookup: %s',str(self.e_lookup))
+        self.log.debug('Here is the H field header lookup: %s',str(self.h_lookup))
 
     def plot(self):
-        print("Plot some stuff")
+        self.log.info("Beginning main plotter method")
         conv = False
-        for sim in self.sims:
-            # Set it as the current sim and grab its data
-            self.sim = sim
-            self.get_data()
-            # For each plot 
-            for plot,args in self.gconf.items('Plotter'):
-                # This is a special case because we need to compute error between sims and we need
-                # to make sure all our other quantities have been calculated before we can compare
-                # them
-                if plot == 'convergence':
-                    conv = True
-                else:
+        for plot,args in self.gconf.items('Plotter'):
+            self.log.info('Plotting %s with args %s',str(plot),str(args))
+            # This is a special case because we need to compute error between sims and we need
+            # to make sure all our other quantities have been calculated before we can compare
+            # them
+            if plot == 'convergence':
+                self.log.info('Will plot convergence')
+                conv = True
+                continue
+            else:
+                for sim in self.sims:
+                    # Set it as the current sim and grab its data
+                    self.sim = sim
+                    self.get_data()
+                    # For each plot 
+                    self.log.info('Plotting data for sim %s',
+                                  str(os.path.basename(self.sim.get('General','sim_dir'))))
+
                     for argset in args.split(';'):
+                        self.log.info('Passing following arg set to function %s: %s',str(plot),str(argset))
                         if argset:
                             self.gen_plot(plot,argset.split(','))
                         else:
                             self.gen_plot(plot,[])
+        
+        #for sim in self.sims:
+        #    # Set it as the current sim and grab its data
+        #    self.sim = sim
+        #    self.get_data()
+        #    # For each plot 
+        #    self.log.info('Plotting data for sim %s',
+        #                  str(os.path.basename(self.sim.get('General','sim_dir'))))
+        #    for plot,args in self.gconf.items('Plotter'):
+        #        # This is a special case because we need to compute error between sims and we need
+        #        # to make sure all our other quantities have been calculated before we can compare
+        #        # them
+        #        if plot == 'convergence':
+        #            self.log.info('Will plot convergence')
+        #            conv = True
+        #            continue
+        #        else:
+        #            self.log.info('Plotting %s with args %s',str(plot),str(args))
+        #            for argset in args.split(';'):
+        #                self.log.info('Passing following arg set to function: %s',str(argset))
+        #                if argset:
+        #                    self.gen_plot(plot,argset.split(','))
+        #                else:
+        #                    self.gen_plot(plot,[])
         if conv:
             self.convergence(self.gconf.get('Plotter','convergence'))
 
     def gen_plot(self,plot,args):
-        print(args)
-        print('gen a plot')
         try:
             getattr(self,plot)(*args)
         except KeyError:
-            print() 
-            print("You have attempted to calculate an unsupported quantity!!")
+            self.log.error("You have attempted to calculate an unsupported quantity!!")
             quit()
 
     def get_scalar_quantity(self,quantity):
-        print(quantity)
-        print(self.e_lookup)
-        print(self.h_lookup)
+        self.log.debug('Retrieving scalar quantity %s',str(quantity))
         try:
             col = self.e_lookup[quantity]
+            self.log.debug('Column of E field quantity %s is %s',str(quantity),str(col))
             return self.e_data[:,col]
         except KeyError:
-            pass
-
-        try:
             col = self.h_lookup[quantity]
+            self.log.debug('Column of H field quantitty %s is %s',str(quantity),str(col))
             return self.h_data[:,col]
         except KeyError:
-            print('You attempted to retrieve a quantity that does not exist in the e and h \
+            self.log.error('You attempted to retrieve a quantity that does not exist in the e and h \
                     matrices')
             quit()
 
     def convergence(self,quantity):
         """Calculates the convergence of a given quantity across all available simulations"""
+        self.log.info('Actually plotting convergence')
         path = os.path.join(self.gconf.get('General','basedir'),'mse_%s.dat'%quantity) 
         labels = []
         errors = []
@@ -310,6 +380,7 @@ class Plotter(Processor):
             fig.savefig(path)
         if self.gconf.get('General','show_plots'):
             plt.show() 
+        plt.close(fig)
 
     def heatmap2d(self,x,y,cs,labels,ptype,colorsMap='jet'):
         """A general utility method for plotting a 2D heat map"""
@@ -331,6 +402,7 @@ class Plotter(Processor):
             fig.savefig(path)
         if self.gconf.get('General','show_plots'):
             plt.show()
+        plt.close(fig)
 
     def plane_2d(self,quantity,plane,pval):
         """Plots a heatmap of a fixed 2D plane"""
@@ -399,6 +471,7 @@ class Plotter(Processor):
             fig.savefig(path)
         if self.gconf.get('General','show_plots'):
             plt.show()
+        plt.close(fig)
     
     def full_3d(self,quantity):
         """Generates a full 3D plot of a specified scalar quantity"""
@@ -445,13 +518,19 @@ def main():
             generated""")
     parser.add_argument('-np','--no_plot',action="store_true",help="""Do not perform plotting
             operations. Useful when you only want to crunch your data without plotting""")
-    
+    parser.add_argument('--log_level',type=str,default='info',choices=['debug','info','warning','error','critical'],
+                        help="""Logging level for the run""")
     args = parser.parse_args()
     if os.path.isfile(args.config_file):
         conf = parse_file(os.path.abspath(args.config_file))
     else:
         print("\n The file you specified does not exist! \n")
         quit()
+    
+    # Configure logger
+    logger = configure_logger(args.log_level,'postprocess',
+                              os.path.join(conf.get('General','basedir'),'logs'),
+                              'postprocess.log')
 
     # Now do all the work
     if not args.no_crunch:

@@ -5,6 +5,43 @@ import argparse as ap
 import os
 import configparser as confp 
 import glob
+import logging
+
+def parse_file(path):
+    """Parse the INI file provided at the command line"""
+    
+    parser = confp.SafeConfigParser()
+    with open(path,'r') as config_file:
+        parser.readfp(config_file)
+    return parser
+
+def configure_logger(level,logger_name,log_dir,logfile):
+    # Get numeric level safely
+    numeric_level = getattr(logging, level.upper(), None)
+    if not isinstance(numeric_level, int):
+        raise ValueError('Invalid log level: %s' % args.log_level)
+    # Set formatting
+    formatter = logging.Formatter('%(asctime)s [%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
+    # Get logger with name
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(numeric_level)
+    # Set up file handler
+    try:
+        os.makedirs(log_dir)
+    except OSError:
+        # Log dir already exists
+        pass
+    output_file = os.path.join(log_dir,logfile)
+    fhandler = logging.FileHandler(output_file)
+    fhandler.setFormatter(formatter)
+    logger.addHandler(fhandler)
+    # Create console handler
+    ch = logging.StreamHandler()
+    ch.setLevel(numeric_level)
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
+       
+    return logger
 
 def sh(cmd):
     '''Executes commands directly to the native bash shell using subprocess.Popen, and retrieves
@@ -24,23 +61,16 @@ def sim(script,ini_file):
     out,err = sh('python %s %s'%(script,ini_file))
     return out,err
 
-def parse_file(path):
-    """Parse the INI file provided at the command line"""
-    
-    parser = confp.SafeConfigParser()
-    with open(path,'r') as config_file:
-        parser.readfp(config_file)
-    return parser
-
 def run_single_sim():
+    log = logging.getLogger('sim_wrapper')
     print("Running single sim")
 
 def run_sweep(conf):
-        
-    print("Running sweep")
+    log = logging.getLogger('sim_wrapper') 
+    log.info("Running parameter sweep ...")
     # Get our variable parameters by splitting string in conf file and explanding into list
     optionValues = dict(conf.items("Variable Parameters"))
-    print(optionValues)
+    log.debug("Option values dict before processing: %s",str(optionValues))
     for key, value in optionValues.items():
         # determine if we have floats or ints
         if value.find('.') != -1:
@@ -67,15 +97,17 @@ def run_sweep(conf):
             dataList = value.split(',')
             dataList = list(map(type_converter,dataList))
             optionValues[key] = dataList
-    
+    log.debug("Option values dict after processing: %s"%str(optionValues))
     valuelist = list(optionValues.values())
     keys = list(optionValues.keys())
     # Consuming a list of lists/tuples where each inner list/tuple contains all the values for a
     # particular parameter, returns a list of tuples containing all the unique combos for that
     # parameter  
     combos=list(itertools.product(*valuelist))
+    log.debug('The list of parameter combos: %s',str(combos))
     # Loop through each unique combination of parameters
     for combo in combos:
+        log.info('Preparing for simulation %s',str(combo))
         # Make a unique working directory based on parameter combo
         basedir=conf.get('General','basedir')
         workdir=''
@@ -119,15 +151,16 @@ def run_sweep(conf):
         if not os.path.exists(script):
             shutil.copyfile('s4_sim.py',script)
         os.chdir(fullpath)
-        print("Starting simulation for %s ...."%workdir)
+        log.info("Starting simulation for %s ....",workdir)
         out, err = sim(script,"sim_conf.ini")
-        print(out)
-        print(err)
-        print("Finished simulation for %s!"%workdir)
+        log.debug('Simulation stdout: %s',str(out))
+        log.debug('Simulation stderr: %s',str(err))
+        log.info("Finished simulation for %s!",str(workdir))
         os.chdir(basedir)
             
 def run_optimization(conf):
-    print("Running optimization")
+    log = logging.getLogger('sim_wrapper')
+    log.info("Running optimization")
 
 def main():
 
@@ -135,26 +168,36 @@ def main():
             sweeps, optimization, directory organization, postproccessing, etc.""")
     parser.add_argument('config_file',type=str,help="""Absolute path to the INI file
     specifying how you want this wrapper to behave""")
-
+    parser.add_argument('--log_level',type=str,default='info',choices=['debug','info','warning','error','critical'],
+                        help="""Logging level for the run""")
     args = parser.parse_args()
+
     if os.path.isfile(args.config_file):
         conf = parse_file(os.path.abspath(args.config_file))
     else:
         print("\n The file you specified does not exist! \n")
         quit()
 
+    # Configure logger
+    logger = configure_logger(args.log_level,'sim_wrapper',
+                              os.path.join(conf.get('General','basedir'),'logs'),
+                              'sim_wrapper.log')
+    
     if not conf.options("Variable Parameters"):
         # No variable params, single sim
+        logger.debug('Entering single sim function from main')
         run_single_sim(conf)
-    # If the variable params have ranges specified, do a parameter sweep
+    # If all the variable params have ranges specified, do a parameter sweep
     elif all(list(zip(*conf.items("Variable Parameters")))[1]):
+        logger.debug('Entering sweep function from main')
         run_sweep(conf)
     # If we have specified variable params without ranges, we need to optimize them
     elif not all(list(zip(*conf.items("Variable Parameters")))[1]):
+        logger.debug('Entering optimization function from main')
         run_optimization(conf)
     else:
-        print("Something isn't right")
-
+        logger.error('Unsupported configuration for a simulation run. Not a single sim, sweep, or \
+        optimization')
 
 if __name__ == '__main__':
     main()

@@ -1,6 +1,4 @@
 import numpy as np
-from scipy import interpolate
-from scipy import constants
 import matplotlib
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -8,7 +6,6 @@ import matplotlib.cm as cmx
 import argparse as ap
 import os
 import configparser as confp 
-import glob
 import re
 import logging
 
@@ -113,22 +110,13 @@ class Cruncher(Processor):
                           os.path.basename(self.sim.get('General','sim_dir')))
             # For each quantity 
             for quant,args in self.gconf.items('Cruncher'):
-                # This is a special case because we need to compute error between sims and we need
-                # to make sure all our other quantities have been calculated before we can compare
-                # them
-                if quant == 'mean_squared_error':
-                    self.log.info('Will compute mean squared error later')
-                    mse = True
-                    continue
-                else:
-                    self.log.info('Computing %s with args %s',str(quant),str(args))
-                    if args:
-                        self.calculate(quant,args.split(','))
+                self.log.info('Computing %s with args %s',str(quant),str(args))
+                for argset in args.split(';'):
+                    if argset:
+                        self.calculate(quant,argset.split(','))
                     else:
                         self.calculate(quant,[])
             self.write_data()
-        if mse:
-            self.mse_wrap(self.gconf.get('Cruncher','mean_squared_error'))
     
     def calculate(self,quantity,args):
         try:
@@ -183,6 +171,8 @@ class Cruncher(Processor):
         Ez = self.e_data[:,5] + 1j*self.e_data[:,8]
         E_mag = np.sqrt(Ex*np.conj(Ex)+Ey*np.conj(Ey)+Ez*np.conj(Ez))
         # The .real is super important or it ruins the entire array
+        # Note that discarding imag parts is fine here because the
+        # magnitude is strictly real and all imag parts are 0
         self.e_data = np.column_stack((self.e_data,E_mag.real)) 
         return E_mag.real
 
@@ -202,50 +192,69 @@ class Cruncher(Processor):
         self.h_data = np.column_stack((self.h_data,H_mag.real))
         return H_mag.real
 
-    def mse_wrap(self,quant):
-        """A wrapper to calculate the mean squared error of a quantity between simulations for a run
-        and write the results to a file"""
-        self.log.info('Running the mean squared error wrapper for quantity %s',quant) 
-        with open(os.path.join(self.gconf.get('General','basedir'),'mse_%s.dat'%quant),'w') as errfile:
-            for i in range(1,len(self.sims)):
-                sim1 = self.sims[i-1]
-                sim2 = self.sims[i]
-                epath1 = os.path.join(sim1.get('General','sim_dir'),sim1.get('General','base_name')+'.E')
-                hpath1 = os.path.join(sim1.get('General','sim_dir'),sim1.get('General','base_name')+'.H')
-                epath2 = os.path.join(sim2.get('General','sim_dir'),sim2.get('General','base_name')+'.E')
-                hpath2 = os.path.join(sim2.get('General','sim_dir'),sim2.get('General','base_name')+'.H')
-                with open(epath1,'r') as efile:
-                    eheads = efile.readlines()[0].strip('#\n').split(',')
-                with open(hpath1,'r') as hfile:
-                    hheads = hfile.readlines()[0].strip('#\n').split(',')
-                if quant in eheads:
-                    ind = eheads.index(quant)
-                    dat1 = np.loadtxt(epath1)
-                    dat2 = np.loadtxt(epath2)
-                    vec1 = dat1[:,ind]
-                    vec2 = dat2[:,ind]
-                    error = self.mean_squared_error(vec1,vec2)
-                elif quant in hheads:
-                    ind = hheads.index(quant)
-                    dat1 = np.loadtxt(hpath1)
-                    dat2 = np.loadtxt(hpath2)
-                    vec1 = dat1[:,ind]
-                    vec2 = dat2[:,ind]
-                    error = self.mean_squared_error(vec1,vec2)
+class Global_Cruncher(Cruncher):
+    """Computes global quantities for an entire run, instead of local quantities for an individual
+    simulation"""
+    def __init__(self,global_conf):
+        super().__init__(global_conf)
+        self.log.debug('This is the global cruncher') 
+
+    def crunch(self):
+        self.log.info('Beginning global data crunch ...')
+        # For each quantity 
+        for quant,args in self.gconf.items('Global_Cruncher'):
+            self.log.info('Computing %s with args %s',str(quant),str(args))
+            for argset in args.split(';'): 
+                if argset:
+                    self.calculate(quant,argset.split(','))
                 else:
-                    self.log.error('The quantity for which you want to compute the error has not yet been \
-                            calculated')
-                    quit()
-                errfile.write('%s-%s,%f\n'%(os.path.basename(sim1.get('General','sim_dir')),os.path.basename(sim2.get('General','sim_dir')),error))
-                
-    def mean_squared_error(self,x,y):
+                    self.calculate(quant,[])
+
+    def mse(self,x,y):
         """Return the mean squared error between two equally sized sets of data"""
         if x.size != y.size:
             self.log.error("You have attempted to compare datasets with an unequal number of points!!!!")
             quit()
         else:
-            mse = sum((x-y)**2)/x.size
+            mse = np.sum((x-y)**2)/x.size
             return mse
+
+    def mean_squared_error(self,field,rel=False,sim_ind=0):
+        """A wrapper to calculate the mean squared error between the fields of adjacent simulations for a run
+        and write the results to a file"""
+        self.log.info('Running the mean squared error wrapper for quantity %s',field) 
+        with open(os.path.join(self.gconf.get('General','basedir'),'mse_%s.dat'%field),'w') as errfile:
+            if field == 'E':
+                ext = '.E'
+            elif field == 'H':
+                ext = '.H'
+            else:
+                self.log.error('The quantity for which you want to compute the error has not yet been calculated')
+                quit()
+            if rel:
+                start = 0
+            else:
+                start = 1
+            for i in range(start,len(self.sims)):
+                if rel:
+                    sim1 = self.sims[int(sim_ind)]
+                else:
+                    sim1 = self.sims[i-1]
+                sim2 = self.sims[i]
+                path1 = os.path.join(sim1.get('General','sim_dir'),
+                                     sim1.get('General','base_name')+ext)
+                path2 = os.path.join(sim2.get('General','sim_dir'),
+                                     sim2.get('General','base_name')+ext)
+                vec1 = np.loadtxt(path1,usecols=range(3,9))
+                vec2 = np.loadtxt(path2,usecols=range(3,9))
+                #self.log.info("%s \n %s",str(vec1),str(vec2))
+                self.log.info("Computing error between %s and %s",
+                              os.path.basename(sim1.get('General','sim_dir')),
+                              os.path.basename(sim2.get('General','sim_dir')))
+                error = self.mse(vec1,vec2)
+                self.log.info(str(error))
+                errfile.write('%s-%s,%f\n'%(os.path.basename(sim1.get('General','sim_dir')),
+                                            os.path.basename(sim2.get('General','sim_dir')),error))
 
 class Plotter(Processor):
     """Plots all the things listed in the config file"""
@@ -270,35 +279,25 @@ class Plotter(Processor):
         self.log.debug('Here is the H field header lookup: %s',str(self.h_lookup))
 
     def plot(self):
-        self.log.info("Beginning main plotter method")
-        conv = False
+        self.log.info("Beginning local plotter method ...")
         for plot,args in self.gconf.items('Plotter'):
             self.log.info('Plotting %s with args %s',str(plot),str(args))
             # This is a special case because we need to compute error between sims and we need
             # to make sure all our other quantities have been calculated before we can compare
             # them
-            if plot == 'convergence':
-                self.log.info('Will plot convergence')
-                conv = True
-                continue
-            else:
-                for sim in self.sims:
-                    # Set it as the current sim and grab its data
-                    self.sim = sim
-                    self.get_data()
-                    # For each plot 
-                    self.log.info('Plotting data for sim %s',
-                                  str(os.path.basename(self.sim.get('General','sim_dir'))))
-
-                    for argset in args.split(';'):
-                        self.log.info('Passing following arg set to function %s: %s',str(plot),str(argset))
-                        if argset:
-                            self.gen_plot(plot,argset.split(','))
-                        else:
-                            self.gen_plot(plot,[])
-        
-        if conv:
-            self.convergence(self.gconf.get('Plotter','convergence'))
+            for sim in self.sims:
+                # Set it as the current sim and grab its data
+                self.sim = sim
+                self.get_data()
+                # For each plot 
+                self.log.info('Plotting data for sim %s',
+                              str(os.path.basename(self.sim.get('General','sim_dir'))))
+                for argset in args.split(';'):
+                    self.log.info('Passing following arg set to function %s: %s',str(plot),str(argset))
+                    if argset:
+                        self.gen_plot(plot,argset.split(','))
+                    else:
+                        self.gen_plot(plot,[])
 
     def gen_plot(self,plot,args):
         try:
@@ -321,30 +320,6 @@ class Plotter(Processor):
             self.log.error('You attempted to retrieve a quantity that does not exist in the e and h \
                     matrices')
             quit()
-
-    def convergence(self,quantity):
-        """Calculates the convergence of a given quantity across all available simulations"""
-        self.log.info('Actually plotting convergence')
-        path = os.path.join(self.gconf.get('General','basedir'),'mse_%s.dat'%quantity) 
-        labels = []
-        errors = []
-        with open(path,'r') as datf:
-            for line in datf.readlines():
-                lab, err = line.split(',')
-                labels.append(lab)
-                errors.append(err)
-        x = range(len(errors))
-        fig = plt.figure(figsize=(9,7))
-        plt.ylabel('M.S.E of %s'%quantity)
-        plt.plot(range(len(errors)),errors,linestyle='-',marker='o',color='b')
-        plt.xticks(x,labels,rotation='vertical')
-        if self.gconf.get('General','save_plots'):
-            name = 'convergence_'+quantity+'.pdf'
-            path = os.path.join(self.gconf.get('General','basedir'),name)
-            fig.savefig(path)
-        if self.gconf.get('General','show_plots'):
-            plt.show() 
-        plt.close(fig)
 
     def heatmap2d(self,x,y,cs,labels,ptype,colorsMap='jet'):
         """A general utility method for plotting a 2D heat map"""
@@ -471,6 +446,47 @@ class Plotter(Processor):
         # Now plot!
         self.scatter3d(planes[:,0],planes[:,1],planes[:,2],planes[:,3],labels,'planes_3d')
     
+class Global_Plotter(Plotter):
+    """Plots global quantities for an entire run that are not specific to a single simulation"""
+    def __init__(self,global_conf):
+        super().__init__(global_conf)
+        self.log.debug("Global plotter init")
+
+    def plot(self):
+        self.log.info('Beginning global plotter method ...')
+        for plot,args in self.gconf.items('Global_Plotter'):
+            self.log.info('Plotting %s with args %s',str(plot),str(args))
+            for argset in args.split(';'):
+                self.log.info('Passing following arg set to function %s: %s',str(plot),str(argset))
+                if argset:
+                    self.gen_plot(plot,argset.split(','))
+                else:
+                    self.gen_plot(plot,[])
+
+    def convergence(self,quantity):
+        """Plots the convergence of a field across all available simulations"""
+        self.log.info('Actually plotting convergence')
+        path = os.path.join(self.gconf.get('General','basedir'),'mse_%s.dat'%quantity) 
+        labels = []
+        errors = []
+        with open(path,'r') as datf:
+            for line in datf.readlines():
+                lab, err = line.split(',')
+                labels.append(lab)
+                errors.append(err)
+        x = range(len(errors))
+        fig = plt.figure(figsize=(9,7))
+        plt.ylabel('M.S.E of %s'%quantity)
+        plt.plot(range(len(errors)),errors,linestyle='-',marker='o',color='b')
+        plt.xticks(x,labels,rotation='vertical')
+        plt.tight_layout()
+        if self.gconf.get('General','save_plots'):
+            name = 'convergence_'+quantity+'.pdf'
+            path = os.path.join(self.gconf.get('General','basedir'),name)
+            fig.savefig(path)
+        if self.gconf.get('General','show_plots'):
+            plt.show() 
+        plt.close(fig)
 
 def main():
     parser = ap.ArgumentParser(description="""A wrapper around s4_sim.py to automate parameter
@@ -499,10 +515,14 @@ def main():
     # Now do all the work
     if not args.no_crunch:
         crunchr = Cruncher(conf)
+        gcrunchr = Global_Cruncher(conf)
         crunchr.crunch()
+        gcrunchr.crunch()
     if not args.no_plot:
         pltr = Plotter(conf) 
+        gpltr = Global_Plotter(conf)
         pltr.plot()
+        gpltr.plot()
 
 if __name__ == '__main__':
     main()

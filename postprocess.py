@@ -109,17 +109,19 @@ class Cruncher(Processor):
             # Set it as the current sim and grab its data
             self.sim = sim
             self.get_data()
-            self.log.info('Crunching data for %s',self.sim.get('General','sim_dir'))
+            self.log.info('Crunching data for %s',
+                          os.path.basename(self.sim.get('General','sim_dir')))
             # For each quantity 
             for quant,args in self.gconf.items('Cruncher'):
                 # This is a special case because we need to compute error between sims and we need
                 # to make sure all our other quantities have been calculated before we can compare
                 # them
-                self.log.info('Computing %s with args %s',str(quant),str(args))
                 if quant == 'mean_squared_error':
-                    self.log.info('Will compute mean squared error')
+                    self.log.info('Will compute mean squared error later')
                     mse = True
+                    continue
                 else:
+                    self.log.info('Computing %s with args %s',str(quant),str(args))
                     if args:
                         self.calculate(quant,args.split(','))
                     else:
@@ -163,6 +165,8 @@ class Cruncher(Processor):
         #formatter = lambda x: "%22s"%x
         #np.savetxt(epath,full_emat,header=''.join(map(formatter, eheader)))
         #np.savetxt(hpath,full_hmat,header=''.join(map(formatter, hheader)))
+        self.log.debug('Here is the E matrix: \n %s',str(self.e_data))
+        self.log.debug('Here is the H matrix: \n %s',str(self.h_data))
         np.savetxt(epath,self.e_data,header=','.join(eheader))
         np.savetxt(hpath,self.h_data,header=','.join(hheader))
     
@@ -170,50 +174,38 @@ class Cruncher(Processor):
         """Calculate and returns the norm of E"""
         
         if not hasattr(self,'e_data'):
-            print()
-            print("You need to get your data first!")
-            print()
+            self.log.error("You need to get your data first!")
             quit()
         
         # Get the magnitude of E and add it to our data
-        #Ex = data[:,3] + 1j*data[:,6]
-        #Ey = data[:,4] + 1j*data[:,7]
-        #Ez = data[:,5] + 1j*data[:,8]
-        #E_mag = np.sqrt(np.absolute(Ex)+np.absolute(Ey)+np.absolute(Ez))
-        
-        # Grab only the real parts. I think this is right. 
-        Ex = self.e_data[:,3]
-        Ey = self.e_data[:,4]
-        Ez = self.e_data[:,5]
-        E_mag = np.sqrt(Ex**2+Ey**2+Ez**2)
-        self.e_data = np.column_stack((self.e_data,E_mag))
-                                     
+        Ex = self.e_data[:,3] + 1j*self.e_data[:,6]
+        Ey = self.e_data[:,4] + 1j*self.e_data[:,7]
+        Ez = self.e_data[:,5] + 1j*self.e_data[:,8]
+        E_mag = np.sqrt(Ex*np.conj(Ex)+Ey*np.conj(Ey)+Ez*np.conj(Ez))
+        # The .real is super important or it ruins the entire array
+        self.e_data = np.column_stack((self.e_data,E_mag.real)) 
+        return E_mag.real
+
     def normH(self):
         """Calculate and returns the norm of H"""
         
         if not hasattr(self,'h_data'):
-            print()
-            print("You need to get your data first!")
-            print()
+            self.log.error("You need to get your data first!")
             quit()
         
-        # Get the magnitude of E and add it to our data
-        #Ex = data[:,3] + 1j*data[:,6]
-        #Ey = data[:,4] + 1j*data[:,7]
-        #Ez = data[:,5] + 1j*data[:,8]
-        #E_mag = np.sqrt(np.absolute(Ex)+np.absolute(Ey)+np.absolute(Ez))
-        
-        # Grab only the real parts. I think this is right. 
-        Hx = self.h_data[:,3]
-        Hy = self.h_data[:,4]
-        Hz = self.h_data[:,5]
-        H_mag = np.sqrt(Hx**2+Hy**2+Hz**2)
-        self.h_data = np.column_stack((self.h_data,H_mag))
+        # Get the magnitude of H and add it to our data
+        Hx = self.h_data[:,3] + 1j*self.h_data[:,6]
+        Hy = self.h_data[:,4] + 1j*self.h_data[:,7]
+        Hz = self.h_data[:,5] + 1j*self.h_data[:,8]
+        H_mag = np.sqrt(Hx*np.conj(Hx)+Hy*np.conj(Hy)+Hz*np.conj(Hz))
+        # The .real is super important or it ruins the entire array
+        self.h_data = np.column_stack((self.h_data,H_mag.real))
+        return H_mag.real
 
     def mse_wrap(self,quant):
         """A wrapper to calculate the mean squared error of a quantity between simulations for a run
         and write the results to a file"""
-        self.log.info('Computing mean squared error') 
+        self.log.info('Running the mean squared error wrapper for quantity %s',quant) 
         with open(os.path.join(self.gconf.get('General','basedir'),'mse_%s.dat'%quant),'w') as errfile:
             for i in range(1,len(self.sims)):
                 sim1 = self.sims[i-1]
@@ -233,7 +225,6 @@ class Cruncher(Processor):
                     vec1 = dat1[:,ind]
                     vec2 = dat2[:,ind]
                     error = self.mean_squared_error(vec1,vec2)
-                    errors.append(error)
                 elif quant in hheads:
                     ind = hheads.index(quant)
                     dat1 = np.loadtxt(hpath1)
@@ -241,9 +232,8 @@ class Cruncher(Processor):
                     vec1 = dat1[:,ind]
                     vec2 = dat2[:,ind]
                     error = self.mean_squared_error(vec1,vec2)
-                    errors.append(error)
                 else:
-                    print('The quantity for which you want to compute the error has not yet been \
+                    self.log.error('The quantity for which you want to compute the error has not yet been \
                             calculated')
                     quit()
                 errfile.write('%s-%s,%f\n'%(os.path.basename(sim1.get('General','sim_dir')),os.path.basename(sim2.get('General','sim_dir')),error))
@@ -251,13 +241,10 @@ class Cruncher(Processor):
     def mean_squared_error(self,x,y):
         """Return the mean squared error between two equally sized sets of data"""
         if x.size != y.size:
-            print("You have attempted to compare datasets with an unequal number of points!!!!")
+            self.log.error("You have attempted to compare datasets with an unequal number of points!!!!")
             quit()
         else:
-            print(x)
-            print(y)
             mse = sum((x-y)**2)/x.size
-            print(mse)
             return mse
 
 class Plotter(Processor):
@@ -310,29 +297,6 @@ class Plotter(Processor):
                         else:
                             self.gen_plot(plot,[])
         
-        #for sim in self.sims:
-        #    # Set it as the current sim and grab its data
-        #    self.sim = sim
-        #    self.get_data()
-        #    # For each plot 
-        #    self.log.info('Plotting data for sim %s',
-        #                  str(os.path.basename(self.sim.get('General','sim_dir'))))
-        #    for plot,args in self.gconf.items('Plotter'):
-        #        # This is a special case because we need to compute error between sims and we need
-        #        # to make sure all our other quantities have been calculated before we can compare
-        #        # them
-        #        if plot == 'convergence':
-        #            self.log.info('Will plot convergence')
-        #            conv = True
-        #            continue
-        #        else:
-        #            self.log.info('Plotting %s with args %s',str(plot),str(args))
-        #            for argset in args.split(';'):
-        #                self.log.info('Passing following arg set to function: %s',str(argset))
-        #                if argset:
-        #                    self.gen_plot(plot,argset.split(','))
-        #                else:
-        #                    self.gen_plot(plot,[])
         if conv:
             self.convergence(self.gconf.get('Plotter','convergence'))
 
@@ -539,32 +503,6 @@ def main():
     if not args.no_plot:
         pltr = Plotter(conf) 
         pltr.plot()
-
-    ## Loop through each individual simulation
-    #for sim in pp.sims:
-    #    # Set it as the current sim and grab its data
-    #    pp.sim = sim
-    #    pp.get_data()
-    #    # For each plot we want, and the list of quantities to be plotted using that plot type
-    #    for plot, quantities in pp.gconf.items('Postprocess'):
-    #        if plot != 'convergence':
-    #            print(quantities)
-    #            # For each group of arguments, grab the proper plot method bound to this instance of
-    #            # PostProcess using getattr() built-in. Unpack the arguments provided by the config
-    #            # file, and pass them in to the plot method. 
-    #            for args in quantities.split(';'):
-    #                tmp = args.split(',')
-    #                print(tmp)
-    #                try:
-    #                    getattr(pp,plot)(*tmp)
-    #                except KeyError:
-    #                    print()
-    #                    print("You have attempted to plot an unsupported plot type!")
-    #                    print()
-    #                    quit()
-
-    #if pp.gconf.has_option('Postprocess','convergence'):
-    #    pp.convergence(pp.gconf.get('Postprocess','convergence'))
 
 if __name__ == '__main__':
     main()

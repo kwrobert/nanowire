@@ -107,13 +107,13 @@ def run_sweep(conf):
     log.debug('The list of parameter combos: %s',str(combos))
     # Loop through each unique combination of parameters
     for combo in combos:
-        log.info('Preparing for simulation %s',str(combo))
         # Make a unique working directory based on parameter combo
         basedir=conf.get('General','basedir')
         workdir=''
         for i in range(len(combo)):
             workdir += str(keys[i])+str(combo[i])+'__'
         workdir=workdir.rstrip('__')
+        log.info('Preparing for simulation %s',str(workdir))
         fullpath = os.path.join(basedir,workdir)
         try:
             os.makedirs(fullpath)

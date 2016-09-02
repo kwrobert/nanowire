@@ -134,8 +134,10 @@ class Cruncher(Processor):
         epath = os.path.join(base,fname+'.E')
         hpath = os.path.join(base,fname+'.H')
         # Move the raw data
-        os.rename(epath,epath+".raw")
-        os.rename(hpath,hpath+".raw")
+        if not os.path.isfile(os.path.join(epath,epath+'.raw')):
+            os.rename(epath,epath+".raw")
+        if not os.path.isfile(os.path.join(hpath,hpath+'.raw')):
+            os.rename(hpath,hpath+".raw")
         # Build the full matrices
         #full_emat = np.column_stack((self.pos_inds,self.e_data))
         #full_hmat = np.column_stack((self.pos_inds,self.h_data))

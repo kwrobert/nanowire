@@ -15,6 +15,7 @@ def parse_file(path):
     """Parse the INI file provided at the command line"""
     
     parser = confp.SafeConfigParser()
+    parser.optionxform = str
     with open(path,'r') as config_file:
         parser.readfp(config_file)
     height = sum((parser.getfloat('Parameters','nw_height'),
@@ -86,6 +87,16 @@ def build_sim(conf):
     # 4. Supply that value to the SetFrequency method
     vec_mag = conf.getfloat("Parameters","array_period")
     sim = S4.New(Lattice=((vec_mag,0),(0,vec_mag)),NumBasis=num_basis)
+    # Collect, clean, and set the simulation config
+    opts = dict(conf.items('Simulation'))
+    for key,val in opts.items():
+        if val.isdigit():
+            opts[key] = int(val)
+        elif val == 'True':
+            opts[key] = True
+        elif val == 'False':
+            opts[key] = False
+    sim.SetOptions(**opts)
 
     # Set up materials
     for mat in conf.options("Materials"):
@@ -96,15 +107,15 @@ def build_sim(conf):
     # Add layers. NOTE!!: Order here DOES MATTER, as incident light will be directed at the FIRST
     # LAYER SPECIFIED
     sim.AddLayer(Name='air',Thickness=conf.getfloat('Parameters','air_t'),Material='vacuum')
-    sim.AddLayer(Name='ito',Thickness=conf.getfloat('Parameters','ito_t'),Material='ito')
-    sim.AddLayer(Name='nanowire',Thickness=conf.getfloat('Parameters','nw_height'),Material='cyclotrene')
-    sim.AddLayer(Name='substrate',Thickness=conf.getfloat('Parameters','substrate_t'),Material='gaas')
+    sim.AddLayer(Name='ito',Thickness=conf.getfloat('Parameters','ito_t'),Material='ITO')
+    sim.AddLayer(Name='nanowire',Thickness=conf.getfloat('Parameters','nw_height'),Material='Cyclotrene')
+    sim.AddLayer(Name='substrate',Thickness=conf.getfloat('Parameters','substrate_t'),Material='GaAs')
     
     # Add patterning to layers
     core_rad = conf.getfloat('Parameters','nw_radius')
     alinp_rad = core_rad + conf.getfloat('Parameters','shell_t')
-    sim.SetRegionCircle(Layer='nanowire',Material='alinp',Center=(0,0),Radius=alinp_rad)
-    sim.SetRegionCircle(Layer='nanowire',Material='gaas',Center=(0,0),Radius=core_rad)
+    sim.SetRegionCircle(Layer='nanowire',Material='AlInP',Center=(0,0),Radius=alinp_rad)
+    sim.SetRegionCircle(Layer='nanowire',Material='GaAs',Center=(0,0),Radius=core_rad)
    
     # Set frequency
     f_phys = conf.getfloat("Parameters","frequency")

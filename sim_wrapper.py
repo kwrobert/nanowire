@@ -11,6 +11,7 @@ def parse_file(path):
     """Parse the INI file provided at the command line"""
     
     parser = confp.SafeConfigParser()
+    parser.optionxform = str
     with open(path,'r') as config_file:
         parser.readfp(config_file)
     return parser
@@ -124,11 +125,13 @@ def run_sweep(conf):
             os.makedirs(fullpath)
         # Make a new configuration object for this specific sim
         sim_conf = confp.SafeConfigParser()
-        for section in ['General','Parameters','Materials']:
+        sim_conf.optionxform = str
+        for section in ['General','Simulation','Parameters','Materials']:
             sim_conf.add_section(section)
         # Add the general stuff for the sim
-        for item, val in conf.items('General'):
-            sim_conf.set('General',item,val)
+        for section in ['General','Simulation']:
+            for item, val in conf.items(section):
+                sim_conf.set(section,item,val)
         sim_conf.set('General','sim_dir',fullpath)
         # Add all the fixed parameters from global conf
         for name,param in conf.items('Fixed Parameters'):

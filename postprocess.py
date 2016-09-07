@@ -221,22 +221,36 @@ class Global_Cruncher(Cruncher):
             mse = np.sum((x-y)**2)/x.size
             return mse
 
-    def mean_squared_error(self,field,rel=False,sim_ind=0):
+    def mean_squared_error(self,field,rel=False,sim_ind=0,normalize=False):
         """A wrapper to calculate the mean squared error between the fields of adjacent simulations for a run
         and write the results to a file"""
         self.log.info('Running the mean squared error wrapper for quantity %s',field) 
         with open(os.path.join(self.gconf.get('General','basedir'),'mse_%s.dat'%field),'w') as errfile:
+            # If we want to normalize errors, get data from desired normalizing sim
+            if normalize:
+                self.sim = sims[int(sim_ind)]
+                self.get_data()
+            # Get the proper file extension depending on the field. Also, if we are normalizing make
+            # sure we take the average of the correct field
             if field == 'E':
                 ext = '.E'
+                if normalize:
+                    vec = self.normE()
+                    avg = np.mean(vec)
             elif field == 'H':
                 ext = '.H'
+                if normalize:
+                    vec = self.normH()
+                    avg = np.mean(vec)
             else:
                 self.log.error('The quantity for which you want to compute the error has not yet been calculated')
                 quit()
+            # Determine the proper starting point for the for loop below
             if rel:
                 start = 0
             else:
                 start = 1
+                
             for i in range(start,len(self.sims)):
                 if rel:
                     sim1 = self.sims[int(sim_ind)]
@@ -253,7 +267,10 @@ class Global_Cruncher(Cruncher):
                 self.log.info("Computing error between %s and %s",
                               os.path.basename(sim1.get('General','sim_dir')),
                               os.path.basename(sim2.get('General','sim_dir')))
-                error = self.mse(vec1,vec2)
+                if normalize:
+                    error = self.mse(vec1,vec2)/avg
+                else:
+                    error = self.mse(vec1,vec2)
                 self.log.info(str(error))
                 errfile.write('%s-%s,%f\n'%(os.path.basename(sim1.get('General','sim_dir')),
                                             os.path.basename(sim2.get('General','sim_dir')),error))
@@ -465,7 +482,7 @@ class Global_Plotter(Plotter):
                 else:
                     self.gen_plot(plot,[])
 
-    def convergence(self,quantity):
+    def convergence(self,quantity,scale='linear'):
         """Plots the convergence of a field across all available simulations"""
         self.log.info('Actually plotting convergence')
         path = os.path.join(self.gconf.get('General','basedir'),'mse_%s.dat'%quantity) 
@@ -480,6 +497,7 @@ class Global_Plotter(Plotter):
         fig = plt.figure(figsize=(9,7))
         plt.ylabel('M.S.E of %s'%quantity)
         plt.plot(range(len(errors)),errors,linestyle='-',marker='o',color='b')
+        plt.yscale(scale)
         plt.xticks(x,labels,rotation='vertical')
         plt.tight_layout()
         plt.title(os.path.basename(self.gconf.get('General','basedir')))

@@ -6,6 +6,7 @@ import os
 import configparser as confp 
 import glob
 import logging
+import datetime
 
 def parse_file(path):
     """Parse the INI file provided at the command line"""
@@ -62,9 +63,52 @@ def sim(script,ini_file):
     out,err = sh('python %s %s'%(script,ini_file))
     return out,err
 
-def run_single_sim():
+def run_single_sim(conf,conf_path):
     log = logging.getLogger('sim_wrapper')
-    print("Running single sim")
+    log.info("Running single sim")
+    # Make the simulation dir
+    basedir = conf.get('General','basedir')
+    # The dir is already made when the logger is configured but this is a safety measure i guess?
+    try:
+        path = os.path.join(basedir,'data')
+        os.makedirs(path)
+    except OSError:
+        log.info('Data directory already exists, appending timestamp')
+        stamp = '{:%Y-%m-%d_%H-%M-%S}'.format(datetime.datetime.now())
+        path = os.path.join(basedir,'data__'+stamp)
+        os.makedirs(path)
+    # Write new config file to sim dir
+    # Make a new configuration object for this specific sim
+    sim_conf = confp.SafeConfigParser()
+    sim_conf.optionxform = str
+    for section in ['General','Simulation','Parameters','Materials']:
+        sim_conf.add_section(section)
+    # Add the general stuff for the sim
+    for section in ['General','Simulation']:
+        for item, val in conf.items(section):
+            sim_conf.set(section,item,val)
+    sim_conf.set('General','sim_dir',path)
+    # Add all the fixed parameters from global conf
+    for name,param in conf.items('Fixed Parameters'):
+        sim_conf.set('Parameters',name,str(param))
+    # Now just add the materials
+    for name,matpath in conf.items('Materials'):
+        sim_conf.set('Materials',name,matpath)
+    # Now write the config file to the data subdir
+    with open(os.path.join(path,'sim_conf.ini'),'w+') as new_conf:
+        sim_conf.write(new_conf)
+    # Copy sim script to sim dir
+    script = os.path.join(path,'s4_sim.py')
+    if not os.path.exists(script):
+        shutil.copyfile('s4_sim.py',script)
+    # Move into sim dir and run the sim
+    os.chdir(path)
+    workdir = os.path.basename(basedir)
+    log.info("Starting simulation for %s ....",workdir)
+    out, err = sim(script,"sim_conf.ini")
+    log.debug('Simulation stdout: %s',out)
+    log.debug('Simulation stderr: %s',err)
+    log.info("Finished simulation for %s!",str(workdir))
 
 def run_sweep(conf):
     log = logging.getLogger('sim_wrapper') 
@@ -189,7 +233,7 @@ def main():
     if not conf.options("Variable Parameters"):
         # No variable params, single sim
         logger.debug('Entering single sim function from main')
-        run_single_sim(conf)
+        run_single_sim(conf,os.path.abspath(args.config_file))
     # If all the variable params have ranges specified, do a parameter sweep
     elif all(list(zip(*conf.items("Variable Parameters")))[1]):
         logger.debug('Entering sweep function from main')

@@ -180,6 +180,23 @@ class Cruncher(Processor):
         self.e_data = np.column_stack((self.e_data,E_mag.real)) 
         return E_mag.real
 
+    def normEsquared(self):
+        """Calculates and returns normE squared"""
+        if not hasattr(self,'e_data'):
+            self.log.error("You need to get your data first!")
+            quit()
+        
+        # Get the magnitude of E and add it to our data
+        Ex = self.e_data[:,3] + 1j*self.e_data[:,6]
+        Ey = self.e_data[:,4] + 1j*self.e_data[:,7]
+        Ez = self.e_data[:,5] + 1j*self.e_data[:,8]
+        E_magsq = Ex*np.conj(Ex)+Ey*np.conj(Ey)+Ez*np.conj(Ez)
+        # The .real is super important or it ruins the entire array
+        # Note that discarding imag parts is fine here because the
+        # magnitude is strictly real and all imag parts are 0
+        self.e_data = np.column_stack((self.e_data,E_magsq.real)) 
+        return E_magsq.real
+
     def normH(self):
         """Calculate and returns the norm of H"""
         
@@ -195,6 +212,22 @@ class Cruncher(Processor):
         # The .real is super important or it ruins the entire array
         self.h_data = np.column_stack((self.h_data,H_mag.real))
         return H_mag.real
+    
+    def normHsquared(self):
+        """Calculates and returns the norm of H squared"""
+        
+        if not hasattr(self,'h_data'):
+            self.log.error("You need to get your data first!")
+            quit()
+        
+        # Get the magnitude of H and add it to our data
+        Hx = self.h_data[:,3] + 1j*self.h_data[:,6]
+        Hy = self.h_data[:,4] + 1j*self.h_data[:,7]
+        Hz = self.h_data[:,5] + 1j*self.h_data[:,8]
+        H_magsq = Hx*np.conj(Hx)+Hy*np.conj(Hy)+Hz*np.conj(Hz)
+        # The .real is super important or it ruins the entire array
+        self.h_data = np.column_stack((self.h_data,H_magsq.real))
+        return H_magsq.real
 
 class Global_Cruncher(Cruncher):
     """Computes global quantities for an entire run, instead of local quantities for an individual
@@ -237,12 +270,12 @@ class Global_Cruncher(Cruncher):
             if field == 'E':
                 ext = '.E'
                 if normalize:
-                    vec = self.normE()
+                    vec = self.normEsquared()
                     avg = np.mean(vec)
             elif field == 'H':
                 ext = '.H'
                 if normalize:
-                    vec = self.normH()
+                    vec = self.normHsquared()
                     avg = np.mean(vec)
             else:
                 self.log.error('The quantity for which you want to compute the error has not yet been calculated')

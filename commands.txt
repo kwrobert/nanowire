@@ -1,0 +1,4 @@
+# This is to replace the specific references to the old simulations directories in each sim_conf.ini
+# file if you happen to move the parent directory for a run to another directory 
+
+for dir in numbasis*; do sed -i 's/long_numbasis_convergence_run/sims\/numbasis_conv_defaults/g' $dir/sim_conf.ini; done

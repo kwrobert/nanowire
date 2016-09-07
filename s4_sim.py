@@ -149,22 +149,6 @@ def build_sim(conf):
         sim.GetFieldsOnGrid(z,NumSamples=(x_samp,y_samp),
                             Format='FileAppend',BaseFilename=output_file)
 
-    #postprocess_planes(output_file,vec_mag,50,25)
-
-    #for layer in E_layers:
-    #    print("#"*30)
-    #    print("Printing E field layer")
-    #    print("#"*30)
-    #    print()
-    #    print(layer)
-    #    for row in layer:
-    #        print("#"*30)
-    #        print("Printing E field layer row")
-    #        print("#"*30)
-    #        print()
-    #        print(row)    
-    #    raw_input("Press enter to continue: ")
-
 def main():
 
     parser = ap.ArgumentParser(description="""A program that uses the S4 RCWA simulation library to

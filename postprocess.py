@@ -518,7 +518,12 @@ def main():
     parser.add_argument('-nc','--no_crunch',action="store_true",default=False,help="""Do not perform crunching
             operations. Useful when data has already been crunched but new plots need to be
             generated""")
-    parser.add_argument('-np','--no_plot',action="store_true",help="""Do not perform plotting
+    parser.add_argument('-ngc','--no_gcrunch',action="store_true",default=False,help="""Do not
+            perform global crunching operations. Useful when data has already been crunched but new plots need to be
+            generated""")
+    parser.add_argument('-np','--no_plot',action="store_true",default=False,help="""Do not perform plotting
+            operations. Useful when you only want to crunch your data without plotting""")
+    parser.add_argument('-ngp','--no_gplot',action="store_true",default=False,help="""Do not perform global plotting
             operations. Useful when you only want to crunch your data without plotting""")
     parser.add_argument('--log_level',type=str,default='info',choices=['debug','info','warning','error','critical'],
                         help="""Logging level for the run""")
@@ -537,13 +542,15 @@ def main():
     # Now do all the work
     if not args.no_crunch:
         crunchr = Cruncher(conf)
-        gcrunchr = Global_Cruncher(conf)
         crunchr.crunch()
+    if not arg.no_gcrunch:
+        gcrunchr = Global_Cruncher(conf)
         gcrunchr.crunch()
     if not args.no_plot:
         pltr = Plotter(conf) 
-        gpltr = Global_Plotter(conf)
         pltr.plot()
+    if not arg.no_gplot:
+        gpltr = Global_Plotter(conf)
         gpltr.plot()
 
 if __name__ == '__main__':

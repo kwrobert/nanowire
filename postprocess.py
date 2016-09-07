@@ -1,5 +1,7 @@
 import numpy as np
 import matplotlib
+# Enables saving plots over ssh
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.cm as cmx
@@ -228,7 +230,7 @@ class Global_Cruncher(Cruncher):
         with open(os.path.join(self.gconf.get('General','basedir'),'mse_%s.dat'%field),'w') as errfile:
             # If we want to normalize errors, get data from desired normalizing sim
             if normalize:
-                self.sim = sims[int(sim_ind)]
+                self.sim = self.sims[int(sim_ind)]
                 self.get_data()
             # Get the proper file extension depending on the field. Also, if we are normalizing make
             # sure we take the average of the correct field
@@ -543,13 +545,13 @@ def main():
     if not args.no_crunch:
         crunchr = Cruncher(conf)
         crunchr.crunch()
-    if not arg.no_gcrunch:
+    if not args.no_gcrunch:
         gcrunchr = Global_Cruncher(conf)
         gcrunchr.crunch()
     if not args.no_plot:
         pltr = Plotter(conf) 
         pltr.plot()
-    if not arg.no_gplot:
+    if not args.no_gplot:
         gpltr = Global_Plotter(conf)
         gpltr.plot()
 

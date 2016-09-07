@@ -56,7 +56,7 @@ class Processor():
         base = self.gconf.get('General','basedir')
         simdirs = []
         for adir in os.listdir(base):
-            if os.path.isdir(os.path.join(base,adir)) and adir != 'logs':
+            if os.path.isdir(os.path.join(base,adir)) and adir not in exclude:
                 simdirs.append(os.path.join(base,adir))
         self.sims = [parse_file(os.path.join(simdir,'sim_conf.ini')) for simdir in simdirs]
         self.log.debug('Sims before sorting: %s',str(self.sims))
@@ -482,9 +482,11 @@ class Global_Plotter(Plotter):
         plt.plot(range(len(errors)),errors,linestyle='-',marker='o',color='b')
         plt.xticks(x,labels,rotation='vertical')
         plt.tight_layout()
+        plt.title(os.path.basename(self.gconf.get('General','basedir')))
         if self.gconf.get('General','save_plots'):
-            name = 'convergence_'+quantity+'.pdf'
-            path = os.path.join(self.gconf.get('General','basedir'),name)
+            basedir = self.gconf.get('General','basedir')
+            name = os.path.basename(basedir)+'_convergence_'+quantity+'.pdf'
+            path = os.path.join(basedir,name)
             fig.savefig(path)
         if self.gconf.get('General','show_plots'):
             plt.show() 

@@ -108,20 +108,23 @@ def build_sim(conf):
     # LAYER SPECIFIED
     sim.AddLayer(Name='air',Thickness=conf.getfloat('Parameters','air_t'),Material='vacuum')
     sim.AddLayer(Name='ito',Thickness=conf.getfloat('Parameters','ito_t'),Material='ITO')
-    sim.AddLayer(Name='nanowire',Thickness=conf.getfloat('Parameters','nw_height'),Material='Cyclotrene')
+    sim.AddLayer(Name='nanowire_alshell',Thickness=conf.getfloat('Parameters','alinp_height'),Material='Cyclotrene')
+    sim.AddLayer(Name='nanowire_sishell',Thickness=conf.getfloat('Parameters','sio2_height'),Material='Cyclotrene')
     sim.AddLayer(Name='substrate',Thickness=conf.getfloat('Parameters','substrate_t'),Material='GaAs')
     
-    # Add patterning to layers
+    # Add patterning to section with AlInP shell
     core_rad = conf.getfloat('Parameters','nw_radius')
-    alinp_rad = core_rad + conf.getfloat('Parameters','shell_t')
-    sim.SetRegionCircle(Layer='nanowire',Material='AlInP',Center=(0,0),Radius=alinp_rad)
-    sim.SetRegionCircle(Layer='nanowire',Material='GaAs',Center=(0,0),Radius=core_rad)
-   
+    shell_rad = core_rad + conf.getfloat('Parameters','shell_t')
+    sim.SetRegionCircle(Layer='nanowire_alshell',Material='AlInP',Center=(0,0),Radius=shell_rad)
+    sim.SetRegionCircle(Layer='nanowire_alshell',Material='GaAs',Center=(0,0),Radius=core_rad)
+    # Add patterning to layer with SiO2 shell
+    sim.SetRegionCircle(Layer='nanowire_sishell',Material='SiO2',Center=(0,0),Radius=shell_rad)
+    sim.SetRegionCircle(Layer='nanowire_sishell',Material='GaAs',Center=(0,0),Radius=core_rad)
+
     # Set frequency
     f_phys = conf.getfloat("Parameters","frequency")
     c_conv = constants.c/conf.getfloat("General","base_unit")
     f_conv = f_phys/c_conv
-    print(f_conv)
     sim.SetFrequency(f_conv)
 
     # Define incident light. Normally incident with frequency dependent amplitude

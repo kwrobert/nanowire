@@ -2,6 +2,6 @@
 *.zip
 *.png
 *.swp
-test/*
+*test*/*
 *numbasis_convergence*
 sims/*

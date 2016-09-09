@@ -5,3 +5,5 @@
 *test*/*
 *numbasis_convergence*
 sims/*
+comsolcompare/*
+*.ipynb

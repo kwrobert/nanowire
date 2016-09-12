@@ -424,15 +424,15 @@ class Plotter(Processor):
         if plane == 'x':
             cs = planes[:,-1].reshape(z.shape[0],y.shape[0])
             labels = ('y [um]','z [um]', quantity)
-            self.heatmap2d(y,z,cs,labels,'plane_2d')
+            self.heatmap2d(y,z,cs,labels,'plane_2d_x')
         elif plane == 'y':
             cs = planes[:,-1].reshape(z.shape[0],x.shape[0])
             labels = ('x [um]','z [um]', quantity)
-            self.heatmap2d(x,z,cs,labels,'plane_2d')
+            self.heatmap2d(x,z,cs,labels,'plane_2d_y')
         elif plane == 'z':
             cs = planes[:,-1].reshape(y.shape[0],x.shape[0])
             labels = ('y [um]','x [um]', quantity)
-            self.heatmap2d(x,y,cs,labels,'plane_2d')
+            self.heatmap2d(x,y,cs,labels,'plane_2d_z')
     
     def scatter3d(self,x,y,z,cs,labels,ptype,colorsMap='jet'):
         """A general utility method for scatter plots in 3D"""

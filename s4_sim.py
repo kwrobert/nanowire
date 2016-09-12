@@ -20,7 +20,8 @@ def parse_file(path):
         parser.readfp(config_file)
     height = sum((parser.getfloat('Parameters','nw_height'),
                   parser.getfloat('Parameters','substrate_t'),
-                  parser.getfloat('Parameters','ito_t')))
+                  parser.getfloat('Parameters','ito_t'),
+                  parser.getfloat('Parameters','air_t')))
     parser.set('Parameters','total_height',str(height))
     with open(path,'w') as conf_file:
         parser.write(conf_file)

@@ -32,7 +32,7 @@ def comp_conv(val):
             val = val.replace('i','j')
             return complex(val)
 
-def parse_comsol(compdir,path):
+def parse_comsol(conf,compdir,path):
     print('Parsing new COMSOL data')
     # COpy the comsol file to the comparison dir for completeness
     shutil.copy(path,compdir)
@@ -46,6 +46,9 @@ def parse_comsol(compdir,path):
     data = np.zeros((raw.shape[0],17))
     data[:,0:3] = np.real(raw[:,0:3])*1E6
     data[:,2] = np.absolute(data[:,2] + 1) 
+    # We also need to shift the origin so its at the corner of the nanowire
+    data[:,0] = data[:,0] + conf.getfloat('Parameters','array_period')/2
+    data[:,1] = data[:,1] + conf.getfloat('Parameters','array_period')/2
     # Split the complex values of all the field components. Dict maps col
     # of raw data to the two new columns in the cleaned up matrix
     mapping = {4:(3,4),5:(5,6),6:(7,8),8:(10,11),9:(12,13),10:(14,15)}
@@ -94,14 +97,16 @@ def parse_s4(conf,compdir,epath,hpath):
     np.savetxt(os.path.join(compdir,'s4_data_formatted.txt'),joined)
     return joined 
 
-def mse(x,y):
+def relative_difference(x,y):
     """Return the mean squared error between two equally sized sets of data"""
     if x.size != y.size:
         self.log.error("You have attempted to compare datasets with an unequal number of points!!!!")
         quit()
     else:
-        mse = np.sum((x-y)**2)/x.size
-        return mse
+        diff = np.abs(x-y)
+        norm_diff = diff/np.amax(diff) 
+        rel_diff  = np.sum(norm_diff)/norm_diff.size
+        return rel_diff
 
 def compare_data(s4data,comsoldata):
     """ The points extracted from COMSOL and S4 are not exactly the same, so we need to interpolate S4
@@ -116,25 +121,30 @@ def compare_data(s4data,comsoldata):
     s4_points = s4data[:,0:3]
     s4_mag = s4data[:,9]
     comsol_mag = comsoldata[:,10]
+    
+
+    # Simple mean squared error for now
+
+    # These should be zero
+    print("These should be zero")
+    interp_vals_s4 = spi.griddata(s4_points,s4_mag,s4_points)
+    interp_vals_coms = spi.griddata(comsol_pts,comsol_mag,comsol_pts)
+    err = relative_difference(interp_vals_s4,s4_mag)
+    print("Error of interpolated and actual S4 mag = ",err)
+    err = relative_difference(interp_vals_coms,comsol_mag)
+    print("Error of interpolated and actual COMSOL mag = ",err)
+
+    # These should be the same
+    
     # This is the S4 data on the COMSOL points
     interp_vals_s4 = spi.griddata(s4_points,s4_mag,comsol_pts)
     # This is the COMSOL data on the S4 points
     interp_vals_coms = spi.griddata(comsol_pts,comsol_mag,s4_points)
     print(interp_vals_s4)
     print(interp_vals_coms)
-
-    # Simple mean squared error for now
-
-    # These should be zero
-    err = mse(interp_vals_s4,s4_mag)
-    print("Error of interpolated and actual S4 mag = ",err)
-    err = mse(interp_vals_coms,comsol_mag)
-    print("Error of interpolated and actual COMSOL mag = ",err)
-
-    # These should be the same
-    err = mse(interp_vals_s4,comsol_mag) 
+    err = relative_difference(interp_vals_s4,comsol_mag) 
     print("The error between interpolated S4 and COMSOL = ",err)
-    err = mse(interp_vals_coms,s4_mag) 
+    err = relative_difference(interp_vals_coms,s4_mag) 
     print("The error between interpolated COMSOL and S4 = ",err)
 
 def main():
@@ -160,6 +170,9 @@ def main():
         if os.path.isfile(os.path.join(comp_dir,'s4_data_formatted.txt')):
             print('Discovered formatted S4 data file')
             s4 = True
+    
+    # Grab the sim config for the S4 sim to which we are comparing
+    conf = parse_file(os.path.join(args.s4_dir,'sim_conf.ini'))
 
     # If the formatted file exists use it, otherwise parse the file provided at the command line
     if comsol:
@@ -167,7 +180,7 @@ def main():
         comsoldata = np.loadtxt(os.path.join(comp_dir,'comsol_data_formatted.txt'))
     else:
         if os.path.isfile(args.comsol_file):
-            comsoldata = parse_comsol(comp_dir,os.path.abspath(args.comsol_file))
+            comsoldata = parse_comsol(conf,comp_dir,os.path.abspath(args.comsol_file))
         else:
             print("\n The comsol file you specified does not exist! \n")
             quit()
@@ -177,8 +190,7 @@ def main():
         print('Reusing formatted S4 data file')
         s4data = np.loadtxt(os.path.join(comp_dir,'s4_data_formatted.txt'))
     else:
-        # Grab the sim config for the S4 sim to which we are comparing
-        conf = parse_file(os.path.join(args.s4_dir,'sim_conf.ini'))
+
         # Get the data files
         name = conf.get('General','base_name')
         e_file = os.path.join(os.path.abspath(args.s4_dir),name+'.E')
@@ -190,7 +202,7 @@ def main():
         else:
             s4data = parse_s4(conf,comp_dir,e_file,h_file)
 
-    
+    # Now do the actual comparison    
     compare_data(s4data,comsoldata)
 
 if __name__ == '__main__':

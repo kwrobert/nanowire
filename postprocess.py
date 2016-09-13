@@ -1,15 +1,18 @@
-import numpy as np
-import matplotlib
-# Enables saving plots over ssh
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-import matplotlib.cm as cmx
 import argparse as ap
 import os
 import configparser as confp 
 import re
 import logging
+import numpy as np
+import matplotlib
+# Enables saving plots over ssh
+try:
+    os.environ['DISPLAY']
+except KeyError:
+    matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import matplotlib.cm as cmx
 
 def configure_logger(level,logger_name,log_dir,logfile):
     # Get numeric level safely

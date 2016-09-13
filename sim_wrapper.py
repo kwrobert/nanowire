@@ -118,7 +118,7 @@ def run_sweep(conf):
     log.debug("Option values dict before processing: %s",str(optionValues))
     for key, value in optionValues.items():
         # determine if we have floats or ints
-        if value.find('.') != -1:
+        if value.find('.') != -1 or value.find('E'):
             type_converter = lambda x: float(x)
         else:
             type_converter = lambda x: int(x)
@@ -156,7 +156,10 @@ def run_sweep(conf):
         basedir=conf.get('General','basedir')
         workdir=''
         for i in range(len(combo)):
-            workdir += str(keys[i])+str(combo[i])+'__'
+            if isinstance(combo[i],float) and combo[i] >= 10000:
+                workdir += str(keys[i])+'%E__'%combo[i]
+            else:
+                workdir += str(keys[i])+str(combo[i])+__
         workdir=workdir.rstrip('__')
         log.info('Preparing for simulation %s',str(workdir))
         fullpath = os.path.join(basedir,workdir)

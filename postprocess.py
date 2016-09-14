@@ -1,9 +1,9 @@
+import numpy as np
 import argparse as ap
 import os
 import configparser as confp 
 import re
 import logging
-import numpy as np
 import matplotlib
 # Enables saving plots over ssh
 try:
@@ -13,6 +13,8 @@ except KeyError:
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.cm as cmx
+import matplotlib.lines as mlines
+import matplotlib.patches as mpatches
 
 def configure_logger(level,logger_name,log_dir,logfile):
     # Get numeric level safely
@@ -378,7 +380,7 @@ class Plotter(Processor):
                     matrices')
             quit()
 
-    def heatmap2d(self,x,y,cs,labels,ptype,colorsMap='jet'):
+    def heatmap2d(self,x,y,cs,labels,ptype,draw=False,colorsMap='jet'):
         """A general utility method for plotting a 2D heat map"""
         cm = plt.get_cmap(colorsMap)
         cNorm = matplotlib.colors.Normalize(vmin=np.amin(cs), vmax=np.amax(cs))
@@ -396,6 +398,12 @@ class Plotter(Processor):
             name = labels[-1]+'_'+ptype+'.pdf'
             path = os.path.join(self.sim.get('General','sim_dir'),name)
             fig.savefig(path)
+        if draw:
+            if ptype[-1] == 'z':
+                self.log.info('draw nanowire circle')
+            elif ptype[-1] == 'y' or ptype[-1] == 'x':
+                self.log.info('draw layers')
+
         if self.gconf.get('General','show_plots'):
             plt.show()
         plt.close(fig)

@@ -398,15 +398,21 @@ class Plotter(Processor):
         if draw:
             if ptype[-1] == 'z':
                 self.log.info('draw nanowire circle')
+                cent = self.sim.getfloat('Parameters','array_period')/2.0
+                rad = self.sim.getfloat('Parameters','nw_radius')
+                circ = mpatches.Circle((cent,cent),radius=rad,fill=False)
+                ax.add_artist(circ)
             elif ptype[-1] == 'y' or ptype[-1] == 'x':
                 self.log.info('draw layers')
                 ito_line = self.sim.getfloat('Parameters','air_t')
-                alnw_line = self.sim.getfloat('Parameters','ito_t')+ito_line
-                sinw_line = self.sim.getfloat('Parameters','alinp_height')+alnw_line
-                sub_line = self.sim.getfloat('Parameters','si02_height')+sinw_line
-                for line_h in [ito_line,alnw_line,sinw_line,sub_line]:
+                nw_line = self.sim.getfloat('Parameters','ito_t')+ito_line
+                sub_line = self.sim.getfloat('Parameters','nw_height')+nw_line
+                for line_h in [(ito_line,'ITO'),(nw_line,'NW'),(sub_line,'Substrate')]:
                     x = [0,self.sim.getfloat('Parameters','array_period')]
-                    y = [line_h,line_h]
+                    y = [line_h[0],line_h[0]]
+                    label_y = line_h[0] + 0.01
+                    label_x = x[-1]
+                    plt.text(label_x,label_y,line_h[-1],ha='right',family='sans-serif',size=12)
                     line = mlines.Line2D(x,y,linestyle='solid',linewidth=2.0,color='black')
                     ax.add_line(line)
         if self.gconf.get('General','save_plots'):

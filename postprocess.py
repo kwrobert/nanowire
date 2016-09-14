@@ -380,10 +380,13 @@ class Plotter(Processor):
                     matrices')
             quit()
 
-    def heatmap2d(self,x,y,cs,labels,ptype,draw=False,colorsMap='jet'):
+    def heatmap2d(self,x,y,cs,labels,ptype,draw=False,fixed=None,colorsMap='jet'):
         """A general utility method for plotting a 2D heat map"""
         cm = plt.get_cmap(colorsMap)
-        cNorm = matplotlib.colors.Normalize(vmin=np.amin(cs), vmax=np.amax(cs))
+        if fixed:
+            cNorm = matplotlib.colors.Normalize(vmin=np.amin(5.0), vmax=np.amax(100.0))
+        else:
+            cNorm = matplotlib.colors.Normalize(vmin=np.amin(cs), vmax=np.amax(cs))
         scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
         fig = plt.figure(figsize=(9,7))
         ax = fig.add_subplot(111)
@@ -423,7 +426,7 @@ class Plotter(Processor):
             plt.show()
         plt.close(fig)
 
-    def plane_2d(self,quantity,plane,pval,draw=False):
+    def plane_2d(self,quantity,plane,pval,draw=False,fixed=None):
         """Plots a heatmap of a fixed 2D plane"""
         if plane == 'x' or plane == 'y':
             pval = int(pval)
@@ -447,18 +450,22 @@ class Plotter(Processor):
         planes = np.array([row for row in mat if row[plane_table[plane]] == pval])
         # Get all unique values for x,y,z and convert them to actual values not indices
         x,y,z = np.unique(planes[:,0])*dx,np.unique(planes[:,1])*dy,np.unique(planes[:,2])
+        # Super hacky and terrible way to fix the minimum and maximum values of the color bar
+        # for a plot across all sims
+        if fixed:
+            fixed = tuple(fixed.split(':'))
         if plane == 'x':
             cs = planes[:,-1].reshape(z.shape[0],y.shape[0])
             labels = ('y [um]','z [um]', quantity)
-            self.heatmap2d(y,z,cs,labels,'plane_2d_x',draw)
+            self.heatmap2d(y,z,cs,labels,'plane_2d_x',draw,fixed)
         elif plane == 'y':
             cs = planes[:,-1].reshape(z.shape[0],x.shape[0])
             labels = ('x [um]','z [um]', quantity)
-            self.heatmap2d(x,z,cs,labels,'plane_2d_y',draw)
+            self.heatmap2d(x,z,cs,labels,'plane_2d_y',draw,fixed)
         elif plane == 'z':
             cs = planes[:,-1].reshape(y.shape[0],x.shape[0])
             labels = ('y [um]','x [um]', quantity)
-            self.heatmap2d(x,y,cs,labels,'plane_2d_z',draw)
+            self.heatmap2d(x,y,cs,labels,'plane_2d_z',draw,fixed)
     
     def scatter3d(self,x,y,z,cs,labels,ptype,colorsMap='jet'):
         """A general utility method for scatter plots in 3D"""

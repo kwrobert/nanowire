@@ -394,21 +394,30 @@ class Plotter(Processor):
         ax.set_xlabel(labels[0])
         ax.set_ylabel(labels[1])
         fig.suptitle(os.path.basename(self.sim.get('General','sim_dir')))
-        if self.gconf.get('General','save_plots'):
-            name = labels[-1]+'_'+ptype+'.pdf'
-            path = os.path.join(self.sim.get('General','sim_dir'),name)
-            fig.savefig(path)
+        # Draw geometric indicators and labels
         if draw:
             if ptype[-1] == 'z':
                 self.log.info('draw nanowire circle')
             elif ptype[-1] == 'y' or ptype[-1] == 'x':
                 self.log.info('draw layers')
-
+                ito_line = self.sim.getfloat('Parameters','air_t')
+                alnw_line = self.sim.getfloat('Parameters','ito_t')+ito_line
+                sinw_line = self.sim.getfloat('Parameters','alinp_height')+alnw_line
+                sub_line = self.sim.getfloat('Parameters','si02_height')+sinw_line
+                for line_h in [ito_line,alnw_line,sinw_line,sub_line]:
+                    x = [0,self.sim.getfloat('Parameters','array_period')]
+                    y = [line_h,line_h]
+                    line = mlines.Line2D(x,y,linestyle='solid',linewidth=2.0,color='black')
+                    ax.add_line(line)
+        if self.gconf.get('General','save_plots'):
+            name = labels[-1]+'_'+ptype+'.pdf'
+            path = os.path.join(self.sim.get('General','sim_dir'),name)
+            fig.savefig(path)
         if self.gconf.get('General','show_plots'):
             plt.show()
         plt.close(fig)
 
-    def plane_2d(self,quantity,plane,pval):
+    def plane_2d(self,quantity,plane,pval,draw=False):
         """Plots a heatmap of a fixed 2D plane"""
         if plane == 'x' or plane == 'y':
             pval = int(pval)
@@ -435,15 +444,15 @@ class Plotter(Processor):
         if plane == 'x':
             cs = planes[:,-1].reshape(z.shape[0],y.shape[0])
             labels = ('y [um]','z [um]', quantity)
-            self.heatmap2d(y,z,cs,labels,'plane_2d_x')
+            self.heatmap2d(y,z,cs,labels,'plane_2d_x',draw)
         elif plane == 'y':
             cs = planes[:,-1].reshape(z.shape[0],x.shape[0])
             labels = ('x [um]','z [um]', quantity)
-            self.heatmap2d(x,z,cs,labels,'plane_2d_y')
+            self.heatmap2d(x,z,cs,labels,'plane_2d_y',draw)
         elif plane == 'z':
             cs = planes[:,-1].reshape(y.shape[0],x.shape[0])
             labels = ('y [um]','x [um]', quantity)
-            self.heatmap2d(x,y,cs,labels,'plane_2d_z')
+            self.heatmap2d(x,y,cs,labels,'plane_2d_z',draw)
     
     def scatter3d(self,x,y,z,cs,labels,ptype,colorsMap='jet'):
         """A general utility method for scatter plots in 3D"""

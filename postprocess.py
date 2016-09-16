@@ -396,6 +396,10 @@ class Plotter(Processor):
         cb.set_label(labels[-1])
         ax.set_xlabel(labels[0])
         ax.set_ylabel(labels[1])
+        start, end = ax.get_xlim()
+        ax.xaxis.set_ticks(np.arange(start,end,0.1))
+        start, end = ax.get_ylim()
+        ax.yaxis.set_ticks(np.arange(start,end,0.1))
         fig.suptitle(os.path.basename(self.sim.get('General','sim_dir')))
         # Draw geometric indicators and labels
         if draw:
@@ -407,6 +411,7 @@ class Plotter(Processor):
                 ax.add_artist(circ)
             elif ptype[-1] == 'y' or ptype[-1] == 'x':
                 self.log.info('draw layers')
+                # Draw a line at the interface between each layer
                 ito_line = self.sim.getfloat('Parameters','air_t')
                 nw_line = self.sim.getfloat('Parameters','ito_t')+ito_line
                 sub_line = self.sim.getfloat('Parameters','nw_height')+nw_line
@@ -417,6 +422,16 @@ class Plotter(Processor):
                     label_x = x[-1]
                     plt.text(label_x,label_y,line_h[-1],ha='right',family='sans-serif',size=12)
                     line = mlines.Line2D(x,y,linestyle='solid',linewidth=2.0,color='black')
+                    ax.add_line(line)
+                # Draw two vertical lines to show the edges of the nanowire
+                cent = self.sim.getfloat('Parameters','array_period')/2.0
+                rad = self.sim.getfloat('Parameters','nw_radius')
+                bottom = self.sim.getfloat('Parameters','ito_t')+ito_line
+                top = self.sim.getfloat('Parameters','nw_height')+nw_line
+                for x in (cent-rad,cent+rad):
+                    xv = [x,x]
+                    yv = [bottom,top]
+                    line = mlines.Line2D(xv,yv,linestyle='solid',linewidth=2.0,color='black')
                     ax.add_line(line)
         if self.gconf.get('General','save_plots'):
             name = labels[-1]+'_'+ptype+'.pdf'

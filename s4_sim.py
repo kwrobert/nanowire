@@ -55,11 +55,6 @@ def get_incident_amplitude(freq,period,path):
     is super small and would be detrimental to the numerics. Thus, all electric field values have
     units of Volts/sqrt(period*period*conversion_factor^2)""" 
     # Get data
-    print(freq)
-    #wvlength = (constants.c/freq)*10E9
-    #print(wvlength)
-    #lambda_vec,p_vec = np.loadtxt(path,skiprows=2,delimiter=",",usecols=(0,3),unpack=True)
-    #print(lambda_vec)
     freq_vec,p_vec = np.loadtxt(path,skiprows=1,unpack=True)
     # Get p at freq by interpolation 
     f_p = interpolate.interp1d(freq_vec,p_vec)
@@ -68,7 +63,11 @@ def get_incident_amplitude(freq,period,path):
     #plt.plot(freq_vec,p_vec,'bs',freq_vec,f_p(freq_vec),'r--')
     #plt.show()
     # Use the Poynting vector to go from power per unit area to E field mag per unit length    i
-    E = np.sqrt(constants.c*constants.mu_0*f_p(freq))
+    ## NOTE!!!: S4 normalizes c and mu_0 to 1, so I think passing in this value for the E field 
+    # amplitude is incorrect!!
+    #E = np.sqrt(constants.c*constants.mu_0*f_p(freq))
+    #E = np.sqrt(2*np.sqrt((constants.epsilon_0/constants.mu_0)*f_p(freq))
+    E = np.sqrt(2*f_p(freq))
     return E
 
 

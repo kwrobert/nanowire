@@ -65,9 +65,9 @@ def get_incident_amplitude(freq,period,path):
     # Use the Poynting vector to go from power per unit area to E field mag per unit length    i
     ## NOTE!!!: S4 normalizes c and mu_0 to 1, so I think passing in this value for the E field 
     # amplitude is incorrect!!
-    #E = np.sqrt(constants.c*constants.mu_0*f_p(freq))
-    #E = np.sqrt(2*np.sqrt((constants.epsilon_0/constants.mu_0)*f_p(freq))
-    E = np.sqrt(2*f_p(freq))
+    E = np.sqrt(constants.c*constants.mu_0*f_p(freq))
+    #E = np.sqrt(2*np.sqrt(constants.epsilon_0/constants.mu_0)*f_p(freq))
+    #E = np.sqrt(2*f_p(freq))
     return E
 
 

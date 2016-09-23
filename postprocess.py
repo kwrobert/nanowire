@@ -175,13 +175,17 @@ class Cruncher(Processor):
             quit()
         
         # Get the magnitude of E and add it to our data
-        Ex = self.e_data[:,3] + 1j*self.e_data[:,6]
-        Ey = self.e_data[:,4] + 1j*self.e_data[:,7]
-        Ez = self.e_data[:,5] + 1j*self.e_data[:,8]
-        E_mag = np.sqrt(Ex*np.conj(Ex)+Ey*np.conj(Ey)+Ez*np.conj(Ez))
+        #Ex = self.e_data[:,3] + 1j*self.e_data[:,6]
+        #Ey = self.e_data[:,4] + 1j*self.e_data[:,7]
+        #Ez = self.e_data[:,5] + 1j*self.e_data[:,8]
+        #E_mag = np.sqrt(Ex*np.conj(Ex)+Ey*np.conj(Ey)+Ez*np.conj(Ez))
         # The .real is super important or it ruins the entire array
         # Note that discarding imag parts is fine here because the
         # magnitude is strictly real and all imag parts are 0
+        Ex = self.e_data[:,3]
+        Ey = self.e_data[:,4]
+        Ez = self.e_data[:,5]
+        E_mag = np.sqrt(Ex*Ex+Ey*Ey+Ez*Ez)
         self.e_data = np.column_stack((self.e_data,E_mag.real)) 
         return E_mag.real
 

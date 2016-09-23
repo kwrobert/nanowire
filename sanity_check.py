@@ -109,8 +109,63 @@ def run_airito_sim():
         sim.GetFieldsOnGrid(z,NumSamples=(x_samp,y_samp),
                             Format='FileAppend',BaseFilename='test_fields')
 
+def run_airitosub_sim():
+    sim = S4.New(Lattice=((.63,0),(0,.63)),NumBasis=25)
+    sim.SetOptions(Verbosity=2)
+    sim.SetMaterial(Name='vacuum',Epsilon=complex(1.0,0.0))
+    sim.SetMaterial(Name='ito',Epsilon=complex(2.0766028416,0.100037324))
+    sim.SetMaterial(Name='gaas',Epsilon=complex(3.5384,0.0))
+    sim.AddLayer(Name='air1',Thickness=.5,Material='vacuum')
+    sim.AddLayer(Name='ito',Thickness=.5,Material='ito')
+    sim.AddLayer(Name='gaas',Thickness=.5,Material='gaas')
+    # Set frequency
+    f_phys = 3E14 
+    c_conv = constants.c/10E-6
+    f_conv = f_phys/c_conv
+    print('f_phys = ',f_phys)
+    print('f_conv = ',f_conv)
+    sim.SetFrequency(f_conv)
+    E_mag = 1.0 
+    sim.SetExcitationPlanewave(IncidenceAngles=(0,0),sAmplitude=complex(E_mag,0), pAmplitude=complex(0,E_mag))
+    x_samp = 200 
+    y_samp = 200 
+    z_samp = 200
+    height = 1.5   
+    for z in np.linspace(0,height,z_samp):
+        sim.GetFieldsOnGrid(z,NumSamples=(x_samp,y_samp),
+                            Format='FileAppend',BaseFilename='test_fields')
+
+def run_airitowiresub_sim():
+    sim = S4.New(Lattice=((.63,0),(0,.63)),NumBasis=25)
+    sim.SetOptions(Verbosity=2)
+    sim.SetMaterial(Name='vacuum',Epsilon=complex(1.0,0.0))
+    sim.SetMaterial(Name='ito',Epsilon=complex(2.0766028416,0.100037324))
+    sim.SetMaterial(Name='gaas',Epsilon=complex(3.5384,0.0))
+    sim.SetMaterial(Name='cyc',Epsilon=complex(1.53531,1.44205E-6))
+    sim.AddLayer(Name='air1',Thickness=.5,Material='vacuum')
+    sim.AddLayer(Name='ito',Thickness=.5,Material='ito')
+    sim.AddLayer(Name='wire',Thickness=.5,Material='cyc')
+    sim.SetRegionCircle('wire','gaas',(0,0),.2)
+    sim.AddLayer(Name='gaas',Thickness=.5,Material='gaas')
+    # Set frequency
+    f_phys = 3E14 
+    c_conv = constants.c/10E-6
+    f_conv = f_phys/c_conv
+    print('f_phys = ',f_phys)
+    print('f_conv = ',f_conv)
+    sim.SetFrequency(f_conv)
+    E_mag = 1.0 
+    sim.SetExcitationPlanewave(IncidenceAngles=(0,0),sAmplitude=complex(E_mag,0), pAmplitude=complex(0,E_mag))
+    x_samp = 200 
+    y_samp = 200 
+    z_samp = 200
+    height = 2.0 
+    for z in np.linspace(0,height,z_samp):
+        sim.GetFieldsOnGrid(z,NumSamples=(x_samp,y_samp),
+                            Format='FileAppend',BaseFilename='test_fields')
+
 def main():
-    run_airito_sim()
+    run_airitowiresub_sim()
     print('Finished sim')
     plot_sim()
     

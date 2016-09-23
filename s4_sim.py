@@ -121,8 +121,10 @@ def build_sim(conf):
 
     # Set frequency
     f_phys = conf.getfloat("Parameters","frequency")
+    print('Physical Frequency = %E'%f_phys)
     c_conv = constants.c/conf.getfloat("General","base_unit")
     f_conv = f_phys/c_conv
+    print('Converted Frequency = %f'%f_conv)
     sim.SetFrequency(f_conv)
 
     # Define incident light. Normally incident with frequency dependent amplitude

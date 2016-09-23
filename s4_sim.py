@@ -70,8 +70,6 @@ def get_incident_amplitude(freq,period,path):
     #E = np.sqrt(2*f_p(freq))
     return E
 
-
-
 def build_sim(conf):
     """Define the materials and build the geometry for the simulation"""
 

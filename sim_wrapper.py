@@ -7,6 +7,7 @@ import configparser as confp
 import glob
 import logging
 import datetime
+from multiprocessing import cpu_count 
 
 def parse_file(path):
     """Parse the INI file provided at the command line"""
@@ -45,7 +46,7 @@ def configure_logger(level,logger_name,log_dir,logfile):
        
     return logger
 
-def sh(cmd):
+def start_sim(script,ini_file):
     '''Executes commands directly to the native bash shell using subprocess.Popen, and retrieves
     stdout and stderr. 
     
@@ -57,7 +58,22 @@ def sh(cmd):
     Input: - bash_command: string
     Output: - out: string
             - err: string'''
-    return subprocess.Popen(cmd,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE).communicate()
+
+    cmd = 'python %s %s'%(script,ini_file)
+    return subprocess.Popen(cmd,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+
+def poll_procs(procs):
+    log = logging.getLogger('sim_wrapper') 
+    log.info('Hit core limit, polling processes ...')
+    # While there are running processes
+    while procs:
+        for proc in procs:
+            if proc[0].poll() != None:
+                out,err = proc[0].communicate()
+                log.debug('Simulation stdout for %s: %s',proc[1],str(out))
+                log.debug('Simulation stderr for %s: %s',proc[1],str(err))
+                log.info("Finished simulation for %s!",str(proc[1]))
+                procs.remove(proc)
 
 def sim(script,ini_file):
     out,err = sh('python %s %s'%(script,ini_file))
@@ -105,7 +121,8 @@ def run_single_sim(conf,conf_path):
     os.chdir(path)
     workdir = os.path.basename(basedir)
     log.info("Starting simulation for %s ....",workdir)
-    out, err = sim(script,"sim_conf.ini")
+    proc = start_sim(script,"sim_conf.ini")
+    out,err = proc.communicate()
     log.debug('Simulation stdout: %s',out)
     log.debug('Simulation stderr: %s',err)
     log.info("Finished simulation for %s!",str(workdir))
@@ -118,7 +135,8 @@ def run_sweep(conf):
     log.debug("Option values dict before processing: %s",str(optionValues))
     for key, value in optionValues.items():
         # determine if we have floats or ints
-        if value.find('.') != -1 or value.find('E'):
+        print(value)
+        if value.find('.') != -1 or value.find('E') != -1:
             type_converter = lambda x: float(x)
         else:
             type_converter = lambda x: int(x)
@@ -150,6 +168,11 @@ def run_sweep(conf):
     # parameter  
     combos=list(itertools.product(*valuelist))
     log.debug('The list of parameter combos: %s',str(combos))
+    # If we are running sims in parallel, need to store running Popen instances
+    # If not running in parallel, this list will always be empty
+    procs = []
+    num_procs = cpu_count()-conf.getint('General','reserved_cores')
+    log.info('Using %i cores ...'%num_procs)
     # Loop through each unique combination of parameters
     for combo in combos:
         # Make a unique working directory based on parameter combo
@@ -202,12 +225,23 @@ def run_sweep(conf):
             shutil.copyfile('s4_sim.py',script)
         os.chdir(fullpath)
         log.info("Starting simulation for %s ....",workdir)
-        out, err = sim(script,"sim_conf.ini")
-        log.debug('Simulation stdout: %s',str(out))
-        log.debug('Simulation stderr: %s',str(err))
-        log.info("Finished simulation for %s!",str(workdir))
+        proc = start_sim(script,"sim_conf.ini")
+        if not conf.getboolean('General','parallel'):
+            out,err = proc.communicate()
+            log.debug('Simulation stdout: %s',str(out))
+            log.debug('Simulation stderr: %s',str(err))
+            log.info("Finished simulation for %s!",str(workdir))
+        else:
+            # The reason for not using multiprocessing is because each process outputs and
+            # identically named file and multiprocessing pools would spit them all out into the same
+            # directory
+            if len(procs) < num_procs:
+                procs.append((proc,workdir))
+            else:
+                poll_procs(procs)
         os.chdir(basedir)
-            
+    poll_procs(procs)
+        
 def run_optimization(conf):
     log = logging.getLogger('sim_wrapper')
     log.info("Running optimization")

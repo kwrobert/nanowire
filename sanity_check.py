@@ -62,10 +62,10 @@ def plot_sim():
     plt.legend()
     plt.show()
 
-def run_sim():
+def run_air_sim():
     sim = S4.New(Lattice=((.63,0),(0,.63)),NumBasis=25)
     sim.SetOptions(Verbosity=2)
-    sim.SetMaterial(Name='vacuum',Epsilon=complex(1.0001,0.0))
+    sim.SetMaterial(Name='vacuum',Epsilon=complex(1.0,0.0))
     sim.AddLayer(Name='air1',Thickness=.5,Material='vacuum')
     sim.AddLayer(Name='air2',Thickness=.5,Material='vacuum')
     # Set frequency
@@ -85,8 +85,32 @@ def run_sim():
         sim.GetFieldsOnGrid(z,NumSamples=(x_samp,y_samp),
                             Format='FileAppend',BaseFilename='test_fields')
 
+def run_airito_sim():
+    sim = S4.New(Lattice=((.63,0),(0,.63)),NumBasis=25)
+    sim.SetOptions(Verbosity=2)
+    sim.SetMaterial(Name='vacuum',Epsilon=complex(1.0,0.0))
+    sim.SetMaterial(Name='ito',Epsilon=complex(2.0766028416,0.100037324))
+    sim.AddLayer(Name='air1',Thickness=.5,Material='vacuum')
+    sim.AddLayer(Name='ito',Thickness=.5,Material='ito')
+    # Set frequency
+    f_phys = 3E14 
+    c_conv = constants.c/10E-6
+    f_conv = f_phys/c_conv
+    print('f_phys = ',f_phys)
+    print('f_conv = ',f_conv)
+    sim.SetFrequency(f_conv)
+    E_mag = 1.0 
+    sim.SetExcitationPlanewave(IncidenceAngles=(0,0),sAmplitude=complex(E_mag,0), pAmplitude=complex(0,E_mag))
+    x_samp = 200 
+    y_samp = 200 
+    z_samp = 200
+    height = 1.0   
+    for z in np.linspace(0,height,z_samp):
+        sim.GetFieldsOnGrid(z,NumSamples=(x_samp,y_samp),
+                            Format='FileAppend',BaseFilename='test_fields')
+
 def main():
-    run_sim()
+    run_airito_sim()
     print('Finished sim')
     plot_sim()
     

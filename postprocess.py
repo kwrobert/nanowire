@@ -53,7 +53,7 @@ def parse_file(path):
         parser.readfp(config_file)
     return parser
 
-class Processor():
+class Processor(object):
     """Base data processor class that has some methods every other processor needs"""
     def __init__(self,global_conf):
         self.log = logging.getLogger('postprocess')

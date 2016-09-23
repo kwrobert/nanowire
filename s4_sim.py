@@ -103,7 +103,7 @@ def build_sim(conf):
         nk_path = conf.get("Materials",mat)
         epsilon = get_epsilon(conf.getfloat("Parameters","frequency"),nk_path)
         sim.SetMaterial(Name=mat,Epsilon=epsilon)
-    sim.SetMaterial(Name='vacuum',Epsilon=complex(1,0))
+    sim.SetMaterial(Name='vacuum',Epsilon=complex(1.0,0.0))
     # Add layers. NOTE!!: Order here DOES MATTER, as incident light will be directed at the FIRST
     # LAYER SPECIFIED
     sim.AddLayer(Name='air',Thickness=conf.getfloat('Parameters','air_t'),Material='vacuum')

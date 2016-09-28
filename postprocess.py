@@ -175,19 +175,22 @@ class Cruncher(Processor):
             quit()
         
         # Get the magnitude of E and add it to our data
-        #Ex = self.e_data[:,3] + 1j*self.e_data[:,6]
-        #Ey = self.e_data[:,4] + 1j*self.e_data[:,7]
-        #Ez = self.e_data[:,5] + 1j*self.e_data[:,8]
-        #E_mag = np.sqrt(Ex*np.conj(Ex)+Ey*np.conj(Ey)+Ez*np.conj(Ez))
+        E_mag = np.zeros(self.e_data.shape[0])
+        for i in range(3,9):
+            E_mag += self.e_data[:,i]*self.e_data[:,i]
+        E_mag = np.sqrt(E_mag)
+        #Ex_r = self.e_data[:,3] 
+        #Ey_r = self.e_data[:,4] 
+        #Ez_r = self.e_data[:,5] 
+        #Ex_i = self.e_data[:,6]
+        #Ey_i = self.e_data[:,7]
+        #Ez_i = self.e_data[:,8]
+        #E_mag = np.sqrt(Ex_r*Ex_r+Ex_i*Ex_i+Ey_r*Ey_r+Ey_i*Ey_i+Ez_r*Ez_r+Ez_i*Ez_i))
         # The .real is super important or it ruins the entire array
         # Note that discarding imag parts is fine here because the
         # magnitude is strictly real and all imag parts are 0
-        Ex = self.e_data[:,3]
-        Ey = self.e_data[:,4]
-        Ez = self.e_data[:,5]
-        E_mag = np.sqrt(Ex*Ex+Ey*Ey+Ez*Ez)
-        self.e_data = np.column_stack((self.e_data,E_mag.real)) 
-        return E_mag.real
+        self.e_data = np.column_stack((self.e_data,E_mag)) 
+        return E_mag
 
     def normEsquared(self):
         """Calculates and returns normE squared"""
@@ -196,15 +199,21 @@ class Cruncher(Processor):
             quit()
         
         # Get the magnitude of E and add it to our data
-        Ex = self.e_data[:,3] + 1j*self.e_data[:,6]
-        Ey = self.e_data[:,4] + 1j*self.e_data[:,7]
-        Ez = self.e_data[:,5] + 1j*self.e_data[:,8]
-        E_magsq = Ex*np.conj(Ex)+Ey*np.conj(Ey)+Ez*np.conj(Ez)
+        E_magsq = np.zeros(self.e_data.shape[0])
+        for i in range(3,9):
+            E_magsq += self.e_data[:,i]*self.e_data[:,i]
+        #Ex_r = self.e_data[:,3] 
+        #Ey_r = self.e_data[:,4] 
+        #Ez_r = self.e_data[:,5] 
+        #Ex_i = self.e_data[:,6]
+        #Ey_i = self.e_data[:,7]
+        #Ez_i = self.e_data[:,8]
+        #E_magsq = np.sqrt(Ex_r*Ex_r+Ex_i*Ex_i+Ey_r*Ey_r+Ey_i*Ey_i+Ez_r*Ez_r+Ez_i*Ez_i))
         # The .real is super important or it ruins the entire array
         # Note that discarding imag parts is fine here because the
         # magnitude is strictly real and all imag parts are 0
-        self.e_data = np.column_stack((self.e_data,E_magsq.real)) 
-        return E_magsq.real
+        self.e_data = np.column_stack((self.e_data,E_magsq)) 
+        return E_magsq
 
     def normH(self):
         """Calculate and returns the norm of H"""
@@ -213,14 +222,26 @@ class Cruncher(Processor):
             self.log.error("You need to get your data first!")
             quit()
         
-        # Get the magnitude of H and add it to our data
-        Hx = self.h_data[:,3] + 1j*self.h_data[:,6]
-        Hy = self.h_data[:,4] + 1j*self.h_data[:,7]
-        Hz = self.h_data[:,5] + 1j*self.h_data[:,8]
-        H_mag = np.sqrt(Hx*np.conj(Hx)+Hy*np.conj(Hy)+Hz*np.conj(Hz))
+        # Get the magnitude of H and add it to our data. This loops through each components real and
+        # imaginary parts and squared it (which is what would happen if you took the complex number
+        # for each component and multiplied it by its conjugate). 
+        H_mag = np.zeros(self.h_data.shape[0])
+        for i in range(3,9):
+            H_mag += self.h_data[:,i]*self.h_data[:,i]
+        H_mag = np.sqrt(H_mag)
+        #Hx_r = self.h_data[:,3] 
+        #Hy_r = self.h_data[:,4] 
+        #Hz_r = self.h_data[:,5] 
+        #Hx_i = self.h_data[:,6]
+        #Hy_i = self.h_data[:,7]
+        #Hz_i = self.h_data[:,8]
+        #H_mag = np.sqrt(Hx_r*Hx_r+Hx_i*Hx_i+Hy_r*Hy_r+Hy_i*Hy_i+Hz_r*Hz_r+Hz_i*Hz_i))
         # The .real is super important or it ruins the entire array
-        self.h_data = np.column_stack((self.h_data,H_mag.real))
-        return H_mag.real
+        # Note that discarding imag parts is fine here because the
+        # magnitude is strictly real and all imag parts are 0
+
+        self.h_data = np.column_stack((self.h_data,H_mag))
+        return H_mag
     
     def normHsquared(self):
         """Calculates and returns the norm of H squared"""
@@ -230,13 +251,22 @@ class Cruncher(Processor):
             quit()
         
         # Get the magnitude of H and add it to our data
-        Hx = self.h_data[:,3] + 1j*self.h_data[:,6]
-        Hy = self.h_data[:,4] + 1j*self.h_data[:,7]
-        Hz = self.h_data[:,5] + 1j*self.h_data[:,8]
-        H_magsq = Hx*np.conj(Hx)+Hy*np.conj(Hy)+Hz*np.conj(Hz)
+        H_magsq = np.zeros(self.h_data.shape[0])
+        for i in range(3,9):
+            H_magsq += self.h_data[:,i]*self.h_data[:,i]
+        #Hx_r = self.h_data[:,3] 
+        #Hy_r = self.h_data[:,4] 
+        #Hz_r = self.h_data[:,5] 
+        #Hx_i = self.h_data[:,6]
+        #Hy_i = self.h_data[:,7]
+        #Hz_i = self.h_data[:,8]
+        #H_mag = np.sqrt(Hx_r*Hx_r+Hx_i*Hx_i+Hy_r*Hy_r+Hy_i*Hy_i+Hz_r*Hz_r+Hz_i*Hz_i))
         # The .real is super important or it ruins the entire array
-        self.h_data = np.column_stack((self.h_data,H_magsq.real))
-        return H_magsq.real
+        # Note that discarding imag parts is fine here because the
+        # magnitude is strictly real and all imag parts are 0
+
+        self.h_data = np.column_stack((self.h_data,H_magsq))
+        return H_magsq
 
 class Global_Cruncher(Cruncher):
     """Computes global quantities for an entire run, instead of local quantities for an individual
@@ -551,7 +581,41 @@ class Plotter(Processor):
         labels = ('X [um]','Y [um]','Z [um]',quantity)
         # Now plot!
         self.scatter3d(planes[:,0],planes[:,1],planes[:,2],planes[:,3],labels,'planes_3d')
-    
+
+    def line_plot(self,x,y,ptype,labels):
+        """Make a simple line plot"""
+        fig = plt.figure()
+        plt.plot(x,y)
+        plt.xlabel(labels[0])
+        plt.ylabel(labels[1])
+        plt.title(os.path.basename(self.sim.get('General','sim_dir')))
+        if self.gconf.get('General','save_plots'):
+            name = labels[-1]+'_'+ptype+'.pdf'
+            path = os.path.join(self.sim.get('General','sim_dir'),name)
+            fig.savefig(path)
+        if self.gconf.get('General','show_plots'):
+            plt.show()
+        plt.close(fig)
+
+    def fixed_line(self,quantity,direction,coord1,coord2):
+        """Plot a scalar quantity on a line along a the z direction at some pair of
+        coordinates in the plane perpendicular to that direction"""
+        coord1 = int(coord1)
+        coord2 = int(coord2)
+        period = self.sim.getfloat('Parameters','array_period')
+        dx = period/self.gconf.getfloat('General','x_samples')
+        dy = period/self.gconf.getfloat('General','y_samples')
+        # Get the scalar values
+        scalar = self.get_scalar_quantity(quantity) 
+        # Filter out any undesired data that isn't on the planes
+        mat = np.column_stack((self.pos_inds[:,0],self.pos_inds[:,1],self.pos_inds[:,2],scalar))
+        planes = np.array([row for row in mat if row[0] == coord1 and row[1] == coord2])
+        planes[:,0] = planes[:,0]*dx
+        planes[:,1] = planes[:,1]*dy
+        labels = ('Z [um]',quantity) 
+        ptype = "%s_line_plot_%i_%i"%(direction,coord1,coord2)
+        self.line_plot(planes[:,2],planes[:,3],ptype,labels)
+
 class Global_Plotter(Plotter):
     """Plots global quantities for an entire run that are not specific to a single simulation"""
     def __init__(self,global_conf):

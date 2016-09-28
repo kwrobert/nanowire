@@ -12,12 +12,16 @@ import configparser as confp
 import glob
 
 def calcnormE(data):
-    Ex = data[:,3] + 1j*data[:,6]
-    Ey = data[:,4] + 1j*data[:,7]
-    Ez = data[:,5] + 1j*data[:,8]
-    E_mag = np.sqrt(Ex*np.conj(Ex)+Ey*np.conj(Ey)+Ez*np.conj(Ez))
+    #Ex = data[:,3] + 1j*data[:,6]
+    #Ey = data[:,4] + 1j*data[:,7]
+    #Ez = data[:,5] + 1j*data[:,8]
+    #E_mag = np.sqrt(Ex*np.conj(Ex)+Ey*np.conj(Ey)+Ez*np.conj(Ez))
+    Ex = data[:,3]
+    Ey = data[:,4]
+    Ez = data[:,5]
+    E_mag = np.sqrt(Ex*Ex+Ey*Ey+Ez*Ez)
     data = np.column_stack((data,E_mag.real))
-    return data, E_mag.real
+    return data, E_mag
 
 def plot_sim():
     data = np.loadtxt('test_fields.E')
@@ -25,7 +29,7 @@ def plot_sim():
     print(normE)
     np.savetxt('processed_data.txt',data)
     pval = 50
-    mat = np.column_stack((data[:,0],data[:,1],data[:,2],data[:,3],data[:,4]))
+    mat = np.column_stack((data[:,0],data[:,1],data[:,2],data[:,3],data[:,4],normE))
     planes = np.array([row for row in mat if row[0] == pval])
     print(planes.shape)
     dx = dy = .63/200
@@ -63,7 +67,7 @@ def plot_sim():
     plt.show()
 
 def run_air_sim():
-    sim = S4.New(Lattice=((.63,0),(0,.63)),NumBasis=25)
+    sim = S4.New(Lattice=((.63,0),(0,.63)),NumBasis=550)
     sim.SetOptions(Verbosity=2)
     sim.SetMaterial(Name='vacuum',Epsilon=complex(1.0,0.0))
     sim.AddLayer(Name='air1',Thickness=.5,Material='vacuum')

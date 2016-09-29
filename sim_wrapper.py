@@ -46,6 +46,9 @@ def configure_logger(level,logger_name,log_dir,logfile):
        
     return logger
 
+def sh(cmd):
+    return subprocess.Popen(cmd,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE).communicate()
+
 def start_sim(script,ini_file):
     '''Executes commands directly to the native bash shell using subprocess.Popen, and retrieves
     stdout and stderr. 
@@ -282,6 +285,12 @@ def main():
     else:
         logger.error('Unsupported configuration for a simulation run. Not a single sim, sweep, or \
         optimization')
+
+    if conf.getboolean('General','postprocess') == True:
+        os.chdir(conf.get('General','basedir'))
+        os.chdir('../')
+        out,err = sh('python3 ./postprocess.py setup.ini')
+        print(err) 
 
 if __name__ == '__main__':
     main()

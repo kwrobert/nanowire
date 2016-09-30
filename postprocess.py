@@ -449,7 +449,8 @@ class Plotter(Processor):
                 ito_line = self.sim.getfloat('Parameters','air_t')
                 nw_line = self.sim.getfloat('Parameters','ito_t')+ito_line
                 sub_line = self.sim.getfloat('Parameters','nw_height')+nw_line
-                for line_h in [(ito_line,'ITO'),(nw_line,'NW'),(sub_line,'Substrate')]:
+                air_line = sub_line+self.sim.getfloat('Parameters','substrate_t')
+                for line_h in [(ito_line,'ITO'),(nw_line,'NW'),(sub_line,'Substrate'),(air_line,'Air')]:
                     x = [0,self.sim.getfloat('Parameters','array_period')]
                     y = [line_h[0],line_h[0]]
                     label_y = line_h[0] + 0.01
@@ -460,9 +461,10 @@ class Plotter(Processor):
                 # Draw two vertical lines to show the edges of the nanowire
                 cent = self.sim.getfloat('Parameters','array_period')/2.0
                 rad = self.sim.getfloat('Parameters','nw_radius')
+                shell = self.sim.getfloat('Parameters','shell_t')
                 bottom = self.sim.getfloat('Parameters','ito_t')+ito_line
                 top = self.sim.getfloat('Parameters','nw_height')+nw_line
-                for x in (cent-rad,cent+rad):
+                for x in (cent-rad,cent+rad,cent-rad-shell,cent+rad+shell):
                     xv = [x,x]
                     yv = [bottom,top]
                     line = mlines.Line2D(xv,yv,linestyle='solid',linewidth=2.0,color='black')
@@ -532,7 +534,7 @@ class Plotter(Processor):
               
         #ax = Axes3D(fig)
         ax = fig.add_subplot(111,projection='3d')
-        ax.scatter(x, y, z, c=scalarMap.to_rgba(cs))
+        ax.scatter(x, y, z, c=scalarMap.to_rgba(cs),edgecolor='none')
         scalarMap.set_array(cs)
         cb = fig.colorbar(scalarMap)
         cb.set_label(labels[-1])

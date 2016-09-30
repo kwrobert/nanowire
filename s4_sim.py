@@ -21,7 +21,7 @@ def parse_file(path):
     height = sum((parser.getfloat('Parameters','nw_height'),
                   parser.getfloat('Parameters','substrate_t'),
                   parser.getfloat('Parameters','ito_t'),
-                  parser.getfloat('Parameters','air_t')))
+                  2*parser.getfloat('Parameters','air_t')))
     parser.set('Parameters','total_height',str(height))
     with open(path,'w') as conf_file:
         parser.write(conf_file)
@@ -44,6 +44,7 @@ def get_epsilon(freq,path):
     # NOTE: Include below in some sort of unit test later
     #print("n = %f"%n)
     #print("k = %f"%k)
+    #print('epsilon = {:.2f}'.format(epsilon))
     #plt.plot(freq_vec,k_vec,'bs',freq_vec,f_k(freq_vec),'r--')
     #plt.show()
     return epsilon
@@ -107,17 +108,19 @@ def build_sim(conf):
     sim.AddLayer(Name='air',Thickness=conf.getfloat('Parameters','air_t'),Material='vacuum')
     sim.AddLayer(Name='ito',Thickness=conf.getfloat('Parameters','ito_t'),Material='ITO')
     sim.AddLayer(Name='nanowire_alshell',Thickness=conf.getfloat('Parameters','alinp_height'),Material='Cyclotrene')
-    sim.AddLayer(Name='nanowire_sishell',Thickness=conf.getfloat('Parameters','sio2_height'),Material='Cyclotrene')
-    sim.AddLayer(Name='substrate',Thickness=conf.getfloat('Parameters','substrate_t'),Material='GaAs')
-    
     # Add patterning to section with AlInP shell
     core_rad = conf.getfloat('Parameters','nw_radius')
     shell_rad = core_rad + conf.getfloat('Parameters','shell_t')
     sim.SetRegionCircle(Layer='nanowire_alshell',Material='AlInP',Center=(0,0),Radius=shell_rad)
     sim.SetRegionCircle(Layer='nanowire_alshell',Material='GaAs',Center=(0,0),Radius=core_rad)
-    # Add patterning to layer with SiO2 shell
+    # Si layer and patterning 
+    sim.AddLayer(Name='nanowire_sishell',Thickness=conf.getfloat('Parameters','sio2_height'),Material='Cyclotrene')
+    # Add patterning to layer with SiO2 shell 
     sim.SetRegionCircle(Layer='nanowire_sishell',Material='SiO2',Center=(0,0),Radius=shell_rad)
     sim.SetRegionCircle(Layer='nanowire_sishell',Material='GaAs',Center=(0,0),Radius=core_rad)
+    # Substrate layer and air transmission region
+    sim.AddLayer(Name='substrate',Thickness=conf.getfloat('Parameters','substrate_t'),Material='GaAs')
+    sim.AddLayerCopy('air_below',Thickness=conf.getfloat('Parameters','air_t'),Layer='air') 
 
     # Set frequency
     f_phys = conf.getfloat("Parameters","frequency")

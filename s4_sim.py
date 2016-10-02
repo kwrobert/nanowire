@@ -21,7 +21,7 @@ def parse_file(path):
     height = sum((parser.getfloat('Parameters','nw_height'),
                   parser.getfloat('Parameters','substrate_t'),
                   parser.getfloat('Parameters','ito_t'),
-                  2*parser.getfloat('Parameters','air_t')))
+                  parser.getfloat('Parameters','air_t')))
     parser.set('Parameters','total_height',str(height))
     with open(path,'w') as conf_file:
         parser.write(conf_file)
@@ -120,7 +120,7 @@ def build_sim(conf):
     sim.SetRegionCircle(Layer='nanowire_sishell',Material='GaAs',Center=(0,0),Radius=core_rad)
     # Substrate layer and air transmission region
     sim.AddLayer(Name='substrate',Thickness=conf.getfloat('Parameters','substrate_t'),Material='GaAs')
-    sim.AddLayerCopy('air_below',Thickness=conf.getfloat('Parameters','air_t'),Layer='air') 
+    #sim.AddLayerCopy('air_below',Thickness=conf.getfloat('Parameters','air_t'),Layer='air') 
 
     # Set frequency
     f_phys = conf.getfloat("Parameters","frequency")

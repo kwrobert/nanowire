@@ -8,42 +8,59 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.cm as cmx
 import argparse as ap
 import os
-import configparser as confp 
-import glob
+
+def get_epsilon(freq,path):
+    """Returns complex dielectric constant for a material by pulling in nk text file, interpolating,
+    computing nk values at freq, and converting"""
+    # Get data
+    freq_vec,n_vec,k_vec = np.loadtxt(path,skiprows=1,unpack=True)
+    # Get n and k at specified frequency via interpolation 
+    f_n = interpolate.interp1d(freq_vec,n_vec)
+    f_k = interpolate.interp1d(freq_vec,k_vec)
+    n,k = f_n(freq),f_k(freq)
+    # Convert to dielectric constant
+    # NOTE!!: This assumes the relative magnetic permability (mew) is 1
+    epsilon_real = n**2 - k**2
+    epsilon_imag = 2*n*k
+    epsilon = complex(epsilon_real,epsilon_imag)
+    # NOTE: Include below in some sort of unit test later
+    #print("n = %f"%n)
+    #print("k = %f"%k)
+    #print('epsilon = {:.2f}'.format(epsilon))
+    #plt.plot(freq_vec,k_vec,'bs',freq_vec,f_k(freq_vec),'r--')
+    #plt.show()
+    return epsilon
 
 def calcnormE(data):
     #Ex = data[:,3] + 1j*data[:,6]
     #Ey = data[:,4] + 1j*data[:,7]
     #Ez = data[:,5] + 1j*data[:,8]
     #E_mag = np.sqrt(Ex*np.conj(Ex)+Ey*np.conj(Ey)+Ez*np.conj(Ez))
-    Ex = data[:,3]
-    Ey = data[:,4]
-    Ez = data[:,5]
-    E_mag = np.sqrt(Ex*Ex+Ey*Ey+Ez*Ez)
-    data = np.column_stack((data,E_mag.real))
+    E_mag = np.zeros_like(data[:,3])
+    for i in range(3,9):
+        E_mag += data[:,i]*data[:,i]
+    E_mag = np.sqrt(E_mag)
+    data = np.column_stack((data,E_mag))
     return data, E_mag
 
-def plot_sim():
+def plot_sim(p,save):
+    # Load the data
     data = np.loadtxt('test_fields.E')
     data, normE = calcnormE(data)
-    print(normE)
     np.savetxt('processed_data.txt',data)
-    pval = 50
-    mat = np.column_stack((data[:,0],data[:,1],data[:,2],data[:,3],data[:,4],normE))
+    # Planar plot of norm of E
+    pval = p['plane']
+    mat = np.column_stack((data[:,0],data[:,1],data[:,2],data[:,3],data[:,6],normE))
     planes = np.array([row for row in mat if row[0] == pval])
-    print(planes.shape)
-    dx = dy = .63/200
+    dx = p['L']/p['x_samp']
+    dy = p['L']/p['y_samp']
     x,y,z = np.unique(planes[:,0])*dx,np.unique(planes[:,1])*dy,np.unique(planes[:,2])
-    print(z.shape)
-    print(y.shape)
-    print(planes[:,-1].size)
     normE = planes[:,-1].reshape(z.shape[0],y.shape[0])
-    # Plot stuff
     colorsMap = 'jet' 
     cm = plt.get_cmap(colorsMap)
     cNorm = matplotlib.colors.Normalize(vmin=np.amin(normE), vmax=np.amax(normE))
     scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
-    fig = plt.figure(figsize=(9,7))
+    fig = plt.figure(1,figsize=(9,7))
     ax = fig.add_subplot(111)
     ax.pcolormesh(y, z, normE,cmap=cm,norm=cNorm,alpha=.5)
     scalarMap.set_array(normE)
@@ -56,90 +73,114 @@ def plot_sim():
     ax.xaxis.set_ticks(np.arange(start,end,0.1))
     start, end = ax.get_ylim()
     ax.yaxis.set_ticks(np.arange(start,end,0.1))
-    fig.suptitle('Electric field') 
+    fig.suptitle('Electric field Norm') 
+    if save:
+        plt.savefig('normE_plane_plot.pdf')
     plt.show()
-    
+    # Plot along line 
     line = np.array([row for row in mat if row[0] == pval and row[1] == pval])
-    print(line)
-    plt.plot(line[:,2],line[:,-2],'r-',label='Ex Real')
-    plt.plot(line[:,2],line[:,-1],'b-',label='Ey Real')
+    plt.figure(2)
+    plt.plot(line[:,2],line[:,-1],'b-')
+    plt.xlabel('z [um]')
+    plt.ylabel('norm E')
+    plt.title('Norm of Electric Field along Line')
+    plt.show()
+    if save:
+        plt.savefig('normE_line_plot.pdf')
+    plt.figure(3)
+    plt.plot(line[:,2],line[:,3],'r-',label='Ex Real')
+    plt.plot(line[:,2],line[:,-2],'b-',label='Ey Real')
     plt.legend()
+    plt.title('Real and Imag Components on Line')
+    if save:
+        plt.savefig('real_imag_line.pdf')
     plt.show()
 
-def run_air_sim():
-    sim = S4.New(Lattice=((.63,0),(0,.63)),NumBasis=550)
+def run_air_sim(p,m):
+    sim = S4.New(Lattice=((p['L'],0),(0,p['L'])),NumBasis=p['numbasis'])
     sim.SetOptions(Verbosity=2)
     sim.SetMaterial(Name='vacuum',Epsilon=complex(1.0,0.0))
-    sim.AddLayer(Name='air1',Thickness=.5,Material='vacuum')
-    sim.AddLayer(Name='air2',Thickness=.5,Material='vacuum')
+    sim.AddLayer(Name='air1',Thickness=p['layer_t'],Material='vacuum')
+    sim.AddLayer(Name='air2',Thickness=p['layer_t'],Material='vacuum')
     # Set frequency
-    f_phys = 3E14 
-    c_conv = constants.c/10E-6
+    f_phys = p['freq'] 
+    c_conv = constants.c*1E6
     f_conv = f_phys/c_conv
     print('f_phys = ',f_phys)
+    print('wavelength = ',(constants.c/f_phys)*1E6)
     print('f_conv = ',f_conv)
     sim.SetFrequency(f_conv)
     E_mag = 1.0 
-    sim.SetExcitationPlanewave(IncidenceAngles=(0,0),sAmplitude=complex(E_mag,0), pAmplitude=complex(0,E_mag))
-    x_samp = 200 
-    y_samp = 200 
-    z_samp = 200
-    height = 1.0   
+    sim.SetExcitationPlanewave(IncidenceAngles=(0,0),sAmplitude=complex(E_mag,0),
+            pAmplitude=complex(0,E_mag))
+    x_samp = p['x_samp'] 
+    y_samp = p['y_samp'] 
+    z_samp = p['z_samp']
+    height = p['layer_t']*2   
     for z in np.linspace(0,height,z_samp):
         sim.GetFieldsOnGrid(z,NumSamples=(x_samp,y_samp),
                             Format='FileAppend',BaseFilename='test_fields')
 
-def run_airito_sim():
-    sim = S4.New(Lattice=((.63,0),(0,.63)),NumBasis=25)
+def run_airito_sim(p,m):
+    sim = S4.New(Lattice=((p['L'],0),(0,p['L'])),NumBasis=p['numbasis'])
     sim.SetOptions(Verbosity=2)
     sim.SetMaterial(Name='vacuum',Epsilon=complex(1.0,0.0))
-    sim.SetMaterial(Name='ito',Epsilon=complex(2.0766028416,0.100037324))
-    sim.AddLayer(Name='air1',Thickness=.5,Material='vacuum')
-    sim.AddLayer(Name='ito',Thickness=.5,Material='ito')
+    eps = get_epsilon(p['freq'],m['ito'])
+    sim.SetMaterial(Name='ito',Epsilon=eps)
+    sim.AddLayer(Name='air1',Thickness=p['layer_t'],Material='vacuum')
+    sim.AddLayer(Name='ito',Thickness=p['layer_t'],Material='ito')
+    sim.AddLayerCopy('air2',Thickness=p['layer_t'],Layer='air1')
     # Set frequency
-    f_phys = 3E14 
-    c_conv = constants.c/10E-6
+    f_phys = p['freq'] 
+    c_conv = constants.c*1E6
     f_conv = f_phys/c_conv
     print('f_phys = ',f_phys)
+    print('wavelength = ',(constants.c/f_phys)*1E6)
     print('f_conv = ',f_conv)
     sim.SetFrequency(f_conv)
     E_mag = 1.0 
-    sim.SetExcitationPlanewave(IncidenceAngles=(0,0),sAmplitude=complex(E_mag,0), pAmplitude=complex(0,E_mag))
-    x_samp = 200 
-    y_samp = 200 
-    z_samp = 200
-    height = 1.0   
+    sim.SetExcitationPlanewave(IncidenceAngles=(0,0),sAmplitude=complex(E_mag,0),
+            pAmplitude=complex(0,E_mag))
+    x_samp = p['x_samp'] 
+    y_samp = p['y_samp'] 
+    z_samp = p['z_samp']
+    height = p['layer_t']*3  
     for z in np.linspace(0,height,z_samp):
         sim.GetFieldsOnGrid(z,NumSamples=(x_samp,y_samp),
                             Format='FileAppend',BaseFilename='test_fields')
 
-def run_airitosub_sim():
-    sim = S4.New(Lattice=((.63,0),(0,.63)),NumBasis=25)
+def run_airitosub_sim(p,m):
+    sim = S4.New(Lattice=((p['L'],0),(0,p['L'])),NumBasis=p['numbasis'])
     sim.SetOptions(Verbosity=2)
     sim.SetMaterial(Name='vacuum',Epsilon=complex(1.0,0.0))
-    sim.SetMaterial(Name='ito',Epsilon=complex(2.0766028416,0.100037324))
-    sim.SetMaterial(Name='gaas',Epsilon=complex(3.5384,0.0))
-    sim.AddLayer(Name='air1',Thickness=.5,Material='vacuum')
-    sim.AddLayer(Name='ito',Thickness=.5,Material='ito')
-    sim.AddLayer(Name='gaas',Thickness=.5,Material='gaas')
+    eps = get_epsilon(p['freq'],m['ito'])
+    sim.SetMaterial(Name='ito',Epsilon=eps)
+    eps = get_epsilon(p['freq'],m['gaas'])
+    sim.SetMaterial(Name='gaas',Epsilon=eps)
+    sim.AddLayer(Name='air1',Thickness=p['layer_t'],Material='vacuum')
+    sim.AddLayer(Name='ito',Thickness=p['layer_t'],Material='ito')
+    sim.AddLayer(Name='gaas',Thickness=p['layer_t'],Material='gaas')
+    sim.AddLayerCopy('air2',Thickness=p['layer_t'],Layer='air1')
     # Set frequency
-    f_phys = 3E14 
-    c_conv = constants.c/10E-6
+    f_phys = p['freq'] 
+    c_conv = constants.c*1E6
     f_conv = f_phys/c_conv
     print('f_phys = ',f_phys)
+    print('wavelength = ',(constants.c/f_phys)*1E6)
     print('f_conv = ',f_conv)
     sim.SetFrequency(f_conv)
     E_mag = 1.0 
-    sim.SetExcitationPlanewave(IncidenceAngles=(0,0),sAmplitude=complex(E_mag,0), pAmplitude=complex(0,E_mag))
-    x_samp = 200 
-    y_samp = 200 
-    z_samp = 200
-    height = 1.5   
+    sim.SetExcitationPlanewave(IncidenceAngles=(0,0),sAmplitude=complex(E_mag,0),
+            pAmplitude=complex(0,0))
+    x_samp = p['x_samp'] 
+    y_samp = p['y_samp'] 
+    z_samp = p['z_samp']
+    height = p['layer_t']*4 
     for z in np.linspace(0,height,z_samp):
         sim.GetFieldsOnGrid(z,NumSamples=(x_samp,y_samp),
                             Format='FileAppend',BaseFilename='test_fields')
 
-def run_airitowiresub_sim():
+def run_airitowiresub_sim(params):
     sim = S4.New(Lattice=((.63,0),(0,.63)),NumBasis=25)
     sim.SetOptions(Verbosity=2)
     sim.SetMaterial(Name='vacuum',Epsilon=complex(1.0,0.0))
@@ -156,6 +197,7 @@ def run_airitowiresub_sim():
     c_conv = constants.c/10E-6
     f_conv = f_phys/c_conv
     print('f_phys = ',f_phys)
+    print('wavelength = ',(constants.c/f_phys)*10E6)
     print('f_conv = ',f_conv)
     sim.SetFrequency(f_conv)
     E_mag = 1.0 
@@ -169,9 +211,42 @@ def run_airitowiresub_sim():
                             Format='FileAppend',BaseFilename='test_fields')
 
 def main():
-    run_airitowiresub_sim()
-    print('Finished sim')
-    plot_sim()
-    
+    parser = ap.ArgumentParser(description="""Sanity check for S4 library""")
+    parser.add_argument('--air',action='store_true',help="Run air simulation")
+    parser.add_argument('--ito',action='store_true',help="Run air-ito simulation")
+    parser.add_argument('--sub',action='store_true',help="Run air-ito-substrate simulation")
+    parser.add_argument('--save_plots',action='store_true',help="Save all generated plots")
+    args = parser.parse_args()
+
+    params = {'freq':3E14,'layer_t':.5,'L':.25,'x_samp':50,'y_samp':50,'z_samp':600,'numbasis':200}
+    plane = params['x_samp']/2
+    params['plane'] = plane
+    mats = {'ito':'/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/008_ITO_nk_Hz.txt',
+            'gaas':'/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/006_GaAs_nk_Walker_modified_Hz.txt'}
+    os.mkdir('sanity_check_run')
+    basedir = os.path.join(os.getcwd(),'sanity_check_run')
+    if args.air:
+        path = os.path.join(basedir,'air_sim')
+        os.mkdir(path)
+        os.chdir(path)
+        run_air_sim(params,mats)
+        print('Finished air sim')
+        plot_sim(params,args.save_plots)
+        os.chdir(basedir)
+    if args.ito:
+        path = os.path.join(basedir,'ito_sim')
+        os.mkdir(path)
+        os.chdir(path)
+        run_airito_sim(params,mats)
+        print('Finished ito sim')
+        plot_sim(params,args.save_plots)
+    if args.sub:
+        path = os.path.join(basedir,'sub_sim')
+        os.mkdir(path)
+        os.chdir(path)
+        run_airitosub_sim(params,mats)
+        print('Finished ito sim')
+        plot_sim(params,args.save_plots)
+
 if __name__ == '__main__':
     main()

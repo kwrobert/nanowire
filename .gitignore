@@ -1,4 +1,5 @@
 *.tar
+__pycache__/
 *.zip
 *.png
 *.swp

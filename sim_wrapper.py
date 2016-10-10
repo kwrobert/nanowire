@@ -119,7 +119,7 @@ def run_single_sim(conf,conf_path):
     # Copy sim script to sim dir
     script = os.path.join(path,'s4_sim.py')
     if not os.path.exists(script):
-        shutil.copyfile('s4_sim.py',script)
+        shutil.copyfile(conf.get('General','sim_script'),script)
     # Move into sim dir and run the sim
     os.chdir(path)
     workdir = os.path.basename(basedir)
@@ -168,7 +168,7 @@ def run_sweep(conf):
     keys = list(optionValues.keys())
     # Consuming a list of lists/tuples where each inner list/tuple contains all the values for a
     # particular parameter, returns a list of tuples containing all the unique combos for that
-    # parameter  
+    # set of parameters 
     combos=list(itertools.product(*valuelist))
     log.debug('The list of parameter combos: %s',str(combos))
     # If we are running sims in parallel, need to store running Popen instances
@@ -225,7 +225,7 @@ def run_sweep(conf):
        
         script = os.path.join(basedir,'s4_sim.py')
         if not os.path.exists(script):
-            shutil.copyfile('s4_sim.py',script)
+            shutil.copyfile(sim_conf.get('General','sim_script'),script)
         os.chdir(fullpath)
         log.info("Starting simulation for %s ....",workdir)
         proc = start_sim(script,"sim_conf.ini")
@@ -249,24 +249,9 @@ def run_optimization(conf):
     log = logging.getLogger('sim_wrapper')
     log.info("Running optimization")
 
-def main():
-
-    parser = ap.ArgumentParser(description="""A wrapper around s4_sim.py to automate parameter
-            sweeps, optimization, directory organization, postproccessing, etc.""")
-    parser.add_argument('config_file',type=str,help="""Absolute path to the INI file
-    specifying how you want this wrapper to behave""")
-    parser.add_argument('--log_level',type=str,default='info',choices=['debug','info','warning','error','critical'],
-                        help="""Logging level for the run""")
-    args = parser.parse_args()
-
-    if os.path.isfile(args.config_file):
-        conf = parse_file(os.path.abspath(args.config_file))
-    else:
-        print("\n The file you specified does not exist! \n")
-        quit()
-
+def run(conf,log):
     # Configure logger
-    logger = configure_logger(args.log_level,'sim_wrapper',
+    logger = configure_logger(log,'sim_wrapper',
                               os.path.join(conf.get('General','basedir'),'logs'),
                               'sim_wrapper.log')
     
@@ -291,6 +276,33 @@ def main():
         os.chdir('../')
         out,err = sh('python3 ./postprocess.py setup.ini')
         print(err) 
+
+def pre_check(conf):
+    """Checks conf file for invalid values"""
+    if not os.path.isfile(conf.get('General','sim_script')):
+        print('You need to change the sim_script entry in the [General] section of your config \
+        file')
+        quit()
+    # TODO: Add checks between specified x,y,z samples and plane vals in plotting section
+
+def main():
+
+    parser = ap.ArgumentParser(description="""A wrapper around s4_sim.py to automate parameter
+            sweeps, optimization, directory organization, postproccessing, etc.""")
+    parser.add_argument('config_file',type=str,help="""Absolute path to the INI file
+    specifying how you want this wrapper to behave""")
+    parser.add_argument('--log_level',type=str,default='info',choices=['debug','info','warning','error','critical'],
+                        help="""Logging level for the run""")
+    args = parser.parse_args()
+
+    if os.path.isfile(args.config_file):
+        conf = parse_file(os.path.abspath(args.config_file))
+    else:
+        print("\n The file you specified does not exist! \n")
+        quit()
+
+    pre_check(conf)
+    run(conf,args.log_level)
 
 if __name__ == '__main__':
     main()

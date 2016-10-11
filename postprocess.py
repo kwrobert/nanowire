@@ -316,59 +316,46 @@ class Global_Cruncher(Cruncher):
             mse = np.sum((x-y)**2)/x.size
             return mse
 
-    def mean_squared_error(self,field,rel=False,sim_ind=0,normalize=False):
+    def mean_squared_error(self,field):
         """A wrapper to calculate the mean squared error between the fields of adjacent simulations for a run
         and write the results to a file"""
         self.log.info('Running the mean squared error wrapper for quantity %s',field) 
-        with open(os.path.join(self.gconf.get('General','basedir'),'mse_%s.dat'%field),'w') as errfile:
-            # If we want to normalize errors, get data from desired normalizing sim
-            if normalize:
-                self.sim = self.sims[int(sim_ind)]
+        for group in self.sim_groups:
+            base = group[0].get('General','basedir')
+            with open(os.path.join(base,'mse_%s.dat'%field),'w') as errfile:
+                # Compare all other sims to our best estimate, which is sim with highest number of
+                # basis terms (last in list cuz sorting)
+                self.sim = group[-1]
                 self.get_data()
-            # Get the proper file extension depending on the field. Also, if we are normalizing make
-            # sure we take the average of the correct field
-            if field == 'E':
-                ext = '.E'
-                if normalize:
+                # Get the proper file extension depending on the field.
+                if field == 'E':
+                    ext = '.E'
                     vec = self.normEsquared()
                     avg = np.mean(vec)
-            elif field == 'H':
-                ext = '.H'
-                if normalize:
+                    # Get the comparison vector
+                    vec1 = self.e_data[:,3:9]
+                elif field == 'H':
+                    ext = '.H'
                     vec = self.normHsquared()
                     avg = np.mean(vec)
-            else:
-                self.log.error('The quantity for which you want to compute the error has not yet been calculated')
-                quit()
-            # Determine the proper starting point for the for loop below
-            if rel:
-                start = 0
-            else:
-                start = 1
-                
-            for i in range(start,len(self.sims)):
-                if rel:
-                    sim1 = self.sims[int(sim_ind)]
+                    vec1 = self.h_data[:,3:9]
                 else:
-                    sim1 = self.sims[i-1]
-                sim2 = self.sims[i]
-                path1 = os.path.join(sim1.get('General','sim_dir'),
-                                     sim1.get('General','base_name')+ext)
-                path2 = os.path.join(sim2.get('General','sim_dir'),
-                                     sim2.get('General','base_name')+ext)
-                vec1 = np.loadtxt(path1,usecols=range(3,9))
-                vec2 = np.loadtxt(path2,usecols=range(3,9))
-                #self.log.info("%s \n %s",str(vec1),str(vec2))
-                self.log.info("Computing error between %s and %s",
-                              os.path.basename(sim1.get('General','sim_dir')),
-                              os.path.basename(sim2.get('General','sim_dir')))
-                if normalize:
+                    self.log.error('The quantity for which you want to compute the error has not yet been calculated')
+                    quit()
+                   
+                # For all other sims in the groups, compare to best estimate and write to error file 
+                for i in range(0,len(group)-1):
+                    sim2 = self.sims[i]
+                    path2 = os.path.join(sim2.get('General','sim_dir'),
+                                         sim2.get('General','base_name')+ext)
+                    vec2 = np.loadtxt(path2,usecols=range(3,9))
+                    #self.log.info("%s \n %s",str(vec1),str(vec2))
+                    self.log.info("Computing error between numbasis %i and numbasis %i",
+                                  self.sim.getint('Parameters','numbasis'),
+                                  sim2.getint('Parameters','numbasis'))
                     error = self.mse(vec1,vec2)/avg
-                else:
-                    error = self.mse(vec1,vec2)
-                self.log.info(str(error))
-                errfile.write('%s-%s,%f\n'%(os.path.basename(sim1.get('General','sim_dir')),
-                                            os.path.basename(sim2.get('General','sim_dir')),error))
+                    self.log.info(str(error))
+                    errfile.write('%i,%f\n'%(sim2.getint('Parameters','numbasis'),error))
 
 class Plotter(Processor):
     """Plots all the things listed in the config file"""
@@ -659,30 +646,31 @@ class Global_Plotter(Plotter):
     def convergence(self,quantity,scale='linear'):
         """Plots the convergence of a field across all available simulations"""
         self.log.info('Actually plotting convergence')
-        path = os.path.join(self.gconf.get('General','basedir'),'mse_%s.dat'%quantity) 
-        labels = []
-        errors = []
-        with open(path,'r') as datf:
-            for line in datf.readlines():
-                lab, err = line.split(',')
-                labels.append(lab)
-                errors.append(err)
-        x = range(len(errors))
-        fig = plt.figure(figsize=(9,7))
-        plt.ylabel('M.S.E of %s'%quantity)
-        plt.plot(range(len(errors)),errors,linestyle='-',marker='o',color='b')
-        plt.yscale(scale)
-        plt.xticks(x,labels,rotation='vertical')
-        plt.tight_layout()
-        plt.title(os.path.basename(self.gconf.get('General','basedir')))
-        if self.gconf.getboolean('General','save_plots'):
-            basedir = self.gconf.get('General','basedir')
-            name = os.path.basename(basedir)+'_convergence_'+quantity+'.pdf'
-            path = os.path.join(basedir,name)
-            fig.savefig(path)
-        if self.gconf.getboolean('General','show_plots'):
-            plt.show() 
-        plt.close(fig)
+        for group in self.sim_groups:
+            base = group[0].get('General','basedir')
+            path = os.path.join(base,'mse_%s.dat'%quantity) 
+            labels = []
+            errors = []
+            with open(path,'r') as datf:
+                for line in datf.readlines():
+                    lab, err = line.split(',')
+                    labels.append(lab)
+                    errors.append(err)
+            x = range(len(errors))
+            fig = plt.figure(figsize=(9,7))
+            plt.ylabel('M.S.E of %s'%quantity)
+            plt.plot(labels,errors,linestyle='-',marker='o',color='b')
+            plt.yscale(scale)
+            #plt.xticks(x,labels,rotation='vertical')
+            plt.tight_layout()
+            plt.title(os.path.basename(self.gconf.get('General','basedir')))
+            if self.gconf.getboolean('General','save_plots'):
+                name = os.path.basename(base)+'_convergence_'+quantity+'.pdf'
+                path = os.path.join(base,name)
+                fig.savefig(path)
+            if self.gconf.getboolean('General','show_plots'):
+                plt.show() 
+            plt.close(fig)
 
 def main():
     parser = ap.ArgumentParser(description="""A wrapper around s4_sim.py to automate parameter

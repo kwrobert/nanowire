@@ -659,11 +659,12 @@ class Global_Plotter(Plotter):
             x = range(len(errors))
             fig = plt.figure(figsize=(9,7))
             plt.ylabel('M.S.E of %s'%quantity)
+            plt.xlabel('Number of Fourier Terms')
             plt.plot(labels,errors,linestyle='-',marker='o',color='b')
             plt.yscale(scale)
             #plt.xticks(x,labels,rotation='vertical')
             plt.tight_layout()
-            plt.title(os.path.basename(self.gconf.get('General','basedir')))
+            plt.title(os.path.basename(base))
             if self.gconf.getboolean('General','save_plots'):
                 name = os.path.basename(base)+'_convergence_'+quantity+'.pdf'
                 path = os.path.join(base,name)

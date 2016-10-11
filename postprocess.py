@@ -67,11 +67,9 @@ class Processor(object):
         #        simdirs.append(os.path.join(base,adir))
         #self.sims = [parse_file(os.path.join(simdir,'sim_conf.ini')) for simdir in simdirs]
         self.collect_sims()
-        self.log.debug('Sims before sorting: %s',str(self.sims))
         # Sort on the sim dir to prevent weirdness when calculating convergence. Sorts by ascending
         # param values and works for multiple variable params
         self.sort_sims()
-        self.log.debug('Sims after sorting: %s',str(self.sims))
         self.sim = None
     
     def collect_sims(self):

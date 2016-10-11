@@ -18,6 +18,17 @@ def parse_file(path):
         parser.readfp(config_file)
     return parser
 
+def copy_conf_obj(old):
+    from io import StringIO
+    config_string = StringIO()
+    old.write(config_string)
+    # We must reset the buffer ready for reading.
+    config_string.seek(0) 
+    new_config = confp.ConfigParser()
+    new_config.optionxform = str
+    new_config.read_file(config_string)
+    return new_config
+
 def configure_logger(level,logger_name,log_dir,logfile):
     # Get numeric level safely
     numeric_level = getattr(logging, level.upper(), None)
@@ -138,7 +149,6 @@ def run_sweep(conf):
     log.debug("Option values dict before processing: %s",str(optionValues))
     for key, value in optionValues.items():
         # determine if we have floats or ints
-        print(value)
         if value.find('.') != -1 or value.find('E') != -1:
             type_converter = lambda x: float(x)
         else:
@@ -244,7 +254,75 @@ def run_sweep(conf):
                 poll_procs(procs)
         os.chdir(basedir)
     poll_procs(procs)
-        
+
+def run_sorted_sweep(conf):
+    # Get access to logger
+    log = logging.getLogger('sim_wrapper')
+    log.info("Running sorted parameter sweep ...")
+    opts = conf.items("Sorting Parameters")
+    log.debug('Opts before sorting: %s',str(opts))
+    # TODO: This should really be in pre_check()
+    if not all([len(x[1].split(';')) == 2 for x in opts]):
+        print("You forgot to add a sorting key to one of your sorting parameters")
+        quit()
+    sort_opts = sorted(opts,key = lambda tup: tup[-1].split(';')[-1])
+    log.debug('Opts after sorting: %s',str(sort_opts))
+    # Done with the sorting keys so we can discard them
+    sort_opts = [(tup[0],tup[1][0:tup[1].find(';')]) for tup in sort_opts]
+    
+    optionValues = []
+    for opt,values in sort_opts:
+        # determine if we have floats or ints
+        if values.find('.') != -1 or values.find('E') != -1:
+            type_converter = lambda x: float(x)
+        else:
+            type_converter = lambda x: int(x)
+        # Now we determine if we have a range or if we have actually included the values
+        if values.find(':') != -1:
+            
+            # Parse the range string
+            dataRange = values.split(':')
+            dataMin,dataMax,dataStep = list(map(type_converter,dataRange))
+
+            # construct the option list (handles ints and floats)
+            vals = [dataMin]
+            while vals[-1] < dataMax:
+                vals.append(vals[-1]+dataStep)
+            # assign the option list
+            optionValues.append(vals)
+        else:
+            # store the typed out values
+            vals = values.split(',')
+            vals = list(map(type_converter,vals))
+            optionValues.append(vals) 
+    log.debug('Processed option values list: %s',str(optionValues))
+    # Make all the leaf directories
+    for combo in itertools.product(*optionValues):
+        # Copy global config object
+        sub_conf = copy_conf_obj(conf)
+        # Remove sorting param section
+        sub_conf.remove_section('Sorting Parameters')
+        # Build path and add params to new config object
+        path = conf.get('General','basedir')
+        for i in range(len(combo)):
+            sub_conf.set('Fixed Parameters',sort_opts[i][0],str(combo[i]))
+            if isinstance(combo[i],float) and combo[i] >= 10000:
+                subdir = '{}_{:.4E}'.format(sort_opts[i][0],combo[i])
+                path = os.path.join(path,subdir)
+            else:
+                subdir = '{}_{:.2f}'.format(sort_opts[i][0],combo[i])
+                path = os.path.join(path,subdir)
+        try:
+            os.makedirs(path)
+        except OSError:
+            pass
+        log.info("Created subdir %s",path)
+        sub_conf.set('General','basedir',path)
+        with open(os.path.join(path,'sorted_sweep_conf.ini'),'w') as conf_file:
+            sub_conf.write(conf_file) 
+        log.info('Running variable param sweep in %s',path)
+        run_sweep(sub_conf)
+
 def run_optimization(conf):
     log = logging.getLogger('sim_wrapper')
     log.info("Running optimization")
@@ -261,8 +339,12 @@ def run(conf,log):
         run_single_sim(conf,os.path.abspath(args.config_file))
     # If all the variable params have ranges specified, do a parameter sweep
     elif all(list(zip(*conf.items("Variable Parameters")))[1]):
-        logger.debug('Entering sweep function from main')
-        run_sweep(conf)
+        if all(list(zip(*conf.items('Sorting Parameters')))[1]):
+            logger.debug('Entering sorted sweep function from main')
+            run_sorted_sweep(conf)
+        else:
+            logger.debug('Entering sweep function from main')
+            run_sweep(conf)
     # If we have specified variable params without ranges, we need to optimize them
     elif not all(list(zip(*conf.items("Variable Parameters")))[1]):
         logger.debug('Entering optimization function from main')
@@ -271,11 +353,12 @@ def run(conf,log):
         logger.error('Unsupported configuration for a simulation run. Not a single sim, sweep, or \
         optimization')
 
-    if conf.getboolean('General','postprocess') == True:
-        os.chdir(conf.get('General','basedir'))
-        os.chdir('../')
-        out,err = sh('python3 ./postprocess.py setup.ini')
-        print(err) 
+    # Need to fix this cuz its currently broken
+    #if conf.getboolean('General','postprocess') == True:
+    #    os.chdir(conf.get('General','basedir'))
+    #    os.chdir('../')
+    #    out,err = sh('python3 ./postprocess.py setup.ini')
+    #    print(err) 
 
 def pre_check(conf):
     """Checks conf file for invalid values"""

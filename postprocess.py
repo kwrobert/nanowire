@@ -60,18 +60,32 @@ class Processor(object):
         self.log.debug("Processor base init")
         self.gconf = global_conf
         exclude = set(['logs'])
-        base = self.gconf.get('General','basedir')
-        simdirs = []
-        for adir in os.listdir(base):
-            if os.path.isdir(os.path.join(base,adir)) and adir not in exclude:
-                simdirs.append(os.path.join(base,adir))
-        self.sims = [parse_file(os.path.join(simdir,'sim_conf.ini')) for simdir in simdirs]
+        #base = self.gconf.get('General','basedir')
+        #simdirs = []
+        #for adir in os.listdir(base):
+        #    if os.path.isdir(os.path.join(base,adir)) and adir not in exclude:
+        #        simdirs.append(os.path.join(base,adir))
+        #self.sims = [parse_file(os.path.join(simdir,'sim_conf.ini')) for simdir in simdirs]
+        self.collect_sims()
         self.log.debug('Sims before sorting: %s',str(self.sims))
         # Sort on the sim dir to prevent weirdness when calculating convergence. Sorts by ascending
         # param values and works for multiple variable params
         self.sort_sims()
         self.log.debug('Sims after sorting: %s',str(self.sims))
         self.sim = None
+    
+    def collect_sims(self):
+        self.sims = []
+        self.sim_groups = []
+        for root,dirs,files in os.walk(self.gconf.get('General','basedir')):
+            if 'sim_conf.ini' in files:
+                obj = parse_file(os.path.join(root,'sim_conf.ini'))
+                self.sims.append(obj)
+            if 'sorted_sweep_conf.ini' in files:
+                conf_paths = [os.path.join(root,simdir,'sim_conf.ini') for simdir in dirs]
+                self.log.debug('Sim group confs: %s',str(conf_paths))
+                self.sim_groups.append(list(map(parse_file,conf_paths)))
+                self.log.debug('Sim groups: %s',str(self.sim_groups))
 
     def sort_sims(self):
         """Sorts simulations by their parameters the way a human would. Called human sorting or
@@ -82,8 +96,15 @@ class Processor(object):
         def natural_keys(sim):
             text = sim.get('General','sim_dir')
             return [ atoi(c) for c in re.split('(\d+)', text) ]
+
         self.sims.sort(key=natural_keys)
-    
+        for group in self.sim_groups:
+            paths = [c.get('General','sim_dir') for c in group]
+            self.log.debug('Group paths before sorting: %s',str(paths))
+            group.sort(key=natural_keys)
+            paths = [c.get('General','sim_dir') for c in group]
+            self.log.debug('Group paths after sorting: %s',str(paths))
+
     def get_data(self):
         """Gets the E and H data for this particular sim"""
         sim_path = self.sim.get('General','sim_dir')
@@ -469,11 +490,11 @@ class Plotter(Processor):
                     yv = [bottom,top]
                     line = mlines.Line2D(xv,yv,linestyle='solid',linewidth=2.0,color='black')
                     ax.add_line(line)
-        if self.gconf.get('General','save_plots'):
+        if self.gconf.getboolean('General','save_plots'):
             name = labels[-1]+'_'+ptype+'.pdf'
             path = os.path.join(self.sim.get('General','sim_dir'),name)
             fig.savefig(path)
-        if self.gconf.get('General','show_plots'):
+        if self.gconf.getboolean('General','show_plots'):
             plt.show()
         plt.close(fig)
 
@@ -542,11 +563,11 @@ class Plotter(Processor):
         ax.set_ylabel(labels[1])
         ax.set_zlabel(labels[2])
         fig.suptitle(os.path.basename(self.sim.get('General','sim_dir')))
-        if self.gconf.get('General','save_plots'):
+        if self.gconf.getboolean('General','save_plots'):
             name = labels[-1]+'_'+ptype+'.pdf'
             path = os.path.join(self.sim.get('General','sim_dir'),name)
             fig.savefig(path)
-        if self.gconf.get('General','show_plots'):
+        if self.gconf.getboolean('General','show_plots'):
             plt.show()
         plt.close(fig)
     
@@ -591,11 +612,11 @@ class Plotter(Processor):
         plt.xlabel(labels[0])
         plt.ylabel(labels[1])
         plt.title(os.path.basename(self.sim.get('General','sim_dir')))
-        if self.gconf.get('General','save_plots'):
+        if self.gconf.getboolean('General','save_plots'):
             name = labels[-1]+'_'+ptype+'.pdf'
             path = os.path.join(self.sim.get('General','sim_dir'),name)
             fig.savefig(path)
-        if self.gconf.get('General','show_plots'):
+        if self.gconf.getboolean('General','show_plots'):
             plt.show()
         plt.close(fig)
 
@@ -654,12 +675,12 @@ class Global_Plotter(Plotter):
         plt.xticks(x,labels,rotation='vertical')
         plt.tight_layout()
         plt.title(os.path.basename(self.gconf.get('General','basedir')))
-        if self.gconf.get('General','save_plots'):
+        if self.gconf.getboolean('General','save_plots'):
             basedir = self.gconf.get('General','basedir')
             name = os.path.basename(basedir)+'_convergence_'+quantity+'.pdf'
             path = os.path.join(basedir,name)
             fig.savefig(path)
-        if self.gconf.get('General','show_plots'):
+        if self.gconf.getboolean('General','show_plots'):
             plt.show() 
         plt.close(fig)
 

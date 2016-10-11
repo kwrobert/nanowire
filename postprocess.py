@@ -80,7 +80,7 @@ class Processor(object):
                 obj = parse_file(os.path.join(root,'sim_conf.ini'))
                 self.sims.append(obj)
             if 'sorted_sweep_conf.ini' in files:
-                log.remove('dirs')
+                dirs.remove('logs')
                 conf_paths = [os.path.join(root,simdir,'sim_conf.ini') for simdir in dirs]
                 self.log.debug('Sim group confs: %s',str(conf_paths))
                 self.sim_groups.append(list(map(parse_file,conf_paths)))
@@ -321,6 +321,7 @@ class Global_Cruncher(Cruncher):
         self.log.info('Running the mean squared error wrapper for quantity %s',field) 
         for group in self.sim_groups:
             base = group[0].get('General','basedir')
+            log.info('Computing error for sweep %s',base)
             with open(os.path.join(base,'mse_%s.dat'%field),'w') as errfile:
                 # Compare all other sims to our best estimate, which is sim with highest number of
                 # basis terms (last in list cuz sorting)
@@ -344,7 +345,7 @@ class Global_Cruncher(Cruncher):
                    
                 # For all other sims in the groups, compare to best estimate and write to error file 
                 for i in range(0,len(group)-1):
-                    sim2 = self.sims[i]
+                    sim2 = group[i]
                     path2 = os.path.join(sim2.get('General','sim_dir'),
                                          sim2.get('General','base_name')+ext)
                     vec2 = np.loadtxt(path2,usecols=range(3,9))

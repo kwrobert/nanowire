@@ -321,7 +321,7 @@ class Global_Cruncher(Cruncher):
         self.log.info('Running the mean squared error wrapper for quantity %s',field) 
         for group in self.sim_groups:
             base = group[0].get('General','basedir')
-            log.info('Computing error for sweep %s',base)
+            self.log.info('Computing error for sweep %s',base)
             with open(os.path.join(base,'mse_%s.dat'%field),'w') as errfile:
                 # Compare all other sims to our best estimate, which is sim with highest number of
                 # basis terms (last in list cuz sorting)

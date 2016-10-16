@@ -138,7 +138,10 @@ def build_sim(conf):
     # circular polarization has j in front of y component. Magnitudes are the same. This means
     # E-field vector rotates clockwise when observed from POV of source. Left handed =
     # counterclockwise. 
-    sim.SetExcitationPlanewave(IncidenceAngles=(0,0),sAmplitude=complex(E_mag,0), pAmplitude=complex(0,E_mag))
+    # In S4, if indicent angles are 0, p-polarization is along x-axis. The minus sign on front of the 
+    # x magnitude is just to get things to look like Anna's simulations.
+    sim.SetExcitationPlanewave(IncidenceAngles=(0,0),sAmplitude=complex(E_mag,0),
+            pAmplitude=complex(0,-E_mag))
     #sim.OutputLayerPatternPostscript(Layer='nanowire',Filename='out.ps')
     #sim.OutputStructurePOVRay(Filename='out.pov')
     E_layers = []

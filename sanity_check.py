@@ -48,54 +48,67 @@ def plot_sim(p,save):
     data = np.loadtxt('test_fields.E')
     data, normE = calcnormE(data)
     np.savetxt('processed_data.txt',data)
-    # Planar plot of norm of E
+    ## Planar plot of norm of E
     pval = p['plane']
-    mat = np.column_stack((data[:,0],data[:,1],data[:,2],data[:,3],data[:,6],normE))
-    planes = np.array([row for row in mat if row[0] == pval])
-    dx = p['L']/p['x_samp']
-    dy = p['L']/p['y_samp']
-    x,y,z = np.unique(planes[:,0])*dx,np.unique(planes[:,1])*dy,np.unique(planes[:,2])
-    normE = planes[:,-1].reshape(z.shape[0],y.shape[0])
-    colorsMap = 'jet' 
-    cm = plt.get_cmap(colorsMap)
-    cNorm = matplotlib.colors.Normalize(vmin=np.amin(normE), vmax=np.amax(normE))
-    scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
-    fig = plt.figure(1,figsize=(9,7))
-    ax = fig.add_subplot(111)
-    ax.pcolormesh(y, z, normE,cmap=cm,norm=cNorm,alpha=.5)
-    scalarMap.set_array(normE)
-    cb = fig.colorbar(scalarMap)
-    labels = ('y','z','normE')
-    cb.set_label(labels[-1])
-    ax.set_xlabel(labels[0])
-    ax.set_ylabel(labels[1])
-    start, end = ax.get_xlim()
-    ax.xaxis.set_ticks(np.arange(start,end,0.1))
-    start, end = ax.get_ylim()
-    ax.yaxis.set_ticks(np.arange(start,end,0.1))
-    fig.suptitle('Electric field Norm') 
-    if save:
-        plt.savefig('normE_plane_plot.pdf')
-    plt.show()
+    mat = np.column_stack((data,normE))
+    #planes = np.array([row for row in mat if row[0] == pval])
+    #dx = p['L']/p['x_samp']
+    #dy = p['L']/p['y_samp']
+    #x,y,z = np.unique(planes[:,0])*dx,np.unique(planes[:,1])*dy,np.unique(planes[:,2])
+    #normE = planes[:,-1].reshape(z.shape[0],y.shape[0])
+    #colorsMap = 'jet' 
+    #cm = plt.get_cmap(colorsMap)
+    #cNorm = matplotlib.colors.Normalize(vmin=np.amin(normE), vmax=np.amax(normE))
+    #scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
+    #fig = plt.figure(1,figsize=(9,7))
+    #ax = fig.add_subplot(111)
+    #ax.pcolormesh(y, z, normE,cmap=cm,norm=cNorm,alpha=.5)
+    #scalarMap.set_array(normE)
+    #cb = fig.colorbar(scalarMap)
+    #labels = ('y','z','normE')
+    #cb.set_label(labels[-1])
+    #ax.set_xlabel(labels[0])
+    #ax.set_ylabel(labels[1])
+    #start, end = ax.get_xlim()
+    #ax.xaxis.set_ticks(np.arange(start,end,0.1))
+    #start, end = ax.get_ylim()
+    #ax.yaxis.set_ticks(np.arange(start,end,0.1))
+    #fig.suptitle('Electric field Norm') 
+    #if save:
+    #    plt.savefig('normE_plane_plot.pdf')
+    #plt.show()
     # Plot along line 
     line = np.array([row for row in mat if row[0] == pval and row[1] == pval])
-    plt.figure(2)
-    plt.plot(line[:,2],line[:,-1],'b-')
-    plt.xlabel('z [um]')
-    plt.ylabel('norm E')
-    plt.title('Norm of Electric Field along Line')
-    plt.show()
-    if save:
-        plt.savefig('normE_line_plot.pdf')
+    #plt.figure(2)
+    #plt.plot(line[:,2],line[:,-1],'b-')
+    #plt.xlabel('z [um]')
+    #plt.ylabel('norm E')
+    #plt.title('Norm of Electric Field along Line')
+    #plt.show()
+    #if save:
+    #    plt.savefig('normE_line_plot.pdf')
+    # Plot real and imaginary components
     plt.figure(3)
     plt.plot(line[:,2],line[:,3],'r-',label='Ex Real')
-    plt.plot(line[:,2],line[:,-2],'b-',label='Ey Real')
+    plt.plot(line[:,2],line[:,5],'b-',label='Ey Real')
+    #plt.plot(line[:,2],line[:,4],'g-',label='Ex Imag')
+    #plt.plot(line[:,2],line[:,6],'m-',label='Ey Imag')
     plt.legend()
     plt.title('Real and Imag Components on Line')
     if save:
         plt.savefig('real_imag_line.pdf')
     plt.show()
-
+    # Plot components magnitudes 
+    #plt.figure(3)
+    #ex_mag = np.sqrt(line[:,3]*line[:,3]+line[:,4]*line[:,4])
+    #ey_mag = np.sqrt(line[:,5]*line[:,5]+line[:,6]*line[:,6])
+    #plt.plot(line[:,2],ex_mag,'r-',label='Ex Magnitude')
+    #plt.plot(line[:,2],ey_mag,'b-',label='Ey Magnitude')
+    #plt.legend()
+    #plt.title('Magnitudes on Line')
+    #if save:
+    #    plt.savefig('real_imag_line.pdf')
+    #plt.show()
 def run_air_sim(p,m):
     sim = S4.New(Lattice=((p['L'],0),(0,p['L'])),NumBasis=p['numbasis'])
     sim.SetOptions(Verbosity=2)
@@ -112,7 +125,7 @@ def run_air_sim(p,m):
     sim.SetFrequency(f_conv)
     E_mag = 1.0 
     sim.SetExcitationPlanewave(IncidenceAngles=(0,0),sAmplitude=complex(E_mag,0),
-            pAmplitude=complex(0,E_mag))
+            pAmplitude=complex(0,-E_mag))
     x_samp = p['x_samp'] 
     y_samp = p['y_samp'] 
     z_samp = p['z_samp']
@@ -218,7 +231,7 @@ def main():
     parser.add_argument('--save_plots',action='store_true',help="Save all generated plots")
     args = parser.parse_args()
 
-    params = {'freq':3E14,'layer_t':.5,'L':.25,'x_samp':50,'y_samp':50,'z_samp':600,'numbasis':200}
+    params = {'freq':5E14,'layer_t':.5,'L':.25,'x_samp':50,'y_samp':50,'z_samp':600,'numbasis':40}
     plane = params['x_samp']/2
     params['plane'] = plane
     mats = {'ito':'/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/008_ITO_nk_Hz.txt',

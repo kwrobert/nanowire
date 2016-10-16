@@ -63,15 +63,11 @@ def parse_comsol(conf,compdir,path):
     print('COMSOL SHAPE: ',data.shape)
     
     # We need to fix the order of the variation in spatial coordinates in the matrix
-    zs = np.unique(data[:,2])
-    xs = np.unique(data[:,0])
-    rowlist = []
-    for z in zs:
-        for x in xs:
-            for row in data:
-                if row[0] == x and row[2] == z:
-                    rowlist.append(row)
-    data = np.vstack(rowlist)
+    data = data.reshape(( z_samples, y_samples, x_samples, 3))
+    # swap the "y" and "x" axes
+    data = np.swapaxes(data, 1,2)
+    # back to 2-D array
+    data = data.reshape((x_samples*y_samples*z_samples,3))
 
     print('COMSOL SHAPE: ',data.shape)
     np.savetxt(os.path.join(compdir,'comsol_data_formatted.txt'),data)

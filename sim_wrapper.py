@@ -72,8 +72,10 @@ def start_sim(script,ini_file):
     Input: - bash_command: string
     Output: - out: string
             - err: string'''
-
+    log = logging.getLogger('sim_wrapper') 
+    log.info('Hit core limit, polling processes ...')
     cmd = 'python %s %s'%(script,ini_file)
+    log.debug('Subprocess command: %s',cmd)
     return subprocess.Popen(cmd,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
 
 def poll_procs(procs):
@@ -81,13 +83,23 @@ def poll_procs(procs):
     log.info('Hit core limit, polling processes ...')
     # While there are running processes
     while procs:
+        # Find which processes have terminated
+        flags = []
         for proc in procs:
+            #if proc[0].poll() != None and os.path.exists(proc[2]):
             if proc[0].poll() != None:
-                out,err = proc[0].communicate()
-                log.debug('Simulation stdout for %s: %s',proc[1],str(out))
-                log.debug('Simulation stderr for %s: %s',proc[1],str(err))
-                log.info("Finished simulation for %s!",str(proc[1]))
-                procs.remove(proc)
+                flags.append(True)
+            else:
+                flags.append(False)
+        # Remove from list if terminated. Do this seperately so we don't modify procs list while looping
+        # through it
+        inds = [nf for nf,flag in enumerate(flags) if flag]
+        for i in sorted(inds, reverse=True):
+            out,err = procs[i][0].communicate()
+            log.debug('Simulation stdout for %s: %s',procs[i][1],str(out))
+            log.info('Simulation stderr for %s: %s',procs[i][1],str(err))
+            log.info("Finished simulation for %s!",str(procs[i][1]))
+            del procs[i]
 
 def sim(script,ini_file):
     out,err = sh('python %s %s'%(script,ini_file))
@@ -184,8 +196,9 @@ def run_sweep(conf):
     # If we are running sims in parallel, need to store running Popen instances
     # If not running in parallel, this list will always be empty
     procs = []
-    num_procs = cpu_count()-conf.getint('General','reserved_cores')
-    log.info('Using %i cores ...'%num_procs)
+    if conf.getboolean('General','parallel'):
+        num_procs = cpu_count()-conf.getint('General','reserved_cores')
+        log.info('Using %i cores ...'%num_procs)
     # Loop through each unique combination of parameters
     for combo in combos:
         # Make a unique working directory based on parameter combo
@@ -239,6 +252,7 @@ def run_sweep(conf):
         os.chdir(fullpath)
         log.info("Starting simulation for %s ....",workdir)
         proc = start_sim(script,"sim_conf.ini")
+        fpath = os.path.join(fullpath,sim_conf.get('General','base_name')+'.E')
         if not conf.getboolean('General','parallel'):
             out,err = proc.communicate()
             log.debug('Simulation stdout: %s',str(out))
@@ -249,11 +263,12 @@ def run_sweep(conf):
             # identically named file and multiprocessing pools would spit them all out into the same
             # directory
             if len(procs) < num_procs:
-                procs.append((proc,workdir))
+                procs.append((proc,workdir,fpath))
             else:
                 poll_procs(procs)
         os.chdir(basedir)
-    poll_procs(procs)
+    if procs:
+        poll_procs(procs)
 
 def run_sorted_sweep(conf):
     # Get access to logger
@@ -339,7 +354,7 @@ def run(conf,log):
         run_single_sim(conf,os.path.abspath(args.config_file))
     # If all the variable params have ranges specified, do a parameter sweep
     elif all(list(zip(*conf.items("Variable Parameters")))[1]):
-        if all(list(zip(*conf.items('Sorting Parameters')))[1]):
+        if conf.items('Sorting Parameters'):
             logger.debug('Entering sorted sweep function from main')
             run_sorted_sweep(conf)
         else:
@@ -360,12 +375,32 @@ def run(conf,log):
     #    out,err = sh('python3 ./postprocess.py setup.ini')
     #    print(err) 
 
-def pre_check(conf):
+def pre_check(conf_path,conf):
     """Checks conf file for invalid values"""
     if not os.path.isfile(conf.get('General','sim_script')):
         print('You need to change the sim_script entry in the [General] section of your config \
         file')
         quit()
+    
+    # Warn user if they are about to dump a bunch of simulation data and directories into a
+    # directory that already exists
+    base = conf.get("General","basedir")
+    if os.path.isdir(base):
+        print('WARNING!!! You are about to start a simulation in a directory that already exists')
+        print('WARNING!!! This will dump a whole bunch of crap into that directory and possibly')
+        print('WARNING!!! overwrite old simulation data.')
+        ans = input('Would you like to continue? CTRL-C to exit, any other key to continue: ')
+    # Copy provided config file to basedir
+    try:
+        os.makedirs(base)
+    except OSError:
+        pass
+    fname = os.path.basename(conf_path)
+    new_path = os.path.join(base,fname)
+    try:
+        shutil.copy(conf_path,new_path)
+    except shutil.SameFileError:
+        pass
     # TODO: Add checks between specified x,y,z samples and plane vals in plotting section
 
 def main():
@@ -384,7 +419,7 @@ def main():
         print("\n The file you specified does not exist! \n")
         quit()
 
-    pre_check(conf)
+    pre_check(os.path.abspath(args.config_file),conf)
     run(conf,args.log_level)
 
 if __name__ == '__main__':

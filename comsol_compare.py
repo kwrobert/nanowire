@@ -1,13 +1,16 @@
 import numpy as np
 import scipy.interpolate as spi
+import os
 import matplotlib
 # Enables saving plots over ssh
-#matplotlib.use('Agg')
+try:
+    os.environ['DISPLAY']
+except KeyError:
+    matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.cm as cmx
 import argparse as ap
-import os
 import configparser as confp
 import shutil
 import glob
@@ -114,7 +117,7 @@ def parse_s4(conf,compdir,path):
         np.savetxt(formatted,emat)
         return emat 
 
-def heatmap2d(x,y,cs,labels,ptype,colorsMap='jet'):
+def heatmap2d(x,y,cs,labels,ptype,path,colorsMap='jet'):
     """A general utility method for plotting a 2D heat map"""
     cm = plt.get_cmap(colorsMap)
     cNorm = matplotlib.colors.Normalize(vmin=np.amin(cs), vmax=np.amax(cs))
@@ -132,12 +135,12 @@ def heatmap2d(x,y,cs,labels,ptype,colorsMap='jet'):
     ax.set_xlabel(labels[0])
     ax.set_ylabel(labels[1])
     fig.suptitle('comsol cut plane')
-    name = labels[-1]+'_'+ptype+'.pdf'
+    name = path+'_'+labels[-1]+'_'+ptype+'.pdf'
+    print('Saving file %s'%name)
     fig.savefig(name)
-    plt.show()
     plt.close(fig)
 
-def plot_comsol(data,conf):
+def plot_comsol(data,conf,data_file):
     xval = .12755
     mat = np.column_stack((data[:,0],data[:,1],data[:,2],data[:,-1]))
     planes = np.array([row for row in mat if np.abs(row[0]-.12755) < .00001])
@@ -145,7 +148,7 @@ def plot_comsol(data,conf):
     x,y,z = np.unique(planes[:,0]),np.unique(planes[:,1]),np.unique(planes[:,2])
     cs = planes[:,-1].reshape(z.shape[0],y.shape[0])
     labels = ('y [um]','z [um]', 'normE')
-    heatmap2d(y,z,cs,labels,'plane_2d_x')
+    heatmap2d(y,z,cs,labels,'plane_2d_x',data_file.rstrip('.txt'))
 
 def relative_difference(x,y):
     """Return the mean squared error between two equally sized sets of data"""
@@ -310,7 +313,7 @@ def main():
     # Glob data files
     sg = os.path.join(s4_dir,'**/*.E')
     s4_files = glob.glob(sg,recursive=True)
-    cg = os.path.join(coms_dir,'frequency*')
+    cg = os.path.join(coms_dir,'frequency*.txt')
     coms_files = glob.glob(cg)
     print('S4 len: ',len(s4_files))
     print('COMSOL len: ',len(coms_files))
@@ -321,7 +324,7 @@ def main():
         # Parse the files
         s4data = parse_s4(conf,comp_dir,f[0])
         comsoldata = parse_comsol(conf,comp_dir,f[1])
-        plot_comsol(comsoldata,conf)
+        plot_comsol(comsoldata,conf,f[1])
         # Now do the actual comparison    
         compare_data(s4data,comsoldata,conf,args.interpolate,args.exclude)
 

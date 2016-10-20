@@ -105,7 +105,7 @@ def sim(script,ini_file):
     out,err = sh('python %s %s'%(script,ini_file))
     return out,err
 
-def run_single_sim(conf,conf_path):
+def run_single_sim(conf):
     log = logging.getLogger('sim_wrapper')
     log.info("Running single sim")
     # Make the simulation dir
@@ -351,7 +351,7 @@ def run(conf,log):
     if not conf.options("Variable Parameters"):
         # No variable params, single sim
         logger.debug('Entering single sim function from main')
-        run_single_sim(conf,os.path.abspath(args.config_file))
+        run_single_sim(conf)
     # If all the variable params have ranges specified, do a parameter sweep
     elif all(list(zip(*conf.items("Variable Parameters")))[1]):
         if conf.items('Sorting Parameters'):

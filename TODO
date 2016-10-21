@@ -1,11 +1,10 @@
-1) Fix convergence plotting. Right now the ways things are sorted breaks plotting of
-convergence when number of basis vectors is looped over along with some other parameters. Need modify convergence
-calculator and plotter to handle calculating error between variations in a single parameter while
-fixing others then creating multiple error.dat files and plotting them. 
-2) Fix simulation subproccesing in sim_wrapper so we get output/feedback from S4 library when
+1) Fix simulation subproccesing in sim_wrapper so we get output/feedback from S4 library when
 verbosity > 1
-3) Fix automatic post processing so we get feedback to stdout as well as logs
-4) Add parallelization amoung list of SSH accessible hosts (paramiko, need pub keys exchanged ahead
+2) Fix automatic post processing so we get feedback to stdout as well as logs
+3) Add parallelization amoung list of SSH accessible hosts (paramiko, need pub keys exchanged ahead
 of time)
-5) Add error checking of plane values in setup.ini to make sure they do not exceed number of samples
-
+4) Add error checking of plane values in setup.ini to make sure they do not exceed number of samples
+5) Add an Evaluated Parameters section that evaluates certain parameters based on values of other
+   params. Ex: Want to keep total diameter of wire fixed but need to vary ratio of core diameter
+   to shell thickness. Will need to extend parser class from config parser module to add this 
+   function. Use inheritance.  

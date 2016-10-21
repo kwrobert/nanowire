@@ -433,7 +433,7 @@ def main():
             comsoldata[:,-1] = mag[::-1]
             # Now do the actual comparison    
             diff, err = compare_data(s4data,comsoldata,conf,(f[0],f[1],comp_dir),args.interpolate,args.exclude)
-            #gen_plots(s4data,comsoldata,diff,conf,(f[0],f[1],comp_dir))
+            gen_plots(s4data,comsoldata,diff,conf,(f[0],f[1],comp_dir))
             efile.write('%f, %f\n'%(freq,err))
             #plot_comsol(comsoldata,conf,f[1])
             #plot_diff(diff_dat,conf,files)

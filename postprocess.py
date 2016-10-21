@@ -80,7 +80,8 @@ class Processor(object):
                 obj = parse_file(os.path.join(root,'sim_conf.ini'))
                 self.sims.append(obj)
             if 'sorted_sweep_conf.ini' in files:
-                dirs.remove('logs')
+                if 'logs' in dirs:
+                    dirs.remove('logs')
                 conf_paths = [os.path.join(root,simdir,'sim_conf.ini') for simdir in dirs]
                 self.log.debug('Sim group confs: %s',str(conf_paths))
                 self.sim_groups.append(list(map(parse_file,conf_paths)))

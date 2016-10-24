@@ -111,8 +111,14 @@ class Processor(object):
         base_name = self.gconf.get('General','base_name')
         e_path = os.path.join(sim_path,base_name+'.E')
         h_path = os.path.join(sim_path,base_name+'.H')
-        e_data = np.loadtxt(e_path)
-        h_data = np.loadtxt(h_path)
+        try: 
+            e_data = np.loadtxt(e_path)
+        except FileNotFoundError:
+            self.log.error('Following file missing: %s',e_path)
+        try:
+            h_data = np.loadtxt(h_path)
+        except FileNotFoundError:
+            self.log.error('Following file missing: %s',h_path)
         self.pos_inds = np.array_split(e_data,[3],axis=1)[0]
         self.e_data = e_data
         self.h_data = h_data

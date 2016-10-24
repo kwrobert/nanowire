@@ -33,8 +33,10 @@ def get_epsilon(freq,path):
     # Get data
     freq_vec,n_vec,k_vec = np.loadtxt(path,skiprows=1,unpack=True)
     # Get n and k at specified frequency via interpolation 
-    f_n = interpolate.interp1d(freq_vec,n_vec,kind='nearest')
-    f_k = interpolate.interp1d(freq_vec,k_vec,kind='nearest')
+    f_n = interpolate.interp1d(freq_vec,n_vec,kind='nearest',
+                               bounds_error=False,fill_value='extrapolate')
+    f_k = interpolate.interp1d(freq_vec,k_vec,kind='nearest',
+                               bounds_error=False,fill_value='extrapolate')
     n,k = f_n(freq),f_k(freq)
     # Convert to dielectric constant
     # NOTE!!: This assumes the relative magnetic permability (mew) is 1
@@ -58,7 +60,8 @@ def get_incident_amplitude(freq,period,path):
     # Get data
     freq_vec,p_vec = np.loadtxt(path,skiprows=1,unpack=True)
     # Get p at freq by interpolation 
-    f_p = interpolate.interp1d(freq_vec,p_vec,kind='nearest')
+    f_p = interpolate.interp1d(freq_vec,p_vec,kind='nearest',
+                               bounds_error=False,fill_value='extrapolate')
     # NOTE: Include below in some sort of unit test later
     #print("p = %f"%f_p(freq))
     #plt.plot(freq_vec,p_vec,'bs',freq_vec,f_p(freq_vec),'r--')
@@ -142,8 +145,7 @@ def build_sim(conf):
     # x magnitude is just to get things to look like Anna's simulations.
     sim.SetExcitationPlanewave(IncidenceAngles=(0,0),sAmplitude=complex(E_mag,0),
             pAmplitude=complex(0,-E_mag))
-    sim.OutputLayerPatternPostscript(Layer='nanowire_alshell',Filename='out.ps')
-    quit()
+    #sim.OutputLayerPatternPostscript(Layer='ito',Filename='out.ps')
     #sim.OutputStructurePOVRay(Filename='out.pov')
     E_layers = []
     output_file = conf.get("General","base_name")

@@ -113,13 +113,13 @@ def build_sim(conf):
     # Add patterning to section with AlInP shell
     core_rad = conf.getfloat('Parameters','nw_radius')
     shell_rad = core_rad + conf.getfloat('Parameters','shell_t')
-    sim.SetRegionCircle(Layer='nanowire_alshell',Material='AlInP',Center=(0,0),Radius=shell_rad)
-    sim.SetRegionCircle(Layer='nanowire_alshell',Material='GaAs',Center=(0,0),Radius=core_rad)
+    sim.SetRegionCircle(Layer='nanowire_alshell',Material='AlInP',Center=(vec_mag/2,vec_mag/2),Radius=shell_rad)
+    sim.SetRegionCircle(Layer='nanowire_alshell',Material='GaAs',Center=(vec_mag/2,vec_mag/2),Radius=core_rad)
     # Si layer and patterning 
     sim.AddLayer(Name='nanowire_sishell',Thickness=conf.getfloat('Parameters','sio2_height'),Material='Cyclotrene')
     # Add patterning to layer with SiO2 shell 
-    sim.SetRegionCircle(Layer='nanowire_sishell',Material='SiO2',Center=(0,0),Radius=shell_rad)
-    sim.SetRegionCircle(Layer='nanowire_sishell',Material='GaAs',Center=(0,0),Radius=core_rad)
+    sim.SetRegionCircle(Layer='nanowire_sishell',Material='SiO2',Center=(vec_mag/2,vec_mag/2),Radius=shell_rad)
+    sim.SetRegionCircle(Layer='nanowire_sishell',Material='GaAs',Center=(vec_mag/2,vec_mag/2),Radius=core_rad)
     # Substrate layer and air transmission region
     sim.AddLayer(Name='substrate',Thickness=conf.getfloat('Parameters','substrate_t'),Material='GaAs')
     #sim.AddLayerCopy('air_below',Thickness=conf.getfloat('Parameters','air_t'),Layer='air') 

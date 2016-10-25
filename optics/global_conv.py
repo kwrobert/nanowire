@@ -14,10 +14,12 @@ def analyze(path,thresh):
     # NOTE: This does not handle multiple sorted parameters!!
     data_pairs = []
     for f in err_files:
+        # Get the parameter value from the directory name
         dirpath = os.path.dirname(f)
         param_dir = os.path.split(dirpath)[-1]
         m = re.search('[0-9]*\.[0-9]*[eE]?[-+]?[0-9]*',param_dir)
         x_val = float(m.group(0))
+        # Now find the first number of basis terms that is within our error threshold
         with open(f,'r') as err:
             for line in err.readlines():
                 data = line.split(',')
@@ -50,18 +52,19 @@ def main():
     if not os.path.isdir(path):
         print("Specified path does not exist")
 
-    
     excludes = []
     for root,dirs,files in os.walk(path,topdown=False):
-        err_files = [m for f in files for m in [re.search('mse_[a-zA-Z]+\.dat',f)] if m]
         # If we haven't already analyzed this node in the directory tree
         if os.path.split(root)[0] not in excludes:
+            # Find all error files in current directory
+            err_files = [m for f in files for m in [re.search('mse_[a-zA-Z]+\.dat',f)] if m]
             # If we found an error file, go up one directory and perform the analysis
             if err_files:
                 base = os.path.split(root)[0]
                 analyze(base,args.threshold)
+                # Add the level above the basis term sweep to the excludes list so we don't perform
+                # the analysis for every basis term dir we find an error file in
                 excludes.append(base)
-    
 
 if __name__ == '__main__':
     main()

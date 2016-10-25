@@ -4,7 +4,4 @@ verbosity > 1
 3) Add parallelization amoung list of SSH accessible hosts (paramiko, need pub keys exchanged ahead
 of time)
 4) Add error checking of plane values in setup.ini to make sure they do not exceed number of samples
-5) Add an Evaluated Parameters section that evaluates certain parameters based on values of other
-   params. Ex: Want to keep total diameter of wire fixed but need to vary ratio of core diameter
-   to shell thickness. Will need to extend parser class from config parser module to add this 
-   function. Use inheritance.  
+5) Parallelize postprocessing

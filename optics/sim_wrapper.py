@@ -12,7 +12,7 @@ from multiprocessing import cpu_count
 def parse_file(path):
     """Parse the INI file provided at the command line"""
     
-    parser = confp.SafeConfigParser()
+    parser = confp.ConfigParser(interpolation=None)
     parser.optionxform = str
     with open(path,'r') as config_file:
         parser.readfp(config_file)
@@ -24,7 +24,7 @@ def copy_conf_obj(old):
     old.write(config_string)
     # We must reset the buffer ready for reading.
     config_string.seek(0) 
-    new_config = confp.ConfigParser()
+    new_config = confp.ConfigParser(interpolation=None)
     new_config.optionxform = str
     new_config.read_file(config_string)
     return new_config
@@ -96,7 +96,7 @@ def poll_procs(procs):
         inds = [nf for nf,flag in enumerate(flags) if flag]
         for i in sorted(inds, reverse=True):
             out,err = procs[i][0].communicate()
-            log.debug('Simulation stdout for %s: %s',procs[i][1],str(out))
+            log.info('Simulation stdout for %s: %s',procs[i][1],str(out))
             log.info('Simulation stderr for %s: %s',procs[i][1],str(err))
             log.info("Finished simulation for %s!",str(procs[i][1]))
             del procs[i]
@@ -149,8 +149,8 @@ def run_single_sim(conf):
     log.info("Starting simulation for %s ....",workdir)
     proc = start_sim(script,"sim_conf.ini")
     out,err = proc.communicate()
-    log.debug('Simulation stdout: %s',out)
-    log.debug('Simulation stderr: %s',err)
+    log.info('Simulation stdout: %s',out)
+    log.info('Simulation stderr: %s',err)
     log.info("Finished simulation for %s!",str(workdir))
 
 def run_sweep(conf):
@@ -220,7 +220,7 @@ def run_sweep(conf):
             fullpath = os.path.join(basedir,workdir)
             os.makedirs(fullpath)
         # Make a new configuration object for this specific sim
-        sim_conf = confp.SafeConfigParser()
+        sim_conf = confp.ConfigParser(interpolation=None)
         sim_conf.optionxform = str
         for section in ['General','Simulation','Parameters','Materials']:
             sim_conf.add_section(section)
@@ -237,7 +237,13 @@ def run_sweep(conf):
         # combo values always line up with the proper parameter name
         for i in range(len(combo)):
             sim_conf.set('Parameters',keys[i],str(combo[i]))
-        
+        # Now that all the parameters have been defined, we can add the evaluated parameters that
+        # depend on the values of some other parameters
+        for par, val in conf.items('Evaluated Parameters'):
+            # Wrap the value in back ticks so we know to evaluate the results of the interpolated
+            # expression in the simulation script
+            wrapped = '`'+str(val)+'`'
+            sim_conf.set('Parameters',par,wrapped)
         # Now just add the materials
         for name,path in conf.items('Materials'):
             sim_conf.set('Materials',name,path)
@@ -255,8 +261,8 @@ def run_sweep(conf):
         fpath = os.path.join(fullpath,sim_conf.get('General','base_name')+'.E')
         if not conf.getboolean('General','parallel'):
             out,err = proc.communicate()
-            log.debug('Simulation stdout: %s',str(out))
-            log.debug('Simulation stderr: %s',str(err))
+            log.info('Simulation stdout: %s',str(out))
+            log.info('Simulation stderr: %s',str(err))
             log.info("Finished simulation for %s!",str(workdir))
         else:
             # The reason for not using multiprocessing is because each process outputs and

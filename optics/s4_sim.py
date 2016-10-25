@@ -23,6 +23,16 @@ def parse_file(path):
                   parser.getfloat('Parameters','ito_t'),
                   parser.getfloat('Parameters','air_t')))
     parser.set('Parameters','total_height',str(height))
+    # If we have any evaluated parameters in the config, evaluate them all and set them to the
+    # appropriate value
+    for par, val in parser.items("Parameters"):
+        if val[0] == '`' and val[-1] == '`':
+            print('Found evaluated param')
+            print(val)
+            result = val.strip('`')
+            result = eval(result)
+            parser.set('Parameters',par,str(result))
+            print(result)
     with open(path,'w') as conf_file:
         parser.write(conf_file)
     return parser
@@ -74,9 +84,11 @@ def get_incident_amplitude(freq,period,path):
     #E = np.sqrt(2*f_p(freq))
     return E
 
+
+
 def build_sim(conf):
     """Define the materials and build the geometry for the simulation"""
-
+    
     # Initialize simulation object
     num_basis = conf.getint("Parameters","numbasis") 
     # These lattice vectors can be a little confusing. Everything in S4 is normalized so that speed

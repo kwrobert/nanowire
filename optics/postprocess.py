@@ -771,9 +771,9 @@ class Global_Plotter(Plotter):
         self.log.info('Actually plotting convergence')
         for group in self.sim_groups:
             base = group[0].get('General','basedir')
-            if err_type = 'local':
+            if err_type == 'local':
                 path = os.path.join(base,'localerror_%s.dat'%quantity) 
-            elif err_type = 'global':
+            elif err_type == 'global':
                 path = os.path.join(base,'globalerror_%s.dat'%quantity) 
             else:
                 log.error('Attempting to plot an unsupported error type')

@@ -344,92 +344,139 @@ class Global_Cruncher(Cruncher):
                     matrices')
             quit()
 
-    def mse(self,x,y,normvec):
-        """Return the mean squared error between two equally sized sets of data"""
+    def diff_sq(self,x,y):
+        """Returns the magnitude of the difference vector squared between two vector fields at each
+        point in space"""
         if x.size != y.size:
             self.log.error("You have attempted to compare datasets with an unequal number of points!!!!")
             quit()
         # Calculate the magnitude of the difference vector SQUARED at each point in space
-        # This is mag(vec(x) - vec(y)) at each point in space. This should be a 1D array
+        # This is mag(vec(x) - vec(y))^2 at each point in space. This should be a 1D array
         # with # of elements = # sampling points
         mag_diff_vec = np.sum((x-y)**2,axis=1)
-        # Normalize the magnitude squared of the difference vector by the magnitude squared of
-        # the local electric field the comparison simulation. In other words, normalize by the
-        # magnitude squared of the electric field of the comparison simulation at each point in
-        # space
-        if len(mag_diff_vec) != len(normvec):
-            self.log.error("The normalization vector has an incorrect number of elements!!!")
-            quit()
-        norm_mag_diff = mag_diff_vec / normvec
-        # Compute the average of the normalized magnitude of all the difference vectors 
-        avg_diffvec_mag = np.sum(norm_mag_diff)/norm_mag_diff.size
-        return avg_diffvec_mag
+        return mag_diff_vec
 
-    def mean_squared_error(self,field,exclude=False):
-        """A wrapper to calculate the mean squared error between the fields of adjacent simulations for a run
-        and write the results to a file"""
-        self.log.info('Running the mean squared error wrapper for quantity %s',field) 
+    def get_slice(self):
+        """Returns indices for data that strip out air and substrate regions"""
+        x_samples = self.gconf.getint('General','x_samples')
+        y_samples = self.gconf.getint('General','y_samples')
+        z_samples = self.gconf.getint('General','z_samples')
+        h = sum((self.gconf.getfloat('Fixed Parameters','nw_height'),self.gconf.getfloat('Fixed Parameters','substrate_t'),
+                self.gconf.getfloat('Fixed Parameters','air_t'),self.gconf.getfloat('Fixed Parameters','ito_t')))
+        arr = np.linspace(0,h,z_samples)
+        dz = arr[1] - arr[0]
+        start_plane = int(round(self.gconf.getfloat('Fixed Parameters','air_t')/dz))
+        start = start_plane*(x_samples*y_samples)
+        end_plane = int(round(sum((self.gconf.getfloat('Fixed Parameters','nw_height'),self.gconf.getfloat('Fixed Parameters','air_t'),
+                self.gconf.getfloat('Fixed Parameters','ito_t')))/dz))
+        end = end_plane*(x_samples*y_samples)
+        return start,end
+
+    def get_comp_vec(self,field,start,end):
+        """Returns the comparison vector"""
+        # Compare all other sims to our best estimate, which is sim with highest number of
+        # basis terms (last in list cuz sorting)
+        self.get_data()
+        # Get the proper file extension depending on the field.
+        if field == 'E':
+            ext = '.E'
+            # Get the comparison vector
+            vec1 = self.e_data[start:end,3:9]
+            normvec = self.get_scalar_quantity('normE')
+            normvec = normvec[start:end]**2
+        elif field == 'H':
+            ext = '.H'
+            vec1 = self.h_data[start:end,3:9]
+            normvec = self.get_scalar_quantity('normH')
+            normvec = normvec[start:end]**2
+        else:
+            self.log.error('The quantity for which you want to compute the error has not yet been calculated')
+            quit()
+        return vec1, normvec, ext
+
+    def local_error(self,field,exclude=False):
+        """Computes the average of the local error between the vector fields of two simulations at
+        each point in space"""
+        self.log.info('Running the local error computation for quantity %s',field) 
         # If we need to exclude calculate the indices
         if exclude:
-            x_samples = self.gconf.getint('General','x_samples')
-            y_samples = self.gconf.getint('General','y_samples')
-            z_samples = self.gconf.getint('General','z_samples')
-            h = sum((self.gconf.getfloat('Fixed Parameters','nw_height'),self.gconf.getfloat('Fixed Parameters','substrate_t'),
-                    self.gconf.getfloat('Fixed Parameters','air_t'),self.gconf.getfloat('Fixed Parameters','ito_t')))
-            arr = np.linspace(0,h,z_samples)
-            dz = arr[1] - arr[0]
-            start_plane = int(round(self.gconf.getfloat('Fixed Parameters','air_t')/dz))
-            start = start_plane*(x_samples*y_samples)
-            end_plane = int(round(sum((self.gconf.getfloat('Fixed Parameters','nw_height'),self.gconf.getfloat('Fixed Parameters','air_t'),
-                    self.gconf.getfloat('Fixed Parameters','ito_t')))/dz))
-            end = end_plane*(x_samples*y_samples)
+            start,end = self.get_slice()    
+        else:
+            start = 0
+            end = None
         for group in self.sim_groups:
             base = group[0].get('General','basedir')
-            self.log.info('Computing error for sweep %s',base)
-            with open(os.path.join(base,'mse_%s.dat'%field),'w') as errfile:
-                # Compare all other sims to our best estimate, which is sim with highest number of
-                # basis terms (last in list cuz sorting)
+            with open(os.path.join(base,'localerror_%s.dat'%field),'w') as errfile:
+                self.log.info('Computing local error for sweep %s',base)
+                # Set comparison sim to current sim
                 self.sim = group[-1]
-                self.get_data()
-                # Get the proper file extension depending on the field.
-                if field == 'E':
-                    ext = '.E'
-                    # Get the comparison vector
-                    if exclude:
-                        vec1 = self.e_data[start:end,3:9]
-                        normvec = self.get_scalar_quantity('normE')
-                        normvec = normvec[start:end]**2
-                    else:
-                        vec1 = self.e_data[:,3:9]
-                        normvec = self.get_scalar_quantity('normE')**2
-                elif field == 'H':
-                    ext = '.H'
-                    if exclude:
-                        vec1 = self.h_data[start:end,3:9]
-                        normvec = self.get_scalar_quantity('normH')
-                        normvec = normvec[start:end]**2
-                    else:
-                        vec1 = self.h_data[:,3:9]
-                        normvec = self.get_scalar_quantity('normH')**2
-                else:
-                    self.log.error('The quantity for which you want to compute the error has not yet been calculated')
-                    quit()
-                   
+                # Get the comparison vector
+                vec1,normvec,ext = self.get_comp_vec(field,start,end)    
+                # For all other sims in the groups, compare to best estimate and write to error file 
+                for i in range(0,len(group)-1):
+                    log.info(group)
+                    sim2 = group[i]
+                    path2 = os.path.join(sim2.get('General','sim_dir'),
+                                         sim2.get('General','base_name')+ext)
+                    vec2 = np.loadtxt(path2,usecols=range(3,9))
+                    vec2 = vec2[start:end,:]
+                    self.log.info("Computing error between numbasis %i and numbasis %i",
+                                  self.sim.getint('Parameters','numbasis'),
+                                  sim2.getint('Parameters','numbasis'))
+                    # Get the array containing the magnitude of the difference vector at each point
+                    # in space
+                    mag_diff_vec = self.diff_sq(vec1,vec2)
+                    # Normalize the magnitude squared of the difference vector by the magnitude squared of
+                    # the local electric field of the comparison simulation at each point in space
+                    if len(mag_diff_vec) != len(normvec):
+                        self.log.error("The normalization vector has an incorrect number of elements!!!")
+                        quit()
+                    norm_mag_diff = mag_diff_vec / normvec
+                    # Compute the average of the normalized magnitude of all the difference vectors 
+                    avg_diffvec_mag = np.sum(norm_mag_diff)/norm_mag_diff.size
+                    self.log.info(str(avg_diffvec_mag))
+                    errfile.write('%i,%f\n'%(sim2.getint('Parameters','numbasis'),avg_diffvec_mag))
+
+    def global_error(self,field,exclude=False):
+        """Computes the global error between the vector fields of two simulations. This is the sum
+        of the magnitude squared of the difference vectors divided by the sum of the magnitude
+        squared of the comparison efield vector over the desired section of the simulation cell"""
+
+        self.log.info('Running the global error computation for quantity %s',field) 
+        # If we need to exclude calculate the indices
+        if exclude:
+            start,end = self.get_slice()    
+        else:
+            start = 0
+            end = None
+        
+        for group in self.sim_groups:
+            base = group[0].get('General','basedir')
+            with open(os.path.join(base,'globalerror_%s.dat'%field),'w') as errfile:
+                self.log.info('Computing global error for sweep %s',base)
+                # Set comparison sim to current sim
+                self.sim = group[-1]
+                # Get the comparison vector
+                vec1,normvec,ext = self.get_comp_vec(field,start,end)    
                 # For all other sims in the groups, compare to best estimate and write to error file 
                 for i in range(0,len(group)-1):
                     sim2 = group[i]
                     path2 = os.path.join(sim2.get('General','sim_dir'),
                                          sim2.get('General','base_name')+ext)
-                    if exclude:
-                        vec2 = np.loadtxt(path2,usecols=range(3,9))
-                        vec2 = vec2[start:end,:]
-                    else:
-                        vec2 = np.loadtxt(path2,usecols=range(3,9))
-                    #self.log.info("%s \n %s",str(vec1),str(vec2))
+                    vec2 = np.loadtxt(path2,usecols=range(3,9))
+                    vec2 = vec2[start:end,:]
                     self.log.info("Computing error between numbasis %i and numbasis %i",
                                   self.sim.getint('Parameters','numbasis'),
                                   sim2.getint('Parameters','numbasis'))
-                    error = self.mse(vec1,vec2,normvec)
+                    # Get the array containing the magnitude of the difference vector at each point
+                    # in space 
+                    mag_diff_vec = self.diff_sq(vec1,vec2)
+                    # Check for equal lengths between norm array and diff mag array 
+                    if len(mag_diff_vec) != len(normvec):
+                        self.log.error("The normalization vector has an incorrect number of elements!!!")
+                        quit()
+                    # Error should be ratio of sum of mag diff vec squared to mag efield squared
+                    error = np.sum(mag_diff_vec)/np.sum(normvec)
                     self.log.info(str(error))
                     errfile.write('%i,%f\n'%(sim2.getint('Parameters','numbasis'),error))
 

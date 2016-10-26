@@ -766,12 +766,18 @@ class Global_Plotter(Plotter):
                 else:
                     self.gen_plot(plot,[])
 
-    def convergence(self,quantity,scale='linear'):
+    def convergence(self,quantity,err_type='global',scale='linear'):
         """Plots the convergence of a field across all available simulations"""
         self.log.info('Actually plotting convergence')
         for group in self.sim_groups:
             base = group[0].get('General','basedir')
-            path = os.path.join(base,'mse_%s.dat'%quantity) 
+            if err_type = 'local':
+                path = os.path.join(base,'localerror_%s.dat'%quantity) 
+            elif err_type = 'global':
+                path = os.path.join(base,'globalerror_%s.dat'%quantity) 
+            else:
+                log.error('Attempting to plot an unsupported error type')
+                quit()
             labels = []
             errors = []
             with open(path,'r') as datf:
@@ -789,7 +795,7 @@ class Global_Plotter(Plotter):
             plt.tight_layout()
             plt.title(os.path.basename(base))
             if self.gconf.getboolean('General','save_plots'):
-                name = os.path.basename(base)+'_convergence_'+quantity+'.pdf'
+                name = '%s_%sconvergence_%s.pdf'%(os.path.basename(base),err_type,quantity)
                 path = os.path.join(base,name)
                 fig.savefig(path)
             if self.gconf.getboolean('General','show_plots'):

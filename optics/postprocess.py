@@ -414,7 +414,6 @@ class Global_Cruncher(Cruncher):
                 vec1,normvec,ext = self.get_comp_vec(field,start,end)    
                 # For all other sims in the groups, compare to best estimate and write to error file 
                 for i in range(0,len(group)-1):
-                    log.info(group)
                     sim2 = group[i]
                     path2 = os.path.join(sim2.get('General','sim_dir'),
                                          sim2.get('General','base_name')+ext)

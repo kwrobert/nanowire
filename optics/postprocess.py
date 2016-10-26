@@ -302,6 +302,22 @@ class Global_Cruncher(Cruncher):
         super().__init__(global_conf)
         self.log.debug('This is the global cruncher') 
 
+    def get_data(self):
+        super().get_data()
+        # But also build the lookup table that maps quantity names to column numbers
+        epath = os.path.join(self.sim.get('General','sim_dir'),
+                             self.sim.get('General','base_name')+'.E')
+        hpath = os.path.join(self.sim.get('General','sim_dir'),
+                             self.sim.get('General','base_name')+'.H')
+        with open(epath,'r') as efile:
+            e_headers = efile.readlines()[0].strip('#\n').split(',')
+        with open(hpath,'r') as hfile:
+            h_headers = hfile.readlines()[0].strip('#\n').split(',')
+        self.e_lookup = {e_headers[ind]:ind for ind in range(len(e_headers))}
+        self.h_lookup = {h_headers[ind]:ind for ind in range(len(h_headers))}
+        self.log.debug('Here is the E field header lookup: %s',str(self.e_lookup))
+        self.log.debug('Here is the H field header lookup: %s',str(self.h_lookup))
+
     def crunch(self):
         self.log.info('Beginning global data crunch ...')
         # For each quantity 
@@ -313,19 +329,60 @@ class Global_Cruncher(Cruncher):
                 else:
                     self.calculate(quant,[])
 
-    def mse(self,x,y):
+    def get_scalar_quantity(self,quantity):
+        self.log.debug('Retrieving scalar quantity %s',str(quantity))
+        try:
+            col = self.e_lookup[quantity]
+            self.log.debug('Column of E field quantity %s is %s',str(quantity),str(col))
+            return self.e_data[:,col]
+        except KeyError:
+            col = self.h_lookup[quantity]
+            self.log.debug('Column of H field quantitty %s is %s',str(quantity),str(col))
+            return self.h_data[:,col]
+        except KeyError:
+            self.log.error('You attempted to retrieve a quantity that does not exist in the e and h \
+                    matrices')
+            quit()
+
+    def mse(self,x,y,normvec):
         """Return the mean squared error between two equally sized sets of data"""
         if x.size != y.size:
             self.log.error("You have attempted to compare datasets with an unequal number of points!!!!")
             quit()
-        else:
-            mse = np.sum((x-y)**2)/x.size
-            return mse
+        # Calculate the magnitude of the difference vector SQUARED at each point in space
+        # This is mag(vec(x) - vec(y)) at each point in space. This should be a 1D array
+        # with # of elements = # sampling points
+        mag_diff_vec = np.sum((x-y)**2,axis=1)
+        # Normalize the magnitude squared of the difference vector by the magnitude squared of
+        # the local electric field the comparison simulation. In other words, normalize by the
+        # magnitude squared of the electric field of the comparison simulation at each point in
+        # space
+        if len(mag_diff_vec) != len(normvec):
+            self.log.error("The normalization vector has an incorrect number of elements!!!")
+            quit()
+        norm_mag_diff = mag_diff_vec / normvec
+        # Compute the average of the normalized magnitude of all the difference vectors 
+        avg_diffvec_mag = np.sum(norm_mag_diff)/norm_mag_diff.size
+        return avg_diffvec_mag
 
-    def mean_squared_error(self,field):
+    def mean_squared_error(self,field,exclude=False):
         """A wrapper to calculate the mean squared error between the fields of adjacent simulations for a run
         and write the results to a file"""
         self.log.info('Running the mean squared error wrapper for quantity %s',field) 
+        # If we need to exclude calculate the indices
+        if exclude:
+            x_samples = self.gconf.getint('General','x_samples')
+            y_samples = self.gconf.getint('General','y_samples')
+            z_samples = self.gconf.getint('General','z_samples')
+            h = sum((self.gconf.getfloat('Fixed Parameters','nw_height'),self.gconf.getfloat('Fixed Parameters','substrate_t'),
+                    self.gconf.getfloat('Fixed Parameters','air_t'),self.gconf.getfloat('Fixed Parameters','ito_t')))
+            arr = np.linspace(0,h,z_samples)
+            dz = arr[1] - arr[0]
+            start_plane = int(round(self.gconf.getfloat('Fixed Parameters','air_t')/dz))
+            start = start_plane*(x_samples*y_samples)
+            end_plane = int(round(sum((self.gconf.getfloat('Fixed Parameters','nw_height'),self.gconf.getfloat('Fixed Parameters','air_t'),
+                    self.gconf.getfloat('Fixed Parameters','ito_t')))/dz))
+            end = end_plane*(x_samples*y_samples)
         for group in self.sim_groups:
             base = group[0].get('General','basedir')
             self.log.info('Computing error for sweep %s',base)
@@ -337,15 +394,23 @@ class Global_Cruncher(Cruncher):
                 # Get the proper file extension depending on the field.
                 if field == 'E':
                     ext = '.E'
-                    vec = self.normEsquared()
-                    avg = np.mean(vec)
                     # Get the comparison vector
-                    vec1 = self.e_data[:,3:9]
+                    if exclude:
+                        vec1 = self.e_data[start:end,3:9]
+                        normvec = self.get_scalar_quantity('normE')
+                        normvec = normvec[start:end]**2
+                    else:
+                        vec1 = self.e_data[:,3:9]
+                        normvec = self.get_scalar_quantity('normE')**2
                 elif field == 'H':
                     ext = '.H'
-                    vec = self.normHsquared()
-                    avg = np.mean(vec)
-                    vec1 = self.h_data[:,3:9]
+                    if exclude:
+                        vec1 = self.h_data[start:end,3:9]
+                        normvec = self.get_scalar_quantity('normH')
+                        normvec = normvec[start:end]**2
+                    else:
+                        vec1 = self.h_data[:,3:9]
+                        normvec = self.get_scalar_quantity('normH')**2
                 else:
                     self.log.error('The quantity for which you want to compute the error has not yet been calculated')
                     quit()
@@ -355,12 +420,16 @@ class Global_Cruncher(Cruncher):
                     sim2 = group[i]
                     path2 = os.path.join(sim2.get('General','sim_dir'),
                                          sim2.get('General','base_name')+ext)
-                    vec2 = np.loadtxt(path2,usecols=range(3,9))
+                    if exclude:
+                        vec2 = np.loadtxt(path2,usecols=range(3,9))
+                        vec2 = vec2[start:end,:]
+                    else:
+                        vec2 = np.loadtxt(path2,usecols=range(3,9))
                     #self.log.info("%s \n %s",str(vec1),str(vec2))
                     self.log.info("Computing error between numbasis %i and numbasis %i",
                                   self.sim.getint('Parameters','numbasis'),
                                   sim2.getint('Parameters','numbasis'))
-                    error = self.mse(vec1,vec2)/avg
+                    error = self.mse(vec1,vec2,normvec)
                     self.log.info(str(error))
                     errfile.write('%i,%f\n'%(sim2.getint('Parameters','numbasis'),error))
 

@@ -295,10 +295,11 @@ def compare_data(s4data,comsoldata,conf,files,interpolate=False,exclude=False):
         #print(round(conf.getfloat('Fixed Parameters','air_t')/dz))
         #print(round(sum((conf.getfloat('Fixed Parameters','nw_height'),conf.getfloat('Fixed Parameters','air_t'),
         #        conf.getfloat('Fixed Parameters','ito_t')))/dz))
-        start = int(round(conf.getfloat('Fixed Parameters','air_t')/dz)*(x_samples*y_samples))
-        end = int(round(sum((conf.getfloat('Fixed Parameters','nw_height'),conf.getfloat('Fixed Parameters','air_t'),
+        start_plane = int(round(conf.getfloat('Fixed Parameters','air_t')/dz))
+        start = start_plane*(x_samples*y_samples)
+        end_plane = int(round(sum((conf.getfloat('Fixed Parameters','nw_height'),conf.getfloat('Fixed Parameters','air_t'),
                 conf.getfloat('Fixed Parameters','ito_t')))/dz))
-        end = end*(x_samples*y_samples)
+        end = end_plane*(x_samples*y_samples)
         print(start)
         print(end)
         comsol_pts = comsoldata[start:end,0:3]
@@ -335,9 +336,14 @@ def compare_data(s4data,comsoldata,conf,files,interpolate=False,exclude=False):
         cx,cy,cz = np.unique(comsol_pts[:,0]),np.unique(comsol_pts[:,1]),np.unique(comsol_pts[:,2])
         points = (cx,cy,cz)
         dat = np.column_stack((comsol_pts,comsol_mag))
-        dat = dat.reshape((z_samples,y_samples,x_samples,4))
-        dat = np.swapaxes(dat,0,2)
-        dat = dat.reshape((z_samples*x_samples*y_samples,4))
+        if exclude:
+            dat = dat.reshape((end_plane-start_plane,y_samples,x_samples,4))
+            dat = np.swapaxes(dat,0,2)
+            dat = dat.reshape(((end_plane-start_plane)*x_samples*y_samples,4))
+        else:
+            dat = dat.reshape((z_samples,y_samples,x_samples,4))
+            dat = np.swapaxes(dat,0,2)
+            dat = dat.reshape((z_samples*x_samples*y_samples,4))
         values = dat[:,-1].reshape((len(cx),len(cy),len(cz)))
         print('Interpolationg S4 points onto COMSOL data and grid')
         interp_vals_coms = spi.interpn(points,values,s4_points,method='linear',bounds_error=False,fill_value=None)
@@ -385,6 +391,8 @@ def main():
     data sets?""")
     parser.add_argument('-e','--exclude',action='store_true',default=False,help="""Exclude substrate
     and air region from comparison?""")
+    parser.add_argument('-o','--output',type=str,default='comparison_results',help="""Name for the
+    output directory of all the comparison results. Not an absolute path""")
     args = parser.parse_args()
 
     # First lets create a subdirectory within the S4 directory to store all our comparison results
@@ -395,7 +403,7 @@ def main():
         quit()
 
     try:
-        comp_dir = os.path.join(s4_dir,'comparison_results')
+        comp_dir = os.path.join(s4_dir,args.output)
         os.mkdir(comp_dir)
     except OSError:
         pass 

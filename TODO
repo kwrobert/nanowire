@@ -1,7 +1,9 @@
 1) Fix simulation subproccesing in sim_wrapper so we get output/feedback from S4 library when
-verbosity > 1
+   verbosity > 1
 2) Fix automatic post processing so we get feedback to stdout as well as logs
 3) Add parallelization amoung list of SSH accessible hosts (paramiko, need pub keys exchanged ahead
 of time)
 4) Add error checking of plane values in setup.ini to make sure they do not exceed number of samples
 5) Parallelize postprocessing
+6) Perhaps save crunched data to numpy savez format to increase parsing speed for future
+   postprocessing

@@ -419,7 +419,7 @@ class Global_Cruncher(Cruncher):
                                          sim2.get('General','base_name')+ext)
                     vec2 = np.loadtxt(path2,usecols=range(3,9))
                     vec2 = vec2[start:end,:]
-                    self.log.info("Computing error between numbasis %i and numbasis %i",
+                    self.log.info("Computing local error between numbasis %i and numbasis %i",
                                   self.sim.getint('Parameters','numbasis'),
                                   sim2.getint('Parameters','numbasis'))
                     # Get the array containing the magnitude of the difference vector at each point
@@ -464,7 +464,7 @@ class Global_Cruncher(Cruncher):
                                          sim2.get('General','base_name')+ext)
                     vec2 = np.loadtxt(path2,usecols=range(3,9))
                     vec2 = vec2[start:end,:]
-                    self.log.info("Computing error between numbasis %i and numbasis %i",
+                    self.log.info("Computing global error between numbasis %i and numbasis %i",
                                   self.sim.getint('Parameters','numbasis'),
                                   sim2.getint('Parameters','numbasis'))
                     # Get the array containing the magnitude of the difference vector at each point

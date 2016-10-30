@@ -1,9 +1,12 @@
 import numpy as np
+from scipy import interpolate
+import scipy.constants as c
 import argparse as ap
 import os
 import configparser as confp 
 import re
 import logging
+from collections import OrderedDict
 import matplotlib
 # Enables saving plots over ssh
 try:
@@ -123,6 +126,21 @@ class Processor(object):
         self.e_data = e_data
         self.h_data = h_data
 
+    def get_scalar_quantity(self,quantity):
+        self.log.debug('Retrieving scalar quantity %s',str(quantity))
+        try:
+            col = self.e_lookup[quantity]
+            self.log.debug('Column of E field quantity %s is %s',str(quantity),str(col))
+            return self.e_data[:,col]
+        except KeyError:
+            col = self.h_lookup[quantity]
+            self.log.debug('Column of H field quantitty %s is %s',str(quantity),str(col))
+            return self.h_data[:,col]
+        except KeyError:
+            self.log.error('You attempted to retrieve a quantity that does not exist in the e and h \
+                    matrices')
+            raise
+
 class Cruncher(Processor):
     """Crunches all the raw data. Calculates quantities specified in the global config file and
     either appends them to the existing data files or creates new ones as needed"""
@@ -130,7 +148,10 @@ class Cruncher(Processor):
     def __init__(self,global_conf):
         super().__init__(global_conf)
         self.log.debug("This is THE CRUNCHER!!!!!")
-        
+        self.e_lookup = OrderedDict([('x',0),('y',1),('z',2),('Ex_real',3),('Ey_real',4),('Ez_real',5),
+                         ('Ex_imag',6),('Ey_imag',7),('Ez_imag',8)])
+        self.h_lookup = OrderedDict([('x',0),('y',1),('z',2),('Hx_real',3),('Hy_real',4),('Hz_real',5),
+                         ('Hx_imag',6),('Hy_imag',7),('Hz_imag',8)])
     def crunch(self):
         mse = False
         self.log.info('Beginning data crunch ...')
@@ -156,9 +177,9 @@ class Cruncher(Processor):
         try:
             getattr(self,quantity)(*args)
         except KeyError:
-            print() 
-            print("You have attempted to calculate an unsupported quantity!!")
-            quit()
+            self.log.error("Unable to calculate the following quantity: %s",
+                           quantity,exc_info=True,stack_info=True)
+            raise
 
     def write_data(self):
         """Writes the crunched data"""
@@ -175,24 +196,25 @@ class Cruncher(Processor):
         # Build the full matrices
         #full_emat = np.column_stack((self.pos_inds,self.e_data))
         #full_hmat = np.column_stack((self.pos_inds,self.h_data))
+
+        ### TODO: We need to build header strings in real time as we calculate things
         # Build the header strings for the matrices
-        eheader = ['x','y','z','Ex_real','Ey_real','Ez_real','Ex_imag','Ey_imag','Ez_imag']
-        hheader = ['x','y','z','Hx_real','Hy_real','Hz_real','Hx_imag','Hy_imag','Hz_imag']
-        for quant,args in self.gconf.items('Cruncher'):
-            # TODO: This is just terrible because it means any quantities NOT pertaining to the
-            # efield are not allowed to have a captial E in their name. Same for the H field. 
-            if 'E' in quant:
-                eheader.append(quant)
-            elif 'H' in quant:
-                hheader.append(quant)
+        
+        #for quant,args in self.gconf.items('Cruncher'):
+        #    # TODO: This is just terrible because it means any quantities NOT pertaining to the
+        #    # efield are not allowed to have a captial E in their name. Same for the H field. 
+        #    if 'E' in quant:
+        #        self.e_header.append(quant)
+        #    elif 'H' in quant:
+        #        self.h_header.append(quant)
         # Write the matrices. TODO: Add a nice format string
         #formatter = lambda x: "%22s"%x
         #np.savetxt(epath,full_emat,header=''.join(map(formatter, eheader)))
         #np.savetxt(hpath,full_hmat,header=''.join(map(formatter, hheader)))
         self.log.debug('Here is the E matrix: \n %s',str(self.e_data))
         self.log.debug('Here is the H matrix: \n %s',str(self.h_data))
-        np.savetxt(epath,self.e_data,header=','.join(eheader))
-        np.savetxt(hpath,self.h_data,header=','.join(hheader))
+        np.savetxt(epath,self.e_data,header=','.join(self.e_lookup.keys()))
+        np.savetxt(hpath,self.h_data,header=','.join(self.h_lookup.keys()))
     
     def normE(self):
         """Calculate and returns the norm of E"""
@@ -216,7 +238,14 @@ class Cruncher(Processor):
         # The .real is super important or it ruins the entire array
         # Note that discarding imag parts is fine here because the
         # magnitude is strictly real and all imag parts are 0
-        self.e_data = np.column_stack((self.e_data,E_mag)) 
+
+        # This approach is 4 times faster than np.column_stack()
+        dat = np.zeros((self.e_data.shape[0],self.e_data.shape[1]+1))
+        dat[:,:-1] = self.e_data
+        dat[:,-1] = E_mag
+        self.e_data = dat 
+        # Now append this quantity and its column the the header dict
+        self.e_lookup['normE'] = dat.shape[1]-1 
         return E_mag
 
     def normEsquared(self):
@@ -239,7 +268,14 @@ class Cruncher(Processor):
         # The .real is super important or it ruins the entire array
         # Note that discarding imag parts is fine here because the
         # magnitude is strictly real and all imag parts are 0
-        self.e_data = np.column_stack((self.e_data,E_magsq)) 
+
+        # This approach is 4 times faster than np.column_stack()
+        dat = np.zeros((self.e_data.shape[0],self.e_data.shape[1]+1))
+        dat[:,:-1] = self.e_data
+        dat[:,-1] = E_magsq
+        self.e_data = dat 
+        # Now append this quantity and its column the the header dict
+        self.e_lookup['normEsquared'] = dat.shape[1]-1 
         return E_magsq
 
     def normH(self):
@@ -267,7 +303,13 @@ class Cruncher(Processor):
         # Note that discarding imag parts is fine here because the
         # magnitude is strictly real and all imag parts are 0
 
-        self.h_data = np.column_stack((self.h_data,H_mag))
+        # This approach is 4 times faster than np.column_stack()
+        dat = np.zeros((self.h_data.shape[0],self.h_data.shape[1]+1))
+        dat[:,:-1] = self.h_data
+        dat[:,-1] = H_mag
+        self.h_data = dat 
+        # Now append this quantity and its column the the header dict
+        self.h_lookup['normH'] = dat.shape[1]-1 
         return H_mag
     
     def normHsquared(self):
@@ -291,9 +333,100 @@ class Cruncher(Processor):
         # The .real is super important or it ruins the entire array
         # Note that discarding imag parts is fine here because the
         # magnitude is strictly real and all imag parts are 0
-
-        self.h_data = np.column_stack((self.h_data,H_magsq))
+        # This approach is 4 times faster than np.column_stack()
+        dat = np.zeros((self.h_data.shape[0],self.h_data.shape[1]+1))
+        dat[:,:-1] = self.h_data
+        dat[:,-1] = H_magsq
+        self.h_data = dat 
+        # Now append this quantity and its column the the header dict
+        self.h_lookup['normHsquared'] = dat.shape[1]-1 
         return H_magsq
+
+    def get_nk(self,path,freq):
+        """Returns functions to compute index of refraction components n and k at a given
+        frequency"""
+        # Get data
+        freq_vec,n_vec,k_vec = np.loadtxt(path,skiprows=1,unpack=True)
+        # Get n and k at specified frequency via interpolation 
+        f_n = interpolate.interp1d(freq_vec,n_vec,kind='linear',
+                                   bounds_error=False,fill_value='extrapolate')
+        f_k = interpolate.interp1d(freq_vec,k_vec,kind='linear',
+                                   bounds_error=False,fill_value='extrapolate')
+        return f_n(freq), f_k(freq)
+
+    def genRate(self):
+        """Computes and return the generation rate at each point in space"""
+
+        # We need to compute normEsquared before we can compute the generation rate
+        normEsq = self.get_scalar_quantity('normEsquared') 
+        gvec = np.zeros_like(normEsq)
+        # Convenient lambda function to actual compute G
+        fact = c.epsilon_0/c.hbar
+        # Get the indices of refraction at this frequency
+        freq = self.sim.get('Parameters','frequency')
+        nk = {mat[0]:(self.get_nk(mat[1],freq)) for mat in self.gconf.items('Materials')}
+        self.log.debug(nk) 
+        height = self.sim.getfloat('Parameters','total_height')
+        # Get spatial discretization
+        z_samples = self.gconf.getint('General','z_samples')
+        x_samples = self.gconf.getint('General','x_samples')
+        y_samples = self.gconf.getint('General','y_samples')
+        dz = height/z_samples
+        period = self.sim.getfloat('Parameters','array_period')
+        dx = period/x_samples
+        dy = period/y_samples
+        # Get boundaries between layers
+        air_ito = self.sim.getfloat('Parameters','air_t')
+        ito_nw = self.sim.getfloat('Parameters','ito_t')+air_ito
+        nw_sio2 = self.sim.getfloat('Parameters','alinp_height')+ito_nw
+        sio2_sub = self.sim.getfloat('Parameters','sio2_height')+nw_sio2
+        air_line = sub_line+self.sim.getfloat('Parameters','substrate_t')
+        # Compute ITO generation (note air generation is already set to zero)
+        start = int(air_ito/dz)*x_samples*y_samples 
+        end = int(ito_nw/dz)*x_samples*y_samples 
+        gvec[start:end] = fact*nk['ITO'][0]*nk['ITO'][1]*normEsq[start:end]
+        # Compute nw generation
+        start = end
+        end = start + int(self.sim.getfloat('Parameters','alinp_height')/dz) 
+        xvec = np.linspace(0,period,x_samples)
+        yvec = np.linspace(0,period,y_samples)
+        center = period/2
+        nw_radius = self.sim.getfloat('Parameters','nw_radius') 
+        # Loop through each z layer in nw with AlInP shell
+        counter = start
+        for layer in range(start,end):
+            for x in xvec:
+                for y in yvec:
+                    if (x-center)**2 + (y-center)**2 <= nw_radius:
+                        gvec[counter] = fact*nk['GaAs'][0]*nk['GaAs'][1]*normEsq[counter] 
+                    elif nw_radius < (x-center)**2 + (y-center)**2 <= core_rad:
+                        gvec[counter] = fact*nk['AlInP'][0]*nk['AlInP'][1]*normEsq[counter]
+                    else:
+                        gvec[counter] = fact*nk['Cyclotene'][0]*nk['Cyclotene'][1]*normEsq[counter]
+                    counter += 1
+        # So same for SiO2 shell
+        start = counter
+        end = start + self.sim.float('Parameters','sio2_height')
+        for layer in range(start,end):
+            for x in xvec:
+                for y in yvec:
+                    if (x-center)**2 + (y-center)**2 <= nw_radius:
+                        gvec[counter] = fact*nk['GaAs'][0]*nk['GaAs'][1]*normEsq[counter] 
+                    elif nw_radius < (x-center)**2 + (y-center)**2 <= core_rad:
+                        gvec[counter] = fact*nk['SiO2'][0]*nk['SiO2'][1]*normEsq[counter]
+                    else:
+                        gvec[counter] = fact*nk['Cyclotene'][0]*nk['Cyclotene'][1]*normEsq[counter]
+                    counter += 1
+        # The rest is just the substrate
+        gvec[counter:] = fact*nk['GaAs'][0]*nk['GaAs'][1]*normEsq[counter:]
+        # This approach is 4 times faster than np.column_stack()
+        dat = np.zeros((self.e_data.shape[0],self.e_data.shape[1]+1))
+        dat[:,:-1] = self.e_data
+        dat[:,-1] = gvec
+        self.e_data = dat 
+        # Now append this quantity and its column the the header dict
+        self.e_lookup['generation_rate'] = dat.shape[1]-1 
+        return gvec
 
 class Global_Cruncher(Cruncher):
     """Computes global quantities for an entire run, instead of local quantities for an individual
@@ -329,20 +462,7 @@ class Global_Cruncher(Cruncher):
                 else:
                     self.calculate(quant,[])
 
-    def get_scalar_quantity(self,quantity):
-        self.log.debug('Retrieving scalar quantity %s',str(quantity))
-        try:
-            col = self.e_lookup[quantity]
-            self.log.debug('Column of E field quantity %s is %s',str(quantity),str(col))
-            return self.e_data[:,col]
-        except KeyError:
-            col = self.h_lookup[quantity]
-            self.log.debug('Column of H field quantitty %s is %s',str(quantity),str(col))
-            return self.h_data[:,col]
-        except KeyError:
-            self.log.error('You attempted to retrieve a quantity that does not exist in the e and h \
-                    matrices')
-            quit()
+    
 
     def diff_sq(self,x,y):
         """Returns the magnitude of the difference vector squared between two vector fields at each
@@ -526,23 +646,9 @@ class Plotter(Processor):
         try:
             getattr(self,plot)(*args)
         except KeyError:
-            self.log.error("You have attempted to calculate an unsupported quantity!!")
-            quit()
-
-    def get_scalar_quantity(self,quantity):
-        self.log.debug('Retrieving scalar quantity %s',str(quantity))
-        try:
-            col = self.e_lookup[quantity]
-            self.log.debug('Column of E field quantity %s is %s',str(quantity),str(col))
-            return self.e_data[:,col]
-        except KeyError:
-            col = self.h_lookup[quantity]
-            self.log.debug('Column of H field quantitty %s is %s',str(quantity),str(col))
-            return self.h_data[:,col]
-        except KeyError:
-            self.log.error('You attempted to retrieve a quantity that does not exist in the e and h \
-                    matrices')
-            quit()
+            self.log.error("Unable to plot the following quantity: %s",
+                           quantity,exc_info=True,stack_info=True)
+            raise
 
     def heatmap2d(self,x,y,cs,labels,ptype,draw=False,fixed=None,colorsMap='jet'):
         """A general utility method for plotting a 2D heat map"""

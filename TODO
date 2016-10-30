@@ -7,3 +7,7 @@ of time)
 5) Parallelize postprocessing
 6) Perhaps save crunched data to numpy savez format to increase parsing speed for future
    postprocessing
+7) Add capability to look up minimum number of basis terms to sim_wrapper 
+8) Write script to compute and plot time scaling with # of basis terms
+9) Add function to compute and plot generation rate in postprocess
+10) Make minimum basis term plots bar graphs instead of line plots!!

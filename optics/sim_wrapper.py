@@ -96,7 +96,7 @@ def poll_procs(procs):
         inds = [nf for nf,flag in enumerate(flags) if flag]
         for i in sorted(inds, reverse=True):
             out,err = procs[i][0].communicate()
-            log.info('Simulation stdout for %s: %s',procs[i][1],str(out))
+            log.debug('Simulation stdout for %s: %s',procs[i][1],str(out))
             log.info('Simulation stderr for %s: %s',procs[i][1],str(err))
             log.info("Finished simulation for %s!",str(procs[i][1]))
             del procs[i]
@@ -149,7 +149,7 @@ def run_single_sim(conf):
     log.info("Starting simulation for %s ....",workdir)
     proc = start_sim(script,"sim_conf.ini")
     out,err = proc.communicate()
-    log.info('Simulation stdout: %s',out)
+    log.debug('Simulation stdout: %s',out)
     log.info('Simulation stderr: %s',err)
     log.info("Finished simulation for %s!",str(workdir))
 
@@ -261,7 +261,7 @@ def run_sweep(conf):
         fpath = os.path.join(fullpath,sim_conf.get('General','base_name')+'.E')
         if not conf.getboolean('General','parallel'):
             out,err = proc.communicate()
-            log.info('Simulation stdout: %s',str(out))
+            log.debug('Simulation stdout: %s',str(out))
             log.info('Simulation stderr: %s',str(err))
             log.info("Finished simulation for %s!",str(workdir))
         else:

@@ -50,7 +50,9 @@ def parse_comsol(conf,compdir,path):
         return comsoldata
     else:
         # COpy the comsol file to the comparison dir for completeness
-        shutil.copy(path,compdir)
+        #shutil.copy(path,compdir)
+        # Make a softlink to the original comsol data file for completeness
+        os.symlink(path,os.path.join(compdir,os.path.basename(path)))
         # Create dictionary for converting comsol values and load raw data
         conv = {col: comp_conv for col in range(3,8)}
         raw = np.loadtxt(path,comments='%',converters=conv,dtype=complex)
@@ -268,9 +270,8 @@ def relative_difference(x,y):
         print("You have attempted to compare datasets with an unequal number of points!!!!")
         quit()
     else:
-        diff = np.abs(x-y)
-        norm_diff = diff/np.amax(diff) 
-        rel_diff  = np.sum(norm_diff)/norm_diff.size
+        diff = (x-y)**2
+        rel_diff  = np.sum(diff)/np.sum(x**2)
         return diff, rel_diff
 
 def compare_data(s4data,comsoldata,conf,files,interpolate=False,exclude=False):

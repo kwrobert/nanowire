@@ -52,7 +52,7 @@ def analyze(path,thresh,local,show):
     x_vals,min_terms = zip(*data_pairs)
     # Plot
     plt.figure()
-    plt.plot(x_vals,min_terms)
+    plt.plot(x_vals,min_terms,'b-o')
     plt.xlabel('Frequency (Hz)')
     plt.ylabel('Number of Fourier Terms')
     plt.title('Lower Bound on Basis Terms,Threshold = %s'%str(thresh))

@@ -186,7 +186,8 @@ def main():
     else:
         print "\n The file you specified does not exist! \n"
         quit()
-
+    
+    print('Building simulation')
     build_sim(conf_obj)
 
 

@@ -141,12 +141,7 @@ function get_incident_amplitude(freq,period,path)
         freqvec:append(freqval)
         pvec:append(p)
     end
-    print(pretty.write(freqvec))
-    print(pretty.write(pvec))
-    print(freq)
-    print(type(freq))
     power = interp1d(freqvec:reverse(),pvec:reverse(),freq,true)
-    print(power)
     mu_0 = (4*math.pi)*1E-7 
     c = 299792458
     E = math.sqrt(c*mu_0*power)
@@ -155,44 +150,30 @@ end
 
 function write_config(conf,path)
     io.output(path)
-    print(conf)
     for sec,params in pairs(conf) do
-        print(sec)
-        print(params)
         io.write(string.format('[%s]\n',sec))
         for par,val in pairs(params) do
-            print(par)
-            print(val)
             io.write(string.format('%s = %s\n',par,val))
         end
     end
     print('Finished write')
 end
+
 function parse_config(path)
     conf = config.read(path)
-    print(pretty.write(conf))
     conf = interpolate(conf)
-    print(pretty.write(conf))
     -- Evaluate expressions
     for par, val in pairs(conf['Parameters']) do
         if type(val) == 'string' then
             if stringx.startswith(val,'`') and stringx.endswith(val,'`') then
-                print('Found evaluated param')
-                print(val)
                 tmp = stringx.strip(val,'`')
-                print(tmp)
                 tmp = stringx.join('',{'result = ',tmp})
-                print(tmp)
                 f = loadstring(tmp)
                 f()
-                print(result)
-                print(conf)
                 conf['Parameters'][par] = result
             end
         end
     end
-    print(getfloat)
-    print(conf)
     arr = {conf['Parameters']['nw_height'],conf['Parameters']['substrate_t'],
            conf['Parameters']['ito_t'],conf['Parameters']['air_t']}
     height,n = seq.sum(arr,tonumber)
@@ -223,7 +204,6 @@ function build_sim(conf)
     -- Configure simulation options
     --
     -- Clean up values
-    print(pretty.write(conf['Simulation']))
     for key,val in pairs(conf['Simulation']) do
         print(val)
         if type(val) == 'number' or stringx.isdigit(val) then
@@ -263,7 +243,6 @@ function build_sim(conf)
     end
     
     f_phys = getfloat(conf,'Parameters','frequency')
-    print(pretty.write(conf['Materials']))
     for mat,path in pairs(conf['Materials']) do
         eps_r,eps_i = get_epsilon(f_phys,path)
         sim:SetMaterial(mat,{eps_r,eps_i})
@@ -279,8 +258,6 @@ function build_sim(conf)
     -- Add patterning to section with AlInP shell
     core_rad = getfloat(conf,'Parameters','nw_radius')
     shell_rad = core_rad + getfloat(conf,'Parameters','shell_t')
-    print(shell_rad)
-    print(core_rad)
     sim:SetLayerPatternCircle('nanowire_alshell','AlInP',{vec_mag/2,vec_mag/2},shell_rad)
     sim:SetLayerPatternCircle('nanowire_alshell','GaAs',{vec_mag/2,vec_mag/2},core_rad)
     -- Si layer and patterning 
@@ -316,7 +293,6 @@ function build_sim(conf)
     glob = stringx.join('',{output_file,".*"})
     cwd = path:currentdir()
     existing_files = dir.getfiles(cwd,glob)
-    print(pretty.write(existing_files))
     if existing_files[1] then
         for key,afile in pairs(existing_files) do
             file.delete(afile)
@@ -341,9 +317,10 @@ A program that uses the S4 RCWA simulation library to simulate
 the optical properties of a single nanowire in a square lattice
     <config_file> (string) Absolute path to simulation INI file
 ]]
-    print(args['config_file'])
+    if not path.isfile(args['config_file']) then
+        error('The config file specified does not exist or is not a file')
+    end
     conf = parse_config(args['config_file'])
-    print(pretty.write(conf))
     build_sim(conf)
 end
 

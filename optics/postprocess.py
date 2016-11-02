@@ -105,10 +105,10 @@ class Processor(object):
 
         self.sims.sort(key=natural_keys)
         for group in self.sim_groups:
-            paths = [c.get('General','sim_dir') for c in group]
+            paths = [sim.get('General','sim_dir') for sim in group]
             self.log.debug('Group paths before sorting: %s',str(paths))
             group.sort(key=natural_keys)
-            paths = [c.get('General','sim_dir') for c in group]
+            paths = [sim.get('General','sim_dir') for sim in group]
             self.log.debug('Group paths after sorting: %s',str(paths))
 
     def set_sim(self,sim):
@@ -123,12 +123,12 @@ class Processor(object):
         ftype = self.gconf.get('General','save_as')
         # If data was saved into text files
         if ftype == 'text':
-            e_path = os.path.join(sim_path,base_name+'.E')
-            h_path = os.path.join(sim_path,base_name+'.H')
+            e_path = os.path.join(sim_path,base_name+'.E.crnch')
+            h_path = os.path.join(sim_path,base_name+'.H.crnch')
             # Load E field data
             try: 
                 e_data = np.loadtxt(e_path)
-                with open(epath,'r') as efile:
+                with open(e_path,'r') as efile:
                     hline = efile.readlines()[0]
                     if hline[0] == '#':
                         # We have headers in the file
@@ -143,7 +143,7 @@ class Processor(object):
             # Load the H field data
             try:
                 h_data = np.loadtxt(h_path)
-                with open(hpath,'r') as hfile:
+                with open(h_path,'r') as hfile:
                     hline = hfile.readlines()[0]
                     if hline[0] == '#':
                         # We have headers in the file
@@ -165,14 +165,16 @@ class Processor(object):
                 # Get the headers and the data
                 with np.load(e_path) as loaded:
                     e_data = loaded['data']
-                    e_lookup = loaded['headers']
+                    e_lookup = loaded['headers'][0]
+                    self.log.debug(str(type(e_lookup)))
+                    self.log.debug(str(e_lookup))
                     self.log.debug('Here is the E field header lookup: %s',str(e_lookup))
             except IOError:
                 self.log.error('Following file missing or unloadable: %s',e_path)
             try:
                 with np.load(h_path) as loaded:
                     h_data = loaded['data']            
-                    h_lookup = loaded['headers']
+                    h_lookup = loaded['headers'][0]
                     self.log.debug('Here is the H field header lookup: %s',str(h_lookup))
             except IOError:
                 self.log.error('Following file missing or unloadable: %s',h_path)
@@ -185,12 +187,17 @@ class Processor(object):
 
     def get_scalar_quantity(self,quantity):
         self.log.debug('Retrieving scalar quantity %s',str(quantity))
+        self.log.debug(type(self.e_lookup))
+        self.log.debug('E Header: %s',str(self.e_lookup))
+        self.log.debug('H Header: %s',str(self.h_lookup))
         try:
             col = self.e_lookup[quantity]
+            self.log.debug(col)
             self.log.debug('Column of E field quantity %s is %s',str(quantity),str(col))
             return self.e_data[:,col]
         except KeyError:
             col = self.h_lookup[quantity]
+            self.log.debug(col)
             self.log.debug('Column of H field quantitty %s is %s',str(quantity),str(col))
             return self.h_data[:,col]
         except KeyError:
@@ -210,22 +217,27 @@ class Cruncher(Processor):
         """We need to override the base Processor get_data function because the Cruncher object is
         the only object that touches raw data files spit out by the simulations. Every other child 
         of Processor consumes files parsed and tidied up by Cruncher"""
-
+        self.log.debug('CRUNCHER GET_DATA')
         sim_path = sim.get('General','sim_dir')
         base_name = self.gconf.get('General','base_name')
         ftype = self.gconf.get('General','save_as')
         e_path = os.path.join(sim_path,base_name+'.E')
         h_path = os.path.join(sim_path,base_name+'.H')
+        # Load E field data
         try: 
             e_data = np.loadtxt(e_path)
         except FileNotFoundError:
             self.log.error('Following file missing: %s',e_path)
+            raise
+        # Load the H field data
         try:
             h_data = np.loadtxt(h_path)
         except FileNotFoundError:
             self.log.error('Following file missing: %s',h_path)
+            raise
         pos_inds = np.zeros((e_data.shape[0],3))
-        pos_inds[:,:] = e_data[:,0:3]
+        pos_inds[:,:] = e_data[:,0:3] 
+        self.log.debug('E shape after getting: %s',str(e_data.shape))        
         return e_data,self.e_lookup,h_data,self.h_lookup,pos_inds
 
     def crunch(self):
@@ -245,6 +257,8 @@ class Cruncher(Processor):
                         self.calculate(quant,argset.split(','))
                     else:
                         self.calculate(quant,[])
+                self.log.debug('E lookup: %s',str(self.e_lookup))
+                self.log.debug('H lookup: %s',str(self.h_lookup))
             self.write_data()
     
     def calculate(self,quantity,args):
@@ -262,22 +276,21 @@ class Cruncher(Processor):
         fname = self.sim.get('General','base_name')
         epath = os.path.join(base,fname+'.E')
         hpath = os.path.join(base,fname+'.H')
-        # Move the raw data
-        if not os.path.isfile(os.path.join(epath,epath+'.raw')):
-            os.rename(epath,epath+".raw")
-        if not os.path.isfile(os.path.join(hpath,hpath+'.raw')):
-            os.rename(hpath,hpath+".raw")
         # Save matrices in specified file tipe 
-        self.log.debug('Here is the E matrix: \n %s',str(self.e_data))
-        self.log.debug('Here is the H matrix: \n %s',str(self.h_data))
+        self.log.debug('Here are the E matrix headers: %s',str(self.e_lookup))
+        #self.log.debug('Here is the E matrix: \n %s',str(self.e_data))
+        self.log.debug('Here are the H matrix headers: %s',str(self.h_lookup))
+        #self.log.debug('Here is the H matrix: \n %s',str(self.h_data))
         ftype = self.gconf.get('General','save_as') 
         if ftype == 'text':
+            epath = epath+'.crnch'
+            hpath= hpath+'.crnch'
             np.savetxt(epath,self.e_data,header=','.join(self.e_lookup.keys()))
             np.savetxt(hpath,self.h_data,header=','.join(self.h_lookup.keys()))
         elif ftype == 'npz':
             # Save the headers and the data
-            np.savez(epath,headers = self.e_lookup, data = self.e_data)
-            np.savez(hpath,headers = self.h_lookup, data = self.h_data)
+            np.savez(epath,headers = np.array([self.e_lookup]), data = self.e_data)
+            np.savez(hpath,headers = np.array([self.h_lookup]), data = self.h_data)
         else:
             raise ValueError('Specified saving in an unsupported file format')
 
@@ -295,7 +308,9 @@ class Cruncher(Processor):
         E_mag = np.sqrt(E_mag)
         
         # This approach is 4 times faster than np.column_stack()
+        self.log.debug('E mat shape: %s',str(self.e_data.shape))
         dat = np.zeros((self.e_data.shape[0],self.e_data.shape[1]+1))
+        self.log.debug('dat mat shape: %s',str(dat.shape))
         dat[:,:-1] = self.e_data
         dat[:,-1] = E_mag
         self.e_data = dat 
@@ -453,28 +468,20 @@ class Cruncher(Processor):
         self.e_lookup['generation_rate'] = dat.shape[1]-1 
         return gvec
 
-class Global_Cruncher(Cruncher):
+class Global_Cruncher(Processor):
     """Computes global quantities for an entire run, instead of local quantities for an individual
     simulation"""
     def __init__(self,global_conf):
         super().__init__(global_conf)
         self.log.debug('This is the global cruncher') 
 
-    #def get_data(self):
-    #    super().get_data()
-    #    # But also build the lookup table that maps quantity names to column numbers
-    #    epath = os.path.join(self.sim.get('General','sim_dir'),
-    #                         self.sim.get('General','base_name')+'.E')
-    #    hpath = os.path.join(self.sim.get('General','sim_dir'),
-    #                         self.sim.get('General','base_name')+'.H')
-    #    with open(epath,'r') as efile:
-    #        e_headers = efile.readlines()[0].strip('#\n').split(',')
-    #    with open(hpath,'r') as hfile:
-    #        h_headers = hfile.readlines()[0].strip('#\n').split(',')
-    #    self.e_lookup = {e_headers[ind]:ind for ind in range(len(e_headers))}
-    #    self.h_lookup = {h_headers[ind]:ind for ind in range(len(h_headers))}
-    #    self.log.debug('Here is the E field header lookup: %s',str(self.e_lookup))
-    #    self.log.debug('Here is the H field header lookup: %s',str(self.h_lookup))
+    def calculate(self,quantity,args):
+        try:
+            getattr(self,quantity)(*args)
+        except KeyError:
+            self.log.error("Unable to calculate the following quantity: %s",
+                           quantity,exc_info=True,stack_info=True)
+            raise
 
     def crunch(self):
         self.log.info('Beginning global data crunch ...')
@@ -486,8 +493,6 @@ class Global_Cruncher(Cruncher):
                     self.calculate(quant,argset.split(','))
                 else:
                     self.calculate(quant,[])
-
-    
 
     def diff_sq(self,x,y):
         """Returns the magnitude of the difference vector squared between two vector fields at each
@@ -562,14 +567,16 @@ class Global_Cruncher(Cruncher):
                     sim2 = group[i]
                     e_data,elook,h_data,hlook,inds = self.get_data(sim2)
                     if field == 'E': 
-                        vec2 = e_data[start:end,:]
+                        vec2 = e_data[start:end,3:9]
                     elif field == 'H':
-                        vec2 = h_data[start:end,:]
+                        vec2 = h_data[start:end,3:9]
                     self.log.info("Computing local error between numbasis %i and numbasis %i",
                                   self.sim.getint('Parameters','numbasis'),
                                   sim2.getint('Parameters','numbasis'))
                     # Get the array containing the magnitude of the difference vector at each point
                     # in space
+                    self.log.debug('vec1 shape: %s',str(vec1.shape))
+                    self.log.debug('vec2 shape: %s',str(vec2.shape))
                     mag_diff_vec = self.diff_sq(vec1,vec2)
                     # Normalize the magnitude squared of the difference vector by the magnitude squared of
                     # the local electric field of the comparison simulation at each point in space
@@ -608,9 +615,9 @@ class Global_Cruncher(Cruncher):
                     sim2 = group[i]
                     e_data,elook,h_data,hlook,inds = self.get_data(sim2)
                     if field == 'E': 
-                        vec2 = e_data[start:end,:]
+                        vec2 = e_data[start:end,3:9]
                     elif field == 'H':
-                        vec2 = h_data[start:end,:]
+                        vec2 = h_data[start:end,3:9]
                     self.log.info("Computing global error between numbasis %i and numbasis %i",
                                   self.sim.getint('Parameters','numbasis'),
                                   sim2.getint('Parameters','numbasis'))
@@ -632,22 +639,6 @@ class Plotter(Processor):
         super().__init__(global_conf)
         self.log.debug("This is the plotter")
     
-    #def get_data(self):
-    #    super().get_data()
-    #    # But also build the lookup table that maps quantity names to column numbers
-    #    epath = os.path.join(self.sim.get('General','sim_dir'),
-    #                         self.sim.get('General','base_name')+'.E')
-    #    hpath = os.path.join(self.sim.get('General','sim_dir'),
-    #                         self.sim.get('General','base_name')+'.H')
-    #    with open(epath,'r') as efile:
-    #        e_headers = efile.readlines()[0].strip('#\n').split(',')
-    #    with open(hpath,'r') as hfile:
-    #        h_headers = hfile.readlines()[0].strip('#\n').split(',')
-    #    self.e_lookup = {e_headers[ind]:ind for ind in range(len(e_headers))}
-    #    self.h_lookup = {h_headers[ind]:ind for ind in range(len(h_headers))}
-    #    self.log.debug('Here is the E field header lookup: %s',str(self.e_lookup))
-    #    self.log.debug('Here is the H field header lookup: %s',str(self.h_lookup))
-
     def plot(self):
         self.log.info("Beginning local plotter method ...")
         for plot,args in self.gconf.items('Plotter'):
@@ -689,14 +680,14 @@ class Plotter(Processor):
         ax.pcolormesh(x, y, cs,cmap=cm,norm=cNorm,alpha=.5)
         scalarMap.set_array(cs)
         cb = fig.colorbar(scalarMap)
-        cb.set_label(labels[-1])
+        cb.set_label(labels[2])
         ax.set_xlabel(labels[0])
         ax.set_ylabel(labels[1])
         start, end = ax.get_xlim()
         ax.xaxis.set_ticks(np.arange(start,end,0.1))
         start, end = ax.get_ylim()
         ax.yaxis.set_ticks(np.arange(start,end,0.1))
-        fig.suptitle(os.path.basename(self.sim.get('General','sim_dir')))
+        fig.suptitle(labels[3])
         # Draw geometric indicators and labels
         if draw:
             if ptype[-1] == 'z':
@@ -765,19 +756,22 @@ class Plotter(Processor):
         x,y,z = np.unique(planes[:,0])*dx,np.unique(planes[:,1])*dy,np.unique(planes[:,2])
         # Super hacky and terrible way to fix the minimum and maximum values of the color bar
         # for a plot across all sims
+        freq = self.sim.getfloat('Parameters','frequency')
+        wvlgth = (c.c/freq)*1E9
+        title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(freq,wvlgth)
         if fixed:
             fixed = tuple(fixed.split(':'))
         if plane == 'x':
             cs = planes[:,-1].reshape(z.shape[0],y.shape[0])
-            labels = ('y [um]','z [um]', quantity)
+            labels = ('y [um]','z [um]', quantity,title)
             self.heatmap2d(y,z,cs,labels,'plane_2d_x',draw,fixed)
         elif plane == 'y':
             cs = planes[:,-1].reshape(z.shape[0],x.shape[0])
-            labels = ('x [um]','z [um]', quantity)
+            labels = ('x [um]','z [um]', quantity,title)
             self.heatmap2d(x,z,cs,labels,'plane_2d_y',draw,fixed)
         elif plane == 'z':
             cs = planes[:,-1].reshape(y.shape[0],x.shape[0])
-            labels = ('y [um]','x [um]', quantity)
+            labels = ('y [um]','x [um]', quantity,title)
             self.heatmap2d(x,y,cs,labels,'plane_2d_z',draw,fixed)
     
     def scatter3d(self,x,y,z,cs,labels,ptype,colorsMap='jet'):
@@ -852,7 +846,7 @@ class Plotter(Processor):
         plt.plot(x,y)
         plt.xlabel(labels[0])
         plt.ylabel(labels[1])
-        plt.title(os.path.basename(self.sim.get('General','sim_dir')))
+        plt.title(labels[2])
         if self.gconf.getboolean('General','save_plots'):
             name = labels[-1]+'_'+ptype+'.pdf'
             path = os.path.join(self.sim.get('General','sim_dir'),name)
@@ -876,7 +870,10 @@ class Plotter(Processor):
         planes = np.array([row for row in mat if row[0] == coord1 and row[1] == coord2])
         planes[:,0] = planes[:,0]*dx
         planes[:,1] = planes[:,1]*dy
-        labels = ('Z [um]',quantity) 
+        freq = self.sim.getfloat('Parameters','frequency')
+        wvlgth = (c.c/freq)*1E9
+        title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(freq,wvlgth)
+        labels = ('Z [um]',quantity,title) 
         ptype = "%s_line_plot_%i_%i"%(direction,coord1,coord2)
         self.line_plot(planes[:,2],planes[:,3],ptype,labels)
 

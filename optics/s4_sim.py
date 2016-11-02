@@ -18,11 +18,6 @@ def parse_file(path):
     parser.optionxform = str
     with open(path,'r') as config_file:
         parser.readfp(config_file)
-    height = sum((parser.getfloat('Parameters','nw_height'),
-                  parser.getfloat('Parameters','substrate_t'),
-                  parser.getfloat('Parameters','ito_t'),
-                  parser.getfloat('Parameters','air_t')))
-    parser.set('Parameters','total_height',str(height))
     # If we have any evaluated parameters in the config, evaluate them all and set them to the
     # appropriate value
     for par, val in parser.items("Parameters"):
@@ -33,6 +28,11 @@ def parse_file(path):
             result = eval(result)
             parser.set('Parameters',par,str(result))
             print(result)
+    height = sum((parser.getfloat('Parameters','nw_height'),
+                  parser.getfloat('Parameters','substrate_t'),
+                  parser.getfloat('Parameters','ito_t'),
+                  parser.getfloat('Parameters','air_t')))
+    parser.set('Parameters','total_height',str(height))
     with open(path,'w') as conf_file:
         parser.write(conf_file)
     return parser
@@ -99,6 +99,7 @@ def build_sim(conf):
     # 3. Whenever you enter a physical frequency (say in Hz), divide it by the speed of light,
     # where the speed of light has been converted to your base length unit of choice.
     # 4. Supply that value to the SetFrequency method
+    # Note: The origin is as the corner of the unit cell
     vec_mag = conf.getfloat("Parameters","array_period")
     sim = S4.New(Lattice=((vec_mag,0),(0,vec_mag)),NumBasis=num_basis)
     # Collect, clean, and set the simulation config
@@ -128,13 +129,13 @@ def build_sim(conf):
     shell_rad = core_rad + conf.getfloat('Parameters','shell_t')
     print(shell_rad)
     print(core_rad)
-    #sim.SetRegionCircle(Layer='nanowire_alshell',Material='AlInP',Center=(vec_mag/2,vec_mag/2),Radius=shell_rad)
-    #sim.SetRegionCircle(Layer='nanowire_alshell',Material='GaAs',Center=(vec_mag/2,vec_mag/2),Radius=core_rad)
+    sim.SetRegionCircle(Layer='nanowire_alshell',Material='AlInP',Center=(vec_mag/2,vec_mag/2),Radius=shell_rad)
+    sim.SetRegionCircle(Layer='nanowire_alshell',Material='GaAs',Center=(vec_mag/2,vec_mag/2),Radius=core_rad)
     # Si layer and patterning 
     sim.AddLayer(Name='nanowire_sishell',Thickness=conf.getfloat('Parameters','sio2_height'),Material='Cyclotene')
     # Add patterning to layer with SiO2 shell 
-    #sim.SetRegionCircle(Layer='nanowire_sishell',Material='SiO2',Center=(vec_mag/2,vec_mag/2),Radius=shell_rad)
-    #sim.SetRegionCircle(Layer='nanowire_sishell',Material='GaAs',Center=(vec_mag/2,vec_mag/2),Radius=core_rad)
+    sim.SetRegionCircle(Layer='nanowire_sishell',Material='SiO2',Center=(vec_mag/2,vec_mag/2),Radius=shell_rad)
+    sim.SetRegionCircle(Layer='nanowire_sishell',Material='GaAs',Center=(vec_mag/2,vec_mag/2),Radius=core_rad)
     # Substrate layer and air transmission region
     sim.AddLayer(Name='substrate',Thickness=conf.getfloat('Parameters','substrate_t'),Material='GaAs')
     #sim.AddLayerCopy('air_below',Thickness=conf.getfloat('Parameters','air_t'),Layer='air') 

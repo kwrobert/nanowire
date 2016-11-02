@@ -74,7 +74,7 @@ def start_sim(script,ini_file):
             - err: string'''
     log = logging.getLogger('sim_wrapper') 
     log.info('Hit core limit, polling processes ...')
-    cmd = '/usr/bin/python2 %s %s'%(script,ini_file)
+    cmd = '/usr/bin/lua %s %s'%(script,ini_file)
     log.debug('Subprocess command: %s',cmd)
     return subprocess.Popen(cmd,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
 

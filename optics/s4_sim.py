@@ -1,4 +1,3 @@
-import S4
 import numpy as np
 from scipy import interpolate
 from scipy import constants
@@ -10,6 +9,7 @@ import argparse as ap
 import os
 import configparser as confp 
 import glob
+import S4
 
 def parse_file(path):
     """Parse the INI file provided at the command line"""
@@ -18,11 +18,6 @@ def parse_file(path):
     parser.optionxform = str
     with open(path,'r') as config_file:
         parser.readfp(config_file)
-    height = sum((parser.getfloat('Parameters','nw_height'),
-                  parser.getfloat('Parameters','substrate_t'),
-                  parser.getfloat('Parameters','ito_t'),
-                  parser.getfloat('Parameters','air_t')))
-    parser.set('Parameters','total_height',str(height))
     # If we have any evaluated parameters in the config, evaluate them all and set them to the
     # appropriate value
     for par, val in parser.items("Parameters"):
@@ -33,6 +28,11 @@ def parse_file(path):
             result = eval(result)
             parser.set('Parameters',par,str(result))
             print(result)
+    height = sum((parser.getfloat('Parameters','nw_height'),
+                  parser.getfloat('Parameters','substrate_t'),
+                  parser.getfloat('Parameters','ito_t'),
+                  parser.getfloat('Parameters','air_t')))
+    parser.set('Parameters','total_height',str(height))
     with open(path,'w') as conf_file:
         parser.write(conf_file)
     return parser
@@ -99,6 +99,7 @@ def build_sim(conf):
     # 3. Whenever you enter a physical frequency (say in Hz), divide it by the speed of light,
     # where the speed of light has been converted to your base length unit of choice.
     # 4. Supply that value to the SetFrequency method
+    # Note: The origin is as the corner of the unit cell
     vec_mag = conf.getfloat("Parameters","array_period")
     sim = S4.New(Lattice=((vec_mag,0),(0,vec_mag)),NumBasis=num_basis)
     # Collect, clean, and set the simulation config
@@ -126,6 +127,8 @@ def build_sim(conf):
     # Add patterning to section with AlInP shell
     core_rad = conf.getfloat('Parameters','nw_radius')
     shell_rad = core_rad + conf.getfloat('Parameters','shell_t')
+    print(shell_rad)
+    print(core_rad)
     sim.SetRegionCircle(Layer='nanowire_alshell',Material='AlInP',Center=(vec_mag/2,vec_mag/2),Radius=shell_rad)
     sim.SetRegionCircle(Layer='nanowire_alshell',Material='GaAs',Center=(vec_mag/2,vec_mag/2),Radius=core_rad)
     # Si layer and patterning 

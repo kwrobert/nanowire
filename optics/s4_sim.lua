@@ -153,6 +153,21 @@ function get_incident_amplitude(freq,period,path)
     return E
 end 
 
+function write_config(conf,path)
+    io.output(path)
+    print(conf)
+    for sec,params in pairs(conf) do
+        print(sec)
+        print(params)
+        io.write(string.format('[%s]\n',sec))
+        for par,val in pairs(params) do
+            print(par)
+            print(val)
+            io.write(string.format('%s = %s\n',par,val))
+        end
+    end
+    print('Finished write')
+end
 function parse_config(path)
     conf = config.read(path)
     print(pretty.write(conf))
@@ -182,6 +197,7 @@ function parse_config(path)
            conf['Parameters']['ito_t'],conf['Parameters']['air_t']}
     height,n = seq.sum(arr,tonumber)
     conf['Parameters']['total_height'] = height
+    write_config(conf,path)
     return conf 
 end
 

@@ -206,9 +206,11 @@ def run_sweep(conf):
         workdir=''
         for i in range(len(combo)):
             if isinstance(combo[i],float) and combo[i] >= 10000:
-                workdir += str(keys[i])+'%E__'%combo[i]
+                substr = '{}_{:.4E}__'.format(keys[i],combo[i])
+                workdir += substr 
             else:
-                workdir += str(keys[i])+str(combo[i])+'__'
+                substr = '{}_{:.4f}__'.format(keys[i],combo[i])
+                workdir += substr 
         workdir=workdir.rstrip('__')
         log.info('Preparing for simulation %s',str(workdir))
         fullpath = os.path.join(basedir,workdir)

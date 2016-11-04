@@ -74,10 +74,9 @@ def start_sim(script,ini_file,timed=False):
     Output: - out: string
             - err: string'''
     log = logging.getLogger('sim_wrapper') 
-    log.info('Hit core limit, polling processes ...')
     if timed:
         log.info('TIMING LUA SCRIPT')
-        cmd = '/usr/bin/time -vv -o timing.dat /usr/bin/lua %s %s'%(script,ini_file)
+        cmd = '/usr/bin/time -v -o timing.dat /usr/bin/lua %s %s'%(script,ini_file)
         #cmd = '/usr/bin/perf stat -o timing.dat -r 5 /usr/bin/lua %s %s'%(script,ini_file)
     else:
         cmd = '/usr/bin/lua %s %s'%(script,ini_file)
@@ -86,7 +85,7 @@ def start_sim(script,ini_file,timed=False):
 
 def poll_procs(procs):
     log = logging.getLogger('sim_wrapper') 
-    log.info('Hit core limit, polling processes ...')
+    log.info('Polling processes ...')
     # While there are running processes
     while procs:
         # True if the process finished, false if not. This way we only actually poll processes once,
@@ -279,6 +278,7 @@ def run_sweep(conf):
             if len(procs) < max_procs:
                 procs.append((proc,os.path.relpath(fullpath,basedir),fpath))
             else:
+                log.info('Hit core limit!')
                 procs = poll_procs(procs)
         os.chdir(basedir)
     if procs:

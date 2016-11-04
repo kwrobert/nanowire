@@ -5,18 +5,12 @@ S4 = require 'RCWA'
 ----------------------------------------------------
 
 function getint(conf,section,parameter)
-    print(conf[section][parameter])
-    print(type(conf[section][parameter]))
     val = math.floor(conf[section][parameter])
-    print(val)
     return val 
 end
 
 function getfloat(conf,section,parameter)
-    print(conf[section][parameter])
-    print(type(conf[section][parameter]))
     val = tonumber(conf[section][parameter])
-    print(val)
     return val 
 end
 
@@ -32,18 +26,16 @@ function interp1d(x, y, xval,extrapolate)
         print('Extrapolate left')
         m = (y[2] - y[1])/(x[2] - x[1])
         val = m*(xval-x[1])+y[1]
-        print('Left: ',y[1])
-        print('Value: ',val)
-        print('Right: ',y[2])
+        --print('Left: ',y[1])
+        --print('Value: ',val)
+        --print('Right: ',y[2])
     elseif xval > max and extrapolate then
         print('Extrapolate right')
-        print(x[#x])
-        print(y[#x])
         m = (y[#y] - y[#y-1])/(x[#x] - x[#x-1])
         val = m*(xval-x[#x])+y[#x]
-        print('Left: ',y[#y-1])
-        print('Value: ',val)
-        print('Right: ',y[#y])
+        --print('Left: ',y[#y-1])
+        --print('Value: ',val)
+        --print('Right: ',y[#y])
     elseif (xval < min or xval > max) and not extrapolate then
         error("The x value is outside the extrapolation range and extrapolation is set to false")
     else 
@@ -54,9 +46,9 @@ function interp1d(x, y, xval,extrapolate)
             counter = counter + 1
         end
         val = (((y[counter]-y[counter-1])*(xval - x[counter-1]))/(x[counter]-x[counter-1]))+y[counter-1]
-        print('Left: ',y[counter-1])
-        print('Value: ',val)
-        print('Right: ',y[counter])
+        --print('Left: ',y[counter-1])
+        --print('Value: ',val)
+        --print('Right: ',y[counter])
     end
     return val
 end
@@ -75,10 +67,6 @@ function parse_nk(path)
         nvec:append(n)
         kvec:append(k)
     end
-    -- input.fields returns iterators. Need to force into lists
-    --freqvec = List(freqvec):sorted()
-    --nvec = List(nvec):sorted()
-    --kvec = List(kvec):sorted()
     return freqvec:reverse(),nvec:reverse(),kvec:reverse()
 end
 
@@ -102,9 +90,7 @@ function interpolate(conf)
                 repl_val = conf[sect][match] 
                 -- Now replace the interpolation string by the actual value of the 
                 -- sought parameter 
-                print(repl_val)
                 rep_par = string.gsub(value,"%%%(([^)]+)%)s",repl_val)
-                print(rep_par)
                 -- Now store the interpolated value of the original parameter
                 conf[sect][param] = rep_par
             end
@@ -114,8 +100,6 @@ function interpolate(conf)
 end
 
 function get_epsilon(freq,path)
-    print(freq)
-    print(path)
     freqvec,nvec,kvec= parse_nk(path)
     n = interp1d(freqvec,nvec,freq,true)
     k = interp1d(freqvec,kvec,freq,true)
@@ -125,9 +109,6 @@ function get_epsilon(freq,path)
 end
 
 function get_incident_amplitude(freq,period,path)
-    print(freq)
-    print(period)
-    print(path)
     -- Set path to current input file
     io.input(path)
     -- Skip the header line
@@ -136,8 +117,6 @@ function get_incident_amplitude(freq,period,path)
     pvec = List()
     -- Get the columns
     for freqval,p in input.fields(2) do
-        print(freqval)
-        print(p)
         freqvec:append(freqval)
         pvec:append(p)
     end
@@ -156,7 +135,6 @@ function write_config(conf,path)
             io.write(string.format('%s = %s\n',par,val))
         end
     end
-    print('Finished write')
 end
 
 function parse_config(path)
@@ -205,7 +183,6 @@ function build_sim(conf)
     --
     -- Clean up values
     for key,val in pairs(conf['Simulation']) do
-        print(val)
         if type(val) == 'number' or stringx.isdigit(val) then
             conf['Simulation'][key] = math.floor(val)
         elseif val == 'True' then

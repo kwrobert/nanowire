@@ -43,10 +43,11 @@ def parse_comsol(conf,compdir,path):
     print('Parsing new COMSOL data')
     # If the formatted file exists use it, otherwise parse the file provided at the command line
     fdir,fname = os.path.split(path)
-    formatted = os.path.join(compdir,fname+'.formatted')
-    if os.path.isfile(formatted):
+    formatted = os.path.join(compdir,fname)
+    if os.path.isfile(formatted+'.npz'):
         print('Reusing formatted COMSOL data file')
-        comsoldata = np.loadtxt(formatted)
+        with np.load(formatted+'.npz') as data:
+            comsoldata = data['arr_0']
         return comsoldata
     else:
         # COpy the comsol file to the comparison dir for completeness
@@ -82,7 +83,6 @@ def parse_comsol(conf,compdir,path):
         print('COMSOL SHAPE: ',data.shape)
         
         # We need to fix the order of the variation in spatial coordinates in the matrix
-        # (No need to copy if you don't want to keep the given_dat ordering)
         cols = data.shape[-1]
         z_samples = conf.getint('General','z_samples')
         x_samples = conf.getint('General','x_samples')
@@ -94,7 +94,7 @@ def parse_comsol(conf,compdir,path):
         new_data = new_data.reshape((x_samples*y_samples*z_samples,cols))
 
         print('COMSOL SHAPE: ',new_data.shape)
-        np.savetxt(formatted,new_data)
+        np.savez(formatted,new_data)
 
         return new_data
 
@@ -104,22 +104,23 @@ def parse_s4(conf,compdir,path):
     fdir,fname = os.path.split(path)
     freq = os.path.basename(fdir)
     formatted = os.path.join(compdir,freq+'.formatted')
-    if os.path.isfile(formatted):
-        print('Reusing formatted S4 data file')
-        s4data = np.loadtxt(formatted)
-        return s4data
-    else:
+    if conf.get('General','save_as') == 'text':
         emat = np.loadtxt(path)
-
         # Convert pos_inds to positions
         period = conf.getfloat('Fixed Parameters','array_period')
         emat[:,0] = emat[:,0]*(period/conf.getfloat('General','x_samples'))
         emat[:,1] = emat[:,1]*(period/conf.getfloat('General','y_samples'))
 
-        # Join into 1 matrix
-        print('S4 SHAPE: ',emat.shape)
-        np.savetxt(formatted,emat)
-        return emat 
+    elif conf.get('General','save_as') == 'npz': 
+        with np.load(path) as data:
+            emat = data['data']
+            # Convert pos_inds to positions
+            period = conf.getfloat('Fixed Parameters','array_period')
+            emat[:,0] = emat[:,0]*(period/conf.getfloat('General','x_samples'))
+            emat[:,1] = emat[:,1]*(period/conf.getfloat('General','y_samples'))
+    
+    print('S4 SHAPE: ',emat.shape)
+    return emat 
 
 def heatmap2d(x,y,cs,labels,ptype,path=None,colorsMap='jet'):
     """A general utility method for plotting a 2D heat map"""
@@ -417,7 +418,11 @@ def main():
         quit()
 
     # Glob data files
-    sg = os.path.join(s4_dir,'**/*.E')
+    if conf.get('General','save_as') == 'text':
+        sg = os.path.join(s4_dir,'**/*.E.crnch')
+    elif conf.get('General','save_as') == 'npz': 
+        sg = os.path.join(s4_dir,'**/*.E.npz')
+
     s4_files = glob.glob(sg,recursive=True)
     cg = os.path.join(coms_dir,'frequency*.txt')
     coms_files = glob.glob(cg)

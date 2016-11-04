@@ -723,7 +723,7 @@ class Plotter(Processor):
                     line = mlines.Line2D(xv,yv,linestyle='solid',linewidth=2.0,color='black')
                     ax.add_line(line)
         if self.gconf.getboolean('General','save_plots'):
-            name = labels[-1]+'_'+ptype+'.pdf'
+            name = labels[2]+'_'+ptype+'.pdf'
             path = os.path.join(self.sim.get('General','sim_dir'),name)
             fig.savefig(path)
         if self.gconf.getboolean('General','show_plots'):
@@ -848,7 +848,7 @@ class Plotter(Processor):
         plt.ylabel(labels[1])
         plt.title(labels[2])
         if self.gconf.getboolean('General','save_plots'):
-            name = labels[-1]+'_'+ptype+'.pdf'
+            name = labels[1]+'_'+ptype+'.pdf'
             path = os.path.join(self.sim.get('General','sim_dir'),name)
             fig.savefig(path)
         if self.gconf.getboolean('General','show_plots'):

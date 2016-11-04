@@ -285,8 +285,7 @@ def run_sorted_sweep(conf):
     log.debug('Opts before sorting: %s',str(opts))
     # TODO: This should really be in pre_check()
     if not all([len(x[1].split(';')) == 2 for x in opts]):
-        print("You forgot to add a sorting key to one of your sorting parameters")
-        quit()
+        raise ValueError("You forgot to add a sorting key to one of your sorting parameters")
     sort_opts = sorted(opts,key = lambda tup: tup[-1].split(';')[-1])
     log.debug('Opts after sorting: %s',str(sort_opts))
     # Done with the sorting keys so we can discard them

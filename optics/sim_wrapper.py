@@ -7,6 +7,7 @@ import configparser as confp
 import glob
 import logging
 import datetime
+from profilehooks import profile
 from multiprocessing import cpu_count 
 
 def parse_file(path):
@@ -60,7 +61,7 @@ def configure_logger(level,logger_name,log_dir,logfile):
 def sh(cmd):
     return subprocess.Popen(cmd,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE).communicate()
 
-def start_sim(script,ini_file):
+def start_sim(script,ini_file,timed=False):
     '''Executes commands directly to the native bash shell using subprocess.Popen, and retrieves
     stdout and stderr. 
     
@@ -74,7 +75,12 @@ def start_sim(script,ini_file):
             - err: string'''
     log = logging.getLogger('sim_wrapper') 
     log.info('Hit core limit, polling processes ...')
-    cmd = '/usr/bin/lua %s %s'%(script,ini_file)
+    if timed:
+        log.info('TIMING LUA SCRIPT')
+        cmd = '/usr/bin/time -vv -o timing.dat /usr/bin/lua %s %s'%(script,ini_file)
+        #cmd = '/usr/bin/perf stat -o timing.dat -r 5 /usr/bin/lua %s %s'%(script,ini_file)
+    else:
+        cmd = '/usr/bin/lua %s %s'%(script,ini_file)
     log.debug('Subprocess command: %s',cmd)
     return subprocess.Popen(cmd,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
 
@@ -146,7 +152,7 @@ def run_single_sim(conf):
     os.chdir(path)
     workdir = os.path.basename(basedir)
     log.info("Starting simulation for %s ....",workdir)
-    proc = start_sim(script,"sim_conf.ini")
+    proc = start_sim(script,"sim_conf.ini",sim_conf.getboolean('General','save_time'))
     out,err = proc.communicate()
     log.debug('Simulation stdout: %s',out)
     log.info('Simulation stderr: %s',err)
@@ -252,13 +258,14 @@ def run_sweep(conf):
         # Now write the config file to the appropriate subdir
         with open(os.path.join(fullpath,'sim_conf.ini'),'w+') as new_conf:
             sim_conf.write(new_conf)
-       
-        script = os.path.join(basedir,'s4_sim.py')
+      
+        base_script = sim_conf.get('General','sim_script')
+        script = os.path.join(basedir,os.path.basename(base_script))
         if not os.path.exists(script):
-            shutil.copyfile(sim_conf.get('General','sim_script'),script)
+            shutil.copyfile(base_script,script)
         os.chdir(fullpath)
         log.info("Starting simulation for %s ....",workdir)
-        proc = start_sim(script,"sim_conf.ini")
+        proc = start_sim(script,"sim_conf.ini",sim_conf.getboolean('General','save_time'))
         fpath = os.path.join(fullpath,sim_conf.get('General','base_name')+'.E')
         if not conf.getboolean('General','parallel'):
             out,err = proc.communicate()

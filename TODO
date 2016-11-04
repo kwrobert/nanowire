@@ -8,4 +8,8 @@ of time)
 7) Add capability to look up minimum number of basis terms to sim_wrapper 
 8) Write script to compute and plot time scaling with # of basis terms
 9) Add function to compute and plot generation rate in postprocess
-10) Make minimum basis term plots bar graphs instead of line plots!!
+10) Find a better way of handling sorted parameter sweeps. Right now all the jobs in each sorted
+branch of the directory tree are executed independently. When not executing things in parallel, this
+is totally fine and does not reduce efficiency. However, if we are running things in parallel and
+each sorted branch contains a number of leaf nodes (and therefore leaf jobs) less than the number of 
+useable cores, then some cores will always go unused. 

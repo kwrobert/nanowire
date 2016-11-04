@@ -113,11 +113,13 @@ class Processor(object):
 
     def set_sim(self,sim):
         """Wrapper method to set the current simulation and retrieve and set the data attributes"""
+        self.log.info('Setting sim to %s',sim.get('General','sim_dir'))
         self.sim = sim
         self.e_data,self.e_lookup,self.h_data,self.h_lookup,self.pos_inds = self.get_data(sim)
 
     def get_data(self,sim):
         """Returns the E and H data for this particular sim"""
+        self.log.info('Collecting data for sim %s',sim.get('General','sim_dir'))
         sim_path = sim.get('General','sim_dir')
         base_name = self.gconf.get('General','base_name')
         ftype = self.gconf.get('General','save_as')
@@ -182,7 +184,7 @@ class Processor(object):
             pos_inds[:,:] = e_data[:,0:3]
         else:
             raise ValueError('Incorrect file type specified in [General] section of config file')
-
+        self.log.info('Collection complete!')
         return e_data,e_lookup,h_data,h_lookup,pos_inds
 
     def get_scalar_quantity(self,quantity):
@@ -218,6 +220,7 @@ class Cruncher(Processor):
         the only object that touches raw data files spit out by the simulations. Every other child 
         of Processor consumes files parsed and tidied up by Cruncher"""
         self.log.debug('CRUNCHER GET_DATA')
+        self.log.info('Collecting raw data for sim %s',sim.get('General','sim_dir'))
         sim_path = sim.get('General','sim_dir')
         base_name = self.gconf.get('General','base_name')
         ftype = self.gconf.get('General','save_as')
@@ -238,12 +241,11 @@ class Cruncher(Processor):
         pos_inds = np.zeros((e_data.shape[0],3))
         pos_inds[:,:] = e_data[:,0:3] 
         self.log.debug('E shape after getting: %s',str(e_data.shape))        
+        self.log.info('Collection complete!')
         return e_data,self.e_lookup,h_data,self.h_lookup,pos_inds
 
     def crunch(self):
         self.log.info('Beginning data crunch ...')
-        # NOTE: Doesn't make sense to switch the order of these loops as in the Plotter class
-        # because we only want to write out data matrix once
         for sim in self.sims:
             # Set it as the current sim and grab its data
             self.set_sim(sim)
@@ -628,8 +630,9 @@ class Global_Cruncher(Processor):
                     if len(mag_diff_vec) != len(normvec):
                         self.log.error("The normalization vector has an incorrect number of elements!!!")
                         quit()
-                    # Error should be ratio of sum of mag diff vec squared to mag efield squared
-                    error = np.sum(mag_diff_vec)/np.sum(normvec)
+                    # Error as a percentage should be the square root of the ratio of sum of mag diff vec 
+                    # squared to mag efield squared
+                    error = np.sqrt(np.sum(mag_diff_vec)/np.sum(normvec))
                     self.log.info(str(error))
                     errfile.write('%i,%f\n'%(sim2.getint('Parameters','numbasis'),error))
 
@@ -641,17 +644,14 @@ class Plotter(Processor):
     
     def plot(self):
         self.log.info("Beginning local plotter method ...")
-        for plot,args in self.gconf.items('Plotter'):
-            self.log.info('Plotting %s with args %s',str(plot),str(args))
-            # This is a special case because we need to compute error between sims and we need
-            # to make sure all our other quantities have been calculated before we can compare
-            # them
-            for sim in self.sims:
-                # Set it as the current sim and grab its data
-                self.set_sim(sim)
-                # For each plot 
-                self.log.info('Plotting data for sim %s',
-                              str(os.path.basename(self.sim.get('General','sim_dir'))))
+        for sim in self.sims:
+            # Set it as the current sim and grab its data
+            self.set_sim(sim)
+            # For each plot 
+            self.log.info('Plotting data for sim %s',
+                          str(os.path.basename(self.sim.get('General','sim_dir'))))
+            for plot,args in self.gconf.items('Plotter'):
+                self.log.info('Plotting %s with args %s',str(plot),str(args))
                 for argset in args.split(';'):
                     self.log.info('Passing following arg set to function %s: %s',str(plot),str(argset))
                     if argset:
@@ -793,7 +793,7 @@ class Plotter(Processor):
         ax.scatter(x, y, z, c=scalarMap.to_rgba(cs),edgecolor='none')
         scalarMap.set_array(cs)
         cb = fig.colorbar(scalarMap)
-        cb.set_label(labels[-1])
+        cb.set_label(labels[3])
         ax.set_xlabel(labels[0])
         ax.set_ylabel(labels[1])
         ax.set_zlabel(labels[2])

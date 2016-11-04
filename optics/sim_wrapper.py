@@ -83,23 +83,22 @@ def poll_procs(procs):
     log.info('Hit core limit, polling processes ...')
     # While there are running processes
     while procs:
-        # Find which processes have terminated
-        flags = []
-        for proc in procs:
-            #if proc[0].poll() != None and os.path.exists(proc[2]):
-            if proc[0].poll() != None:
-                flags.append(True)
-            else:
-                flags.append(False)
-        # Remove from list if terminated. Do this seperately so we don't modify procs list while looping
-        # through it
-        inds = [nf for nf,flag in enumerate(flags) if flag]
-        for i in sorted(inds, reverse=True):
-            out,err = procs[i][0].communicate()
-            log.debug('Simulation stdout for %s: %s',procs[i][1],str(out))
-            log.info('Simulation stderr for %s: %s',procs[i][1],str(err))
-            log.info("Finished simulation for %s!",str(procs[i][1]))
-            del procs[i]
+        # True if the process finished, false if not. This way we only actually poll processes once,
+        # polling seperately for finished and running procs might cause inconsistencies 
+        flags = [True if proc[0].poll() != None else False for proc in procs]
+        # The processes which have terminated 
+        fin_procs = [procs[i] for i in range(len(flags)) if flags[i]]
+        # Running procs
+        run_procs = [procs[i] for i in range(len(flags)) if not flags[i]]
+        # Retrieve output from finished procs
+        for proc in fin_procs:
+            out,err = proc[0].communicate()
+            log.debug('Simulation stdout for %s: %s',proc[1],str(out))
+            log.info('Simulation stderr for %s: %s',proc[1],str(err))
+            log.info("Finished simulation for %s!",str(proc[1]))
+        procs = run_procs
+    log.info('Batch complete!')
+    return procs
 
 def sim(script,ini_file):
     out,err = sh('python %s %s'%(script,ini_file))
@@ -197,8 +196,8 @@ def run_sweep(conf):
     # If not running in parallel, this list will always be empty
     procs = []
     if conf.getboolean('General','parallel'):
-        num_procs = cpu_count()-conf.getint('General','reserved_cores')
-        log.info('Using %i cores ...'%num_procs)
+        max_procs = cpu_count()-conf.getint('General','reserved_cores')
+        log.info('Using %i cores ...'%max_procs)
     # Loop through each unique combination of parameters
     for combo in combos:
         # Make a unique working directory based on parameter combo
@@ -270,10 +269,10 @@ def run_sweep(conf):
             # The reason for not using multiprocessing is because each process outputs and
             # identically named file and multiprocessing pools would spit them all out into the same
             # directory
-            if len(procs) < num_procs:
-                procs.append((proc,workdir,fpath))
+            if len(procs) < max_procs:
+                procs.append((proc,os.path.relpath(fullpath,basedir),fpath))
             else:
-                poll_procs(procs)
+                procs = poll_procs(procs)
         os.chdir(basedir)
     if procs:
         poll_procs(procs)

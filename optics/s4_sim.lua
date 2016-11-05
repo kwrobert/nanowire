@@ -263,7 +263,7 @@ function build_sim(conf)
     -- counterclockwise. 
     -- In S4, if indicent angles are 0, p-polarization is along x-axis. The minus sign on front of the 
     -- x magnitude is just to get things to look like Anna's simulations.
-    sim:SetExcitationPlanewave({0,0},{E_mag,0},{E_mag,math.pi/4.0})
+    sim:SetExcitationPlanewave({0,0},{-E_mag,0},{-E_mag,90})
     --sim.OutputLayerPatternPostscript(Layer='ito',Filename='out.ps')
     --sim.OutputStructurePOVRay(Filename='out.pov')
     output_file = conf["General"]["base_name"]

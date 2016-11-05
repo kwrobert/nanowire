@@ -9,3 +9,4 @@ sims/*
 comsolcompare/*
 *.ipynb
 .ipynb*/
+sanity_check_run/*

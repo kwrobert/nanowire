@@ -289,7 +289,7 @@ function build_sim(conf)
     sim:SetExcitationPlanewave({0,0},{E_mag,0},{E_mag,math.pi/4.0})
     --sim.OutputLayerPatternPostscript(Layer='ito',Filename='out.ps')
     --sim.OutputStructurePOVRay(Filename='out.pov')
-    output_file = conf["General"]["base_name"]
+    output_file = path.join(conf['General']['sim_dir'],conf["General"]["base_name"])
     glob = stringx.join('',{output_file,".*"})
     cwd = path:currentdir()
     existing_files = dir.getfiles(cwd,glob)

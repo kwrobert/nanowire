@@ -274,11 +274,12 @@ def run_sim(jobtup):
     log = logging.getLogger('sim_wrapper') 
     jobpath,jobconf = jobtup
     timed = jobconf.getboolean('General','save_time')
+    touf = os.path.join(jobpath,'timing.dat')
     script = jobconf.get('General','sim_script')
     ini_file = os.path.join(jobpath,'sim_conf.ini')
     if timed:
         log.debug('Executing script with timing wrapper ...')
-        cmd = '/usr/bin/time -vv -o timing.dat /usr/bin/lua %s %s'%(script,ini_file)
+        cmd = '/usr/bin/time -vv -o %s /usr/bin/lua %s %s'%(tout,script,ini_file)
         #cmd = '/usr/bin/perf stat -o timing.dat -r 5 /usr/bin/lua %s %s'%(script,ini_file)
     else:
         cmd = '/usr/bin/lua %s %s'%(script,ini_file)

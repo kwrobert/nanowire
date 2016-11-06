@@ -18,6 +18,8 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.cm as cmx
 import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
+# Literally just for the initial data load
+import pandas
 
 def configure_logger(level,logger_name,log_dir,logfile):
     # Get numeric level safely
@@ -228,13 +230,18 @@ class Cruncher(Processor):
         h_path = os.path.join(sim_path,base_name+'.H')
         # Load E field data
         try: 
-            e_data = np.loadtxt(e_path)
+            #e_data = np.loadtxt(e_path)
+            # pandas read_csv is WAY faster than loadtxt
+            d = pandas.read_csv(e_path,delim_whitespace=True)
+            e_data = d.as_matrix()
         except FileNotFoundError:
             self.log.error('Following file missing: %s',e_path)
             raise
         # Load the H field data
         try:
-            h_data = np.loadtxt(h_path)
+            #h_data = np.loadtxt(h_path)
+            d = pandas.read_csv(h_path,delim_whitespace=True)
+            h_data = d.as_matrix()
         except FileNotFoundError:
             self.log.error('Following file missing: %s',h_path)
             raise

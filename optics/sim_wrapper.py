@@ -274,7 +274,7 @@ def run_sim(jobtup):
     log = logging.getLogger('sim_wrapper') 
     jobpath,jobconf = jobtup
     timed = jobconf.getboolean('General','save_time')
-    touf = os.path.join(jobpath,'timing.dat')
+    tout = os.path.join(jobpath,'timing.dat')
     script = jobconf.get('General','sim_script')
     ini_file = os.path.join(jobpath,'sim_conf.ini')
     if timed:

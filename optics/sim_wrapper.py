@@ -150,7 +150,6 @@ def make_leaves(nodes):
     # of the inner lists corresponds to the ith param name in keys. The inner list consists of 
     # a unique combination of variable parameters. Note all nodes sweep through the same parameters
     # so we only need to compute this once. 
-    print(nodes)
     keys,combos = get_combos(nodes[0][1].items("Variable Parameters"))
     # Build all the leaves at every node in the directory tree 
     leaves = []
@@ -220,7 +219,7 @@ def make_leaves(nodes):
 def make_nodes(conf):
     # Get access to logger
     log = logging.getLogger('sim_wrapper')
-    log.info("Construction all nodes in sorted directory tree ...")
+    log.info("Constructing all nodes in sorted directory tree ...")
     opts = conf.items("Sorting Parameters")
     log.debug('Opts before sorting: %s',str(opts))
     # TODO: This should really be in pre_check()

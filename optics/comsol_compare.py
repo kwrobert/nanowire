@@ -103,7 +103,6 @@ def parse_s4(conf,compdir,path):
     # Do the same for the S4 file
     fdir,fname = os.path.split(path)
     freq = os.path.basename(fdir)
-    formatted = os.path.join(compdir,freq+'.formatted')
     if conf.get('General','save_as') == 'text':
         emat = np.loadtxt(path)
         # Convert pos_inds to positions
@@ -293,10 +292,6 @@ def compare_data(s4data,comsoldata,conf,files,interpolate=False,exclude=False):
         # Exclude the air regions and substrate regions
         arr = np.linspace(0,h,z_samples)
         dz = arr[1] - arr[0]
-        #print('dz = ',dz)
-        #print(round(conf.getfloat('Fixed Parameters','air_t')/dz))
-        #print(round(sum((conf.getfloat('Fixed Parameters','nw_height'),conf.getfloat('Fixed Parameters','air_t'),
-        #        conf.getfloat('Fixed Parameters','ito_t')))/dz))
         start_plane = int(round(conf.getfloat('Fixed Parameters','air_t')/dz))
         start = start_plane*(x_samples*y_samples)
         end_plane = int(round(sum((conf.getfloat('Fixed Parameters','nw_height'),conf.getfloat('Fixed Parameters','air_t'),
@@ -319,22 +314,6 @@ def compare_data(s4data,comsoldata,conf,files,interpolate=False,exclude=False):
 
     if interpolate:
         print('Interpolating data sets before comparison ...')
-        # These should be zero
-        #print("These should be zero")
-        #xv,yv,zv = np.meshgrid(s4_points
-        #interp_vals_s4 = spi.griddata(s4_points,s4_mag,
-        #                 (s4_points[:,0],s4_points[:,1],s4_points[:,2]),method='linear')
-        #interp_vals_coms = spi.griddata(comsol_pts,comsol_mag,comsol_pts,method='linear')
-        #err = relative_difference(interp_vals_s4,s4_mag)
-        #print("Error between interpolated and actual S4 mag = ",err)
-        #err = relative_difference(interp_vals_coms,comsol_mag)
-        #print("Error between interpolated and actual COMSOL mag = ",err)
-        
-        # Regular grid
-        # Interpolating S4 points onto comsol data/grid
-        #for tup in zip(comsol_mag,s4_mag):
-        #    print(tup)
-        #x = input('Continue?')
         cx,cy,cz = np.unique(comsol_pts[:,0]),np.unique(comsol_pts[:,1]),np.unique(comsol_pts[:,2])
         points = (cx,cy,cz)
         dat = np.column_stack((comsol_pts,comsol_mag))
@@ -352,23 +331,6 @@ def compare_data(s4data,comsoldata,conf,files,interpolate=False,exclude=False):
         diff_vec, err = relative_difference(interp_vals_coms,s4_mag)
         print("The error between interpolated COMSOL and S4 = ",err)
         diff_dat = np.column_stack((s4_points,diff_vec))
-
-        # These should be the same
-
-        ## This is the S4 data on the COMSOL points
-        #cx,cy,cz = np.meshgrid(np.unique(comsol_pts[:,0]),
-        #                       np.unique(comsol_pts[:,1]),np.unique(comsol_pts[:,2]))
-        #interp_vals_s4 = spi.griddata(s4_points,s4_mag,(cx,cy,cz),method='linear')
-        ## This is the COMSOL data on the S4 points
-        #interp_vals_coms = spi.griddata(comsol_pts,comsol_mag,s4_points,method='linear')
-        #print(interp_vals_s4)
-        #print(interp_vals_coms)
-        #print('Computing error')
-        #err = relative_difference(interp_vals_s4,comsol_mag) 
-        #print("The error between interpolated S4 and COMSOL = ",err)
-        #print(s4data[:,-1])
-        #err = relative_difference(interp_vals_coms,s4_mag) 
-        #print("The error between interpolated COMSOL and S4 = ",err)
     else:
         # Just get error without interpolating 
         print('Not interpolating data sets before comparison ...')

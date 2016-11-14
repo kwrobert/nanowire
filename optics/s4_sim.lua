@@ -135,6 +135,7 @@ function write_config(conf,path)
             io.write(string.format('%s = %s\n',par,val))
         end
     end
+    io.flush()
 end
 
 function parse_config(path)
@@ -237,6 +238,8 @@ function build_sim(conf)
     shell_rad = core_rad + getfloat(conf,'Parameters','shell_t')
     sim:SetLayerPatternCircle('nanowire_alshell','AlInP',{vec_mag/2,vec_mag/2},shell_rad)
     sim:SetLayerPatternCircle('nanowire_alshell','GaAs',{vec_mag/2,vec_mag/2},core_rad)
+    --sim:SetLayerPatternCircle('nanowire_alshell','AlInP',{0,0},shell_rad)
+    --sim:SetLayerPatternCircle('nanowire_alshell','GaAs',{0,0},core_rad)
     -- Si layer and patterning 
     sim:AddLayer('nanowire_sishell',getfloat(conf,'Parameters','sio2_height'),'Cyclotene')
     -- Add patterning to layer with SiO2 shell 
@@ -264,7 +267,13 @@ function build_sim(conf)
     -- In S4, if indicent angles are 0, p-polarization is along x-axis. The minus sign on front of the 
     -- x magnitude is just to get things to look like Anna's simulations.
     sim:SetExcitationPlanewave({0,0},{-E_mag,0},{-E_mag,90})
-    --sim.OutputLayerPatternPostscript(Layer='ito',Filename='out.ps')
+    -- Get gnoplot output of vector field
+    -- prefix = path.join(conf['General']['sim_dir'],'vecfield')
+    -- print(prefix)
+    -- sim:SetBasisFieldDumpPrefix(prefix)
+    -- Get layer patterning  
+    -- out = path.join(conf['General']['sim_dir'],'out.ps')
+    -- sim:OutputLayerPatternRealization('nanowire_alshell',50,50,out)
     --sim.OutputStructurePOVRay(Filename='out.pov')
     output_file = path.join(conf['General']['sim_dir'],conf["General"]["base_name"])
     glob = stringx.join('',{output_file,".*"})

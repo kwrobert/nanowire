@@ -1,10 +1,29 @@
+Code
+====
+
 1) Fix simulation subproccesing in sim_wrapper so we get output/feedback from S4 library when
    verbosity > 1
 2) Fix automatic post processing so we get feedback to stdout as well as logs
-3) Add parallelization amoung list of SSH accessible hosts (paramiko, need pub keys exchanged ahead
-of time)
-4) Add error checking of plane values in setup.ini to make sure they do not exceed number of samples
-5) Parallelize postprocessing
-7) Add capability to look up minimum number of basis terms to sim_wrapper 
-8) Write script to compute and plot time scaling with # of basis terms
-9) Add function to compute and plot generation rate in postprocess
+3) Add error checking of plane values in setup.ini to make sure they do not exceed number of samples
+4) Parallelize postprocessing
+5) Add capability to look up minimum number of basis terms to sim_wrapper 
+    a) Will need to create a database. Store number of basis terms for each combination of
+       frequency and some reasonable number of geometric parameters. 
+6) Add function to compute and plot generation rate in postprocess
+7) Add counter to simulation sweeps so we know how many are left to run 
+
+Reading
+=======
+
+1) Read Rays paper and identify any gaps in their optimization that we could fill
+2) Find/ask for generation rate document Anna made and read it
+3) Genetic algorithm book that I downloaded. Should be somewhere in papers/  
+
+Simulations
+===========
+
+1) Run a full convergence analysis for different system sizes
+    a) period 200 nm, radius 75
+    b) period 300 nm, radius 60
+2) Run simulation with fixed total nanowire radius, but vary ratio between shell thickness
+   and core radius 

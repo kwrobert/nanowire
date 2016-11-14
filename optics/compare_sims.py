@@ -56,9 +56,18 @@ def relative_difference(x,y):
         print("You have attempted to compare datasets with an unequal number of points!!!!")
         quit()
     else:
-        diff = (x-y)**2
-        rel_diff  = np.sum(diff)/np.sum(x**2)
+        diff = np.abs(x-y)/x
+        rel_diff  = np.sum(diff)/np.sum(x)
         return diff, rel_diff
+
+#def relative_difference(x,y):
+#    """Return the mean squared error between two equally sized sets of data"""
+#    if x.size != y.size:
+#        print("You have attempted to compare datasets with an unequal number of points!!!!")
+#        quit()
+#    else:
+#        mag_diff_vec = np.sum((x-y)**2,axis=1)
+#        return mag_diff_vec
 
 def compare_data(s4data,comsoldata,conf,files,interpolate=False,exclude=False):
     """ The points extracted from COMSOL and S4 are not exactly the same, so we need to interpolate S4
@@ -121,14 +130,16 @@ def compare_data(s4data,comsoldata,conf,files,interpolate=False,exclude=False):
         # Just get error without interpolating 
         print('Not interpolating data sets before comparison ...')
         diff_vec, err = relative_difference(s4_mag,comsol_mag) 
-        diff_dat = np.column_stack((s4_points,diff_vec))
+        norm_diff_vec = diff_vec / s4_mag
+        diff_dat = np.column_stack((s4_points,norm_diff_vec))
         print("The error between COMSOL and S4 = ",err)
     return diff_dat, err
 
 def heatmap2d(x,y,cs,labels,ptype,path=None,colorsMap='jet'):
     """A general utility method for plotting a 2D heat map"""
     cm = plt.get_cmap(colorsMap)
-    cNorm = matplotlib.colors.Normalize(vmin=np.amin(cs), vmax=np.amax(cs))
+    #cNorm = matplotlib.colors.Normalize(vmin=np.amin(cs), vmax=np.amax(cs))
+    cNorm = matplotlib.colors.LogNorm(vmin=np.amin(cs), vmax=np.amax(cs))
     scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
     fig = plt.figure(figsize=(9,7))
     ax = fig.add_subplot(111)
@@ -158,7 +169,7 @@ def heatmap2dax(ax,x,y,cs,labels,cNorm,conf,colorsMap='jet'):
     cb.set_label(labels[2])
     ax.set_xlabel(labels[0])
     ax.set_ylabel(labels[1])
-    ax.set_title(labels[3])
+    #ax.set_title(labels[3])
     ax.axis('tight')
     ## Draw a line at the interface between each layer
     #ito_line = conf.getfloat('Fixed Parameters','air_t')
@@ -215,7 +226,7 @@ def gen_plots(s4dat,comsdat,diffdat,conf,files):
     planes = np.array([row for row in mat if np.abs(row[0]-dx*(x_samp/2)) < .0001])
     x,y,z = np.unique(planes[:,0]),np.unique(planes[:,1]),np.unique(planes[:,2])
     cs = planes[:,-1].reshape(z.shape[0],y.shape[0])
-    labels = ('y [um]','z [um]', 'normE', 'S4 Data')
+    labels = ('y [um]','z [um]', 'normE', 'Data1')
     ax1 = heatmap2dax(ax1,y,z,cs,labels,cNorm,conf)
     # Plots comsol data
     xval = .12755
@@ -223,7 +234,7 @@ def gen_plots(s4dat,comsdat,diffdat,conf,files):
     planes = np.array([row for row in mat if np.abs(row[0]-dx*(x_samp/2)) < .0001])
     x,y,z = np.unique(planes[:,0]),np.unique(planes[:,1]),np.unique(planes[:,2])
     cs = planes[:,-1].reshape(z.shape[0],y.shape[0])
-    labels = ('y [um]','z [um]', 'normE','COMSOL Data')
+    labels = ('y [um]','z [um]', 'normE','Data2')
     ax2 = heatmap2dax(ax2,y,z,cs,labels,cNorm,conf)
     scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
     # Plots diff data
@@ -231,7 +242,8 @@ def gen_plots(s4dat,comsdat,diffdat,conf,files):
     x,y,z = np.unique(planes[:,0]),np.unique(planes[:,1]),np.unique(planes[:,2])
     cs = planes[:,-1].reshape(z.shape[0],y.shape[0])
     labels = ('y [um]','z [um]', 'M.S.E','Difference Between Data Sets')
-    cNorm = matplotlib.colors.Normalize(vmin=np.amin(cs), vmax=np.amax(cs))
+    #cNorm = matplotlib.colors.Normalize(vmin=np.amin(cs), vmax=np.amax(cs))
+    cNorm = matplotlib.colors.LogNorm(vmin=np.amin(cs), vmax=np.amax(cs))
     ax3 = heatmap2dax(ax3,y,z,cs,labels,cNorm,conf)
     scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
     # Fix overlap
@@ -241,7 +253,7 @@ def gen_plots(s4dat,comsdat,diffdat,conf,files):
     path = os.path.join(files[-1],fname)
     name = path+'multiplot.pdf'
     print('Saving figure %s'%name)
-    fig.suptitle('Frequency = %.4E'%comsdat[0,3])
+    #fig.suptitle('Frequency = %.4E'%comsdat[0,3])
     fig.subplots_adjust(top=0.85)
     plt.savefig(name)
     plt.close(fig)

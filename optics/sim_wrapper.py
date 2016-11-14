@@ -98,7 +98,7 @@ def make_single_sim(conf):
     base_script = sim_conf.get('General','sim_script')
     script = os.path.join(path,os.path.basename(base_script))
     if not os.path.exists(script):
-        shutil.copyfile(base_script,script)
+        shutil.copy(base_script,script)
     return (path,sim_conf)
     
 def get_combos(tuplist):
@@ -159,12 +159,14 @@ def make_leaves(nodes):
             # Make a unique working directory based on parameter combo
             workdir=''
             for i in range(len(combo)):
-                if isinstance(combo[i],float) and combo[i] >= 10000:
-                    substr = '{}_{:.4E}__'.format(keys[i],combo[i])
-                    workdir += substr 
-                else:
-                    substr = '{}_{:.4f}__'.format(keys[i],combo[i])
-                    workdir += substr 
+                substr = '{}_{:G}__'.format(keys[i],combo[i])
+                workdir += substr 
+                #if isinstance(combo[i],float) and combo[i] >= 10000:
+                #    substr = '{}_{:.4E}__'.format(keys[i],combo[i])
+                #    workdir += substr 
+                #else:
+                #    substr = '{}_{:.4f}__'.format(keys[i],combo[i])
+                #    workdir += substr 
             workdir=workdir.rstrip('__')
             fullpath = os.path.join(nodepath,workdir)
             try:
@@ -209,7 +211,7 @@ def make_leaves(nodes):
             base_script = sim_conf.get('General','sim_script')
             script = os.path.join(nodepath,os.path.basename(base_script))
             if not os.path.exists(script):
-                shutil.copyfile(base_script,script)
+                shutil.copy(base_script,script)
             leaves.append((fullpath,sim_conf))
     log.debug('Here are the leaves: %s',str(leaves))
     log.info('Finished building leaves!')
@@ -239,26 +241,33 @@ def make_nodes(conf):
     for combo in combos:
         # Copy global config object
         sub_conf = copy_conf_obj(conf)
-        # Remove sorting param section
-        sub_conf.remove_section('Sorting Parameters')
         # Build path and add params to new config object
         path = conf.get('General','basedir')
         for i in range(len(combo)):
             sub_conf.set('Fixed Parameters',keys[i],str(combo[i]))
-            if isinstance(combo[i],float) and combo[i] >= 10000:
-                subdir = '{}_{:.4E}'.format(keys[i],combo[i])
-                path = os.path.join(path,subdir)
+            sub_conf.remove_option("Sorting Parameters",keys[i])
+            subdir = '{}_{:G}'.format(keys[i],combo[i])
+            path = os.path.join(path,subdir)
+            #if isinstance(combo[i],float) and combo[i] >= 10000:
+            #    subdir = '{}_{:.4E}'.format(keys[i],combo[i])
+            #    path = os.path.join(path,subdir)
+            #else:
+            #    subdir = '{}_{:.2f}'.format(keys[i],combo[i])
+            #    path = os.path.join(path,subdir)
+            try:
+                os.makedirs(path)
+            except OSError:
+                pass
+            log.info("Created node %s",path)
+            sub_conf.set('General','basedir',path)
+            if not i == len(combo)-1:
+                with open(os.path.join(path,'sorted_sweep_conf_%s.ini'%keys[i]),'w') as conf_file:
+                    sub_conf.write(conf_file) 
             else:
-                subdir = '{}_{:.2f}'.format(keys[i],combo[i])
-                path = os.path.join(path,subdir)
-        try:
-            os.makedirs(path)
-        except OSError:
-            pass
-        log.info("Created node %s",path)
-        sub_conf.set('General','basedir',path)
-        with open(os.path.join(path,'sorted_sweep_conf.ini'),'w') as conf_file:
-            sub_conf.write(conf_file) 
+                # Remove sorting param section
+                sub_conf.remove_section('Sorting Parameters')
+                with open(os.path.join(path,'sorted_sweep_conf.ini'),'w') as conf_file:
+                    sub_conf.write(conf_file)
         nodes.append((path,sub_conf))
     log.debug('Here are the nodes: %s',str(nodes))
     log.info('Finished building nodes!')
@@ -356,11 +365,11 @@ def pre_check(conf_path,conf):
     # Warn user if they are about to dump a bunch of simulation data and directories into a
     # directory that already exists
     base = conf.get("General","basedir")
-    if os.path.isdir(base):
-        print('WARNING!!! You are about to start a simulation in a directory that already exists')
-        print('WARNING!!! This will dump a whole bunch of crap into that directory and possibly')
-        print('WARNING!!! overwrite old simulation data.')
-        ans = input('Would you like to continue? CTRL-C to exit, any other key to continue: ')
+    #if os.path.isdir(base):
+    #    print('WARNING!!! You are about to start a simulation in a directory that already exists')
+    #    print('WARNING!!! This will dump a whole bunch of crap into that directory and possibly')
+    #    print('WARNING!!! overwrite old simulation data.')
+    #    ans = input('Would you like to continue? CTRL-C to exit, any other key to continue: ')
     # Copy provided config file to basedir
     try:
         os.makedirs(base)

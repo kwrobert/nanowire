@@ -5,6 +5,7 @@ import argparse as ap
 import os
 import configparser as confp 
 import re
+import glob
 import logging
 from collections import OrderedDict
 import matplotlib
@@ -93,7 +94,6 @@ class Processor(object):
                 conf_paths = [os.path.join(root,simdir,'sim_conf.ini') for simdir in dirs]
                 self.log.debug('Sim group confs: %s',str(conf_paths))
                 self.sim_groups.append(list(map(parse_file,conf_paths)))
-                self.log.debug('Sim groups: %s',str(self.sim_groups))
 
     def sort_sims(self):
         """Sorts simulations by their parameters the way a human would. Called human sorting or
@@ -102,6 +102,8 @@ class Processor(object):
             return int(text) if text.isdigit() else text
 
         def natural_keys(sim):
+            self.log.debug(sim)
+            self.log.debug(sim.sections())
             text = sim.get('General','sim_dir')
             return [ atoi(c) for c in re.split('(\d+)', text) ]
 
@@ -560,12 +562,15 @@ class Global_Cruncher(Processor):
         # If we need to exclude calculate the indices
         if exclude:
             start,end = self.get_slice()    
+            excluded = '_excluded'
         else:
             start = 0
             end = None
+            excluded = ''
         for group in self.sim_groups:
             base = group[0].get('General','basedir')
-            with open(os.path.join(base,'localerror_%s.dat'%field),'w') as errfile:
+            errpath = os.path.join(base,'localerror_%s%s.dat'%(field,excluded))
+            with open(errpath,'w') as errfile:
                 self.log.info('Computing local error for sweep %s',base)
                 # Set comparison sim to current sim
                 self.set_sim(group[-1])
@@ -607,13 +612,15 @@ class Global_Cruncher(Processor):
         # If we need to exclude calculate the indices
         if exclude:
             start,end = self.get_slice()    
+            excluded = '_excluded'
         else:
             start = 0
             end = None
-        
+            excluded = ''
         for group in self.sim_groups:
             base = group[0].get('General','basedir')
-            with open(os.path.join(base,'globalerror_%s.dat'%field),'w') as errfile:
+            errpath = os.path.join(base,'globalerror_%s%s.dat'%(field,excluded))
+            with open(errpath,'w') as errfile:
                 self.log.info('Computing global error for sweep %s',base)
                 # Set comparison sim to current sim
                 self.set_sim(group[-1])
@@ -903,39 +910,45 @@ class Global_Plotter(Plotter):
 
     def convergence(self,quantity,err_type='global',scale='linear'):
         """Plots the convergence of a field across all available simulations"""
-        self.log.info('Actually plotting convergence')
+        self.log.info('Plotting convergence')
         for group in self.sim_groups:
             base = group[0].get('General','basedir')
             if err_type == 'local':
-                path = os.path.join(base,'localerror_%s.dat'%quantity) 
+                fglob = os.path.join(base,'localerror_%s*.dat'%quantity) 
             elif err_type == 'global':
-                path = os.path.join(base,'globalerror_%s.dat'%quantity) 
+                fglob = os.path.join(base,'globalerror_%s*.dat'%quantity) 
             else:
                 log.error('Attempting to plot an unsupported error type')
                 quit()
-            labels = []
-            errors = []
-            with open(path,'r') as datf:
-                for line in datf.readlines():
-                    lab, err = line.split(',')
-                    labels.append(lab)
-                    errors.append(err)
-            x = range(len(errors))
-            fig = plt.figure(figsize=(9,7))
-            plt.ylabel('M.S.E of %s'%quantity)
-            plt.xlabel('Number of Fourier Terms')
-            plt.plot(labels,errors,linestyle='-',marker='o',color='b')
-            plt.yscale(scale)
-            #plt.xticks(x,labels,rotation='vertical')
-            plt.tight_layout()
-            plt.title(os.path.basename(base))
-            if self.gconf.getboolean('General','save_plots'):
-                name = '%s_%sconvergence_%s.pdf'%(os.path.basename(base),err_type,quantity)
-                path = os.path.join(base,name)
-                fig.savefig(path)
-            if self.gconf.getboolean('General','show_plots'):
-                plt.show() 
-            plt.close(fig)
+            paths = glob.glob(fglob)
+            for path in paths:
+                labels = []
+                errors = []
+                with open(path,'r') as datf:
+                    for line in datf.readlines():
+                        lab, err = line.split(',')
+                        labels.append(lab)
+                        errors.append(err)
+                x = range(len(errors))
+                fig = plt.figure(figsize=(9,7))
+                plt.ylabel('M.S.E of %s'%quantity)
+                plt.xlabel('Number of Fourier Terms')
+                plt.plot(labels,errors,linestyle='-',marker='o',color='b')
+                plt.yscale(scale)
+                #plt.xticks(x,labels,rotation='vertical')
+                plt.tight_layout()
+                plt.title(os.path.basename(base))
+                if self.gconf.getboolean('General','save_plots'):
+                    if '_excluded' in path:
+                        excluded='_excluded'
+                    else:
+                        excluded=''
+                    name = '%s_%sconvergence_%s%s.pdf'%(os.path.basename(base),err_type,quantity,excluded)
+                    path = os.path.join(base,name)
+                    fig.savefig(path)
+                if self.gconf.getboolean('General','show_plots'):
+                    plt.show() 
+                plt.close(fig)
 
 def main():
     parser = ap.ArgumentParser(description="""A wrapper around s4_sim.py to automate parameter

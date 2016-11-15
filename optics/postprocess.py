@@ -431,7 +431,7 @@ class Cruncher(Processor):
         ito_nw = self.sim.getfloat('Parameters','ito_t')+air_ito
         nw_sio2 = self.sim.getfloat('Parameters','alinp_height')+ito_nw
         sio2_sub = self.sim.getfloat('Parameters','sio2_height')+nw_sio2
-        air_line = sub_line+self.sim.getfloat('Parameters','substrate_t')
+        air_line = self.sim.getfloat('Parameters','substrate_t')+sio2_sub
         # Compute ITO generation (note air generation is already set to zero)
         start = int(air_ito/dz)*x_samples*y_samples 
         end = int(ito_nw/dz)*x_samples*y_samples 
@@ -457,7 +457,7 @@ class Cruncher(Processor):
                     counter += 1
         # So same for SiO2 shell
         start = counter
-        end = start + self.sim.float('Parameters','sio2_height')
+        end = start + int(self.sim.getfloat('Parameters','sio2_height')/dz)
         for layer in range(start,end):
             for x in xvec:
                 for y in yvec:
@@ -471,12 +471,13 @@ class Cruncher(Processor):
         # The rest is just the substrate
         gvec[counter:] = fact*nk['GaAs'][0]*nk['GaAs'][1]*normEsq[counter:]
         # This approach is 4 times faster than np.column_stack()
+        assert(self.e_data.shape[0] == len(gvec))
         dat = np.zeros((self.e_data.shape[0],self.e_data.shape[1]+1))
         dat[:,:-1] = self.e_data
         dat[:,-1] = gvec
         self.e_data = dat 
         # Now append this quantity and its column the the header dict
-        self.e_lookup['generation_rate'] = dat.shape[1]-1 
+        self.e_lookup['genRate'] = dat.shape[1]-1 
         return gvec
 
 class Global_Cruncher(Processor):
@@ -716,7 +717,7 @@ class Plotter(Processor):
                 ito_line = self.sim.getfloat('Parameters','air_t')
                 nw_line = self.sim.getfloat('Parameters','ito_t')+ito_line
                 sub_line = self.sim.getfloat('Parameters','nw_height')+nw_line
-                air_line = sub_line+self.sim.getfloat('Parameters','substrate_t')
+                air_line = self.sim.getfloat('Parameters','substrate_t')+sub_line
                 for line_h in [(ito_line,'ITO'),(nw_line,'NW'),(sub_line,'Substrate'),(air_line,'Air')]:
                     x = [0,self.sim.getfloat('Parameters','array_period')]
                     y = [line_h[0],line_h[0]]

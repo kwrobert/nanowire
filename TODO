@@ -9,13 +9,16 @@ Code
 5) Add capability to look up minimum number of basis terms to sim_wrapper 
     a) Will need to create a database. Store number of basis terms for each combination of
        frequency and some reasonable number of geometric parameters. 
-6) Add function to compute and plot generation rate in postprocess
+5) Fix comsol_compare.py so it grabs quantities by column header 
+6) Add averaging over frequency *** 
 7) Add counter to simulation sweeps so we know how many are left to run 
+8) Fix limits on 2D color plots to remove whitespace
 
 Reading
 =======
 
 1) Read Rays paper and identify any gaps in their optimization that we could fill
+    a) Notes in Zotero
 2) Find/ask for generation rate document Anna made and read it
 3) Genetic algorithm book that I downloaded. Should be somewhere in papers/  
 
@@ -27,3 +30,8 @@ Simulations
     b) period 300 nm, radius 60
 2) Run simulation with fixed total nanowire radius, but vary ratio between shell thickness
    and core radius 
+   
+Other
+====
+
+1) Create documentation for the code and all calculations 

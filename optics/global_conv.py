@@ -54,7 +54,7 @@ def analyze(path,thresh,local,show):
         out = 'minimum_basis_terms_global_t%s.dat'%str(thresh)
 
     with open(os.path.join(path,out),'w') as minf:
-        minf.write('frequency,numterms\n')
+        minf.write('# frequency,numterms\n')
         for pair in data_pairs:
             minf.write('%E,%i\n'%(pair[0],int(pair[1]))) 
     x_vals,min_terms,converged = zip(*data_pairs)
@@ -97,10 +97,10 @@ def main():
     
     if args.local:
         print('Using local error')
-        file_reg = 'localerror_[a-zA-Z]+\.dat'
+        file_reg = 'localerror_.+\.dat'
     else:
         print('Assuming global error')
-        file_reg = 'globalerror_[a-zA-Z]+\.dat'
+        file_reg = 'globalerror_.+\.dat'
 
     excludes = [os.path.join(path,'comp_struct')]
     for root,dirs,files in os.walk(path,topdown=False):
@@ -111,6 +111,7 @@ def main():
             # If we found an error file, go up one directory and perform the analysis
             if err_files:
                 base = os.path.split(root)[0]
+                print('Analyzing error in %s'%base)
                 analyze(base,args.threshold,args.local,args.show)
                 # Add the level above the basis term sweep to the excludes list so we don't perform
                 # the analysis for every basis term dir we find an error file in

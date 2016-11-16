@@ -50,8 +50,14 @@ def analyze(path,show):
         # Get the parameter value from the directory name
         dirpath = os.path.dirname(f)
         param_dir = os.path.split(dirpath)[-1]
+        # Find a float 
         m = re.search('[0-9]*\.[0-9]*[eE]?[-+]?[0-9]*',param_dir)
-        x_val = float(m.group(0))
+        if m:
+            x_val = float(m.group(0))
+        else:
+        # If there are no floats, find an integer
+            m = re.search('[0-9]+',param_dir)
+            x_val = int(m.group(0))
         # Now parse the timing file to extract total run time
         time = extract_time(f)
         data_pairs.append((x_val,time))
@@ -61,7 +67,7 @@ def analyze(path,show):
     data_pairs.sort(key=itemgetter(0))
     out = os.path.join(path,'time_scaling.dat')
     with open(out,'w') as outf:
-        outf.write('basis_terms,time (seconds)\n')
+        outf.write('# basis_terms,time (seconds)\n')
         for pair in data_pairs:
             outf.write('%i,%f\n'%(int(pair[0]),int(pair[1]))) 
     basis_terms,time = zip(*data_pairs)

@@ -24,9 +24,9 @@ Code
        argument, and does its job on that simulation. We can then easily parallelize this. Call this
        function "process", raise NotImplementedError in base class but override in child classes. 
     b) Will need to remove the dependency on the self.data attribute. Every function that performs
-       some operation on data needs to explicitly receive that data as an argument. Note we can
-       still keep the header attributes as it will force our data to maintain the proper column
-       structure. This point is mainly relevant to Cruncher and Global_Cruncher 
+       some operation on data needs to explicitly receive that data as an argument. We cannot set
+       the headers as an attribute because this will fuck EVERYTHING up if two simulations for some
+       reason have different header lines. 
     c) Can still have some large, monolithic function that, given some master config file for a
        sweep, will do its job on all sims in the sweep. This will just be a simple loop/wrapper 
        around the basic "process" function. Boolean kwarg that determines whether or not to run in

@@ -59,150 +59,136 @@ def parse_file(path):
         parser.readfp(config_file)
     return parser
 
-class Processor(object):
-    """Base data processor class that has some methods every other processor needs"""
-    def __init__(self,global_conf,sims=None,sim_groups=None):
+class Simulation(object):
+    """An object that represents a simulation. It contains the data for the sim, the data file
+    headers, and its configuration object as attributes. This object contains all the information
+    about a simulation, but DOES NOT perform any actions on that data. That job is relegated to the
+    various processor objects"""
+
+    def __init__(self,conf):
+        self.conf = conf
         self.log = logging.getLogger('postprocess')
-        self.log.debug("Processor base init")
-        self.gconf = global_conf
-        # This allows us to pass in the list of simulation config objects if we have them, 
-        # otherwise just collect them
-        if not sims or not sim_groups:
-            self.collect_sims()
-        else:
-            self.sims = sims
-            self.sims_groups = sim_groups
-        
-        # Sort on the sim dir to prevent weirdness when calculating convergence. Sorts by ascending
-        # param values and works for multiple variable params
-        self.sort_sims()
-        self.sim = None
+        self.e_data = None
+        self.h_data = None
+        self.pos_inds = None
+        self.failed = False
         self.e_lookup = OrderedDict([('x',0),('y',1),('z',2),('Ex_real',3),('Ey_real',4),('Ez_real',5),
                          ('Ex_imag',6),('Ey_imag',7),('Ez_imag',8)])
         self.h_lookup = OrderedDict([('x',0),('y',1),('z',2),('Hx_real',3),('Hy_real',4),('Hz_real',5),
                          ('Hx_imag',6),('Hy_imag',7),('Hz_imag',8)])
-        # A place to store any failed sims (i.e sims that are missing their data file)
-        self.failed_sims = []
 
-    def collect_sims(self):
-        self.sims = []
-        self.sim_groups = []
-        datfile = self.gconf.get('General','base_name')+'.E'
-        for root,dirs,files in os.walk(self.gconf.get('General','basedir')):
-            if 'sim_conf.ini' in files and datfile in files:
-                obj = parse_file(os.path.join(root,'sim_conf.ini'))
-                self.sims.append(obj)
-            elif 'sim_conf.ini' in files:
-                obj = parse_file(os.path.join(root,'sim_conf.ini'))
-                self.log.error('The following sim is missing its data file: %s',
-                                obj.get('General','sim_dir'))
-                self.failed_sims.append(obj)
-            if 'sorted_sweep_conf.ini' in files:
-                if 'logs' in dirs:
-                    dirs.remove('logs')
-                conf_paths = [os.path.join(root,simdir,'sim_conf.ini') for simdir in dirs]
-                self.log.debug('Sim group confs: %s',str(conf_paths))
-                self.sim_groups.append(list(map(parse_file,conf_paths)))
+    def load_txt(self,path):
+        try: 
+            # pandas read_csv is WAY faster than loadtxt
+            d = pandas.read_csv(path,delim_whitespace=True)
+            data = d.as_matrix()
+            with open(path,'r') as dfile:
+                hline = dfile.readlines()[0]
+                if hline[0] == '#':
+                    # We have headers in the file
+                    headers = hline.strip('#\n').split(',')
+                    lookup = {headers[ind]:ind for ind in range(len(headers))}
+                    self.log.debug('Here is the E field header lookup: %s',str(lookup))
+                else:
+                    self.log.debug('File is missing headers')
+                    lookup = None
+        except FileNotFoundError:
+            self.log.error('Following file missing: %s',path)
+            self.failed = True
+            data, lookup = None, None
+        return data, lookup
 
-    def sort_sims(self):
-        """Sorts simulations by their parameters the way a human would. Called human sorting or
-        natural sorting. Thanks stackoverflow"""
-        def atoi(text):
-            return int(text) if text.isdigit() else text
+    def load_npz(self,path):
+        try: 
+            # Get the headers and the data
+            with np.load(path) as loaded:
+                data = loaded['data']
+                lookup = loaded['headers'][0]
+                self.log.debug(str(type(lookup)))
+                self.log.debug(str(lookup))
+                self.log.debug('Here is the E field header lookup: %s',str(lookup))
+        except IOError:
+            self.log.error('Following file missing or unloadable: %s',path)
+            self.failed = True
+            data, lookup = None, None
+        return data,lookup
 
-        def natural_keys(sim):
-            self.log.debug(sim)
-            self.log.debug(sim.sections())
-            text = sim.get('General','sim_dir')
-            return [ atoi(c) for c in re.split('(\d+)', text) ]
+    def get_raw_data(self):
+        """We need to override the base Processor get_data function because the Cruncher object is
+        the only object that touches raw data files spit out by the simulations. Every other child 
+        of Processor consumes files parsed and tidied up by Cruncher"""
+        self.log.info('Collecting raw data for sim %s',self.conf.get('General','sim_dir'))
+        sim_path = self.conf.get('General','sim_dir')
+        base_name = self.conf.get('General','base_name')
+        e_path = os.path.join(sim_path,base_name+'.E')
+        h_path = os.path.join(sim_path,base_name+'.H')
+        # Load E field data
+        e_data, e_lookup = self.load_txt(e_path)
+        self.log.debug('E shape after getting: %s',str(e_data.shape))        
+        pos_inds = np.zeros((e_data.shape[0],3))
+        pos_inds[:,:] = e_data[:,0:3] 
+        # Load H field data
+        h_data, h_lookup = self.load_txt(h_path)
+        self.e_data = e_data
+        self.h_data = h_data
+        self.pos_inds = e_data[:,0:3] 
+        self.e_data,self.h_data,self.pos_inds = e_data,h_data,pos_inds
+        self.log.info('Collection complete!')
+        return e_data,self.e_lookup,h_data,self.h_lookup,pos_inds
 
-        self.sims.sort(key=natural_keys)
-        for group in self.sim_groups:
-            paths = [sim.get('General','sim_dir') for sim in group]
-            self.log.debug('Group paths before sorting: %s',str(paths))
-            group.sort(key=natural_keys)
-            paths = [sim.get('General','sim_dir') for sim in group]
-            self.log.debug('Group paths after sorting: %s',str(paths))
-
-    def set_sim(self,sim):
-        """Wrapper method to set the current simulation and retrieve and set the data attributes"""
-        self.log.info('Setting sim to %s',sim.get('General','sim_dir'))
-        self.sim = sim
-        self.e_data,self.e_lookup,self.h_data,self.h_lookup,self.pos_inds = self.get_data(sim)
-
-    def get_data(self,sim):
-        """Returns the E and H data for this particular sim"""
-        self.log.info('Collecting data for sim %s',sim.get('General','sim_dir'))
-        sim_path = sim.get('General','sim_dir')
-        base_name = self.gconf.get('General','base_name')
-        ftype = self.gconf.get('General','save_as')
+    def get_data(self):
+        """Returns the already crunched E and H data for this particular sim"""
+        self.log.info('Collecting data for sim %s',self.conf.get('General','sim_dir'))
+        sim_path = self.conf.get('General','sim_dir')
+        base_name = self.conf.get('General','base_name')
+        ftype = self.conf.get('General','save_as')
         # If data was saved into text files
         if ftype == 'text':
             e_path = os.path.join(sim_path,base_name+'.E.crnch')
             h_path = os.path.join(sim_path,base_name+'.H.crnch')
             # Load E field data
-            try: 
-                e_data = np.loadtxt(e_path)
-                with open(e_path,'r') as efile:
-                    hline = efile.readlines()[0]
-                    if hline[0] == '#':
-                        # We have headers in the file
-                        e_headers = hline.strip('#\n').split(',')
-                        e_lookup = {e_headers[ind]:ind for ind in range(len(e_headers))}
-                        self.log.debug('Here is the E field header lookup: %s',str(e_lookup))
-                    else:
-                        self.log.debug('File is missing headers')
-                
-            except FileNotFoundError:
-                self.log.error('Following file missing: %s',e_path)
-                self.failed_sims.append(sim)
-            # Load the H field data
-            try:
-                h_data = np.loadtxt(h_path)
-                with open(h_path,'r') as hfile:
-                    hline = hfile.readlines()[0]
-                    if hline[0] == '#':
-                        # We have headers in the file
-                        h_headers = hline.strip('#\n').split(',')
-                        h_lookup = {h_headers[ind]:ind for ind in range(len(h_headers))}
-                        self.log.debug('Here is the H field header lookup: %s',str(h_lookup))
-                    else:
-                        self.log.debug('File is missing headers')
-            except FileNotFoundError:
-                self.log.error('Following file missing: %s',h_path)
-                self.failed_sims.append(sim)
-            pos_inds = np.zeros((e_data.shape[0],3))
-            pos_inds[:,:] = e_data[:,0:3] 
+            e_data, e_lookup = self.load_txt(e_path)
+            # Load H field data
+            h_data, h_lookup = self.load_txt(h_path)
         # If data was saved in in npz format
         elif ftype == 'npz':
             # Get the paths
             e_path = os.path.join(sim_path,base_name+'.E.npz')
             h_path = os.path.join(sim_path,base_name+'.H.npz')
-            try: 
-                # Get the headers and the data
-                with np.load(e_path) as loaded:
-                    e_data = loaded['data']
-                    e_lookup = loaded['headers'][0]
-                    self.log.debug(str(type(e_lookup)))
-                    self.log.debug(str(e_lookup))
-                    self.log.debug('Here is the E field header lookup: %s',str(e_lookup))
-            except IOError:
-                self.log.error('Following file missing or unloadable: %s',e_path)
-                self.failed_sims.append(sim)
-            try:
-                with np.load(h_path) as loaded:
-                    h_data = loaded['data']            
-                    h_lookup = loaded['headers'][0]
-                    self.log.debug('Here is the H field header lookup: %s',str(h_lookup))
-            except IOError:
-                self.log.error('Following file missing or unloadable: %s',h_path)
-                self.failed_sims.append(sim)
-            pos_inds = np.zeros((e_data.shape[0],3))
-            pos_inds[:,:] = e_data[:,0:3]
+            e_data, e_lookup = self.load_npz(e_path)
+            h_data, h_lookup = self.load_npz(h_path)
         else:
             raise ValueError('Incorrect file type specified in [General] section of config file')
+        pos_inds = np.zeros((e_data.shape[0],3))
+        pos_inds[:,:] = e_data[:,0:3] 
+        self.e_data,self.e_lookup,self.h_data,self.h_lookup,self.pos_inds = e_data,e_lookup,h_data,h_lookup,pos_inds
         self.log.info('Collection complete!')
         return e_data,e_lookup,h_data,h_lookup,pos_inds
+
+    def write_data(self):
+        """Writes the data"""
+        # Get the current path
+        base = self.conf.get('General','sim_dir')
+        fname = self.conf.get('General','base_name')
+        epath = os.path.join(base,fname+'.E')
+        hpath = os.path.join(base,fname+'.H')
+        # Save matrices in specified file tipe 
+        self.log.debug('Here are the E matrix headers: %s',str(self.e_lookup))
+        #self.log.debug('Here is the E matrix: \n %s',str(self.e_data))
+        self.log.debug('Here are the H matrix headers: %s',str(self.h_lookup))
+        #self.log.debug('Here is the H matrix: \n %s',str(self.h_data))
+        ftype = self.conf.get('General','save_as') 
+        if ftype == 'text':
+            epath = epath+'.crnch'
+            hpath= hpath+'.crnch'
+            np.savetxt(epath,self.e_data,header=','.join(self.e_lookup.keys()))
+            np.savetxt(hpath,self.h_data,header=','.join(self.h_lookup.keys()))
+        elif ftype == 'npz':
+            # Save the headers and the data
+            np.savez(epath,headers = np.array([self.e_lookup]), data = self.e_data)
+            np.savez(hpath,headers = np.array([self.h_lookup]), data = self.h_data)
+        else:
+            raise ValueError('Specified saving in an unsupported file format')
 
     def get_scalar_quantity(self,quantity):
         self.log.debug('Retrieving scalar quantity %s',str(quantity))
@@ -223,188 +209,194 @@ class Processor(object):
             self.log.error('You attempted to retrieve a quantity that does not exist in the e and h \
                     matrices')
             raise
+    
+    def clear_data(self):
+        """Clears all the data attributes to free up memory"""
+        self.e_data = None
+        self.h_data = None
+        self.pos_inds = None
 
+class Processor(object):
+    """Base data processor class that has some methods every other processor needs"""
+    def __init__(self,global_conf,sims=[],sim_groups=[],failed_sims=[]):
+        self.log = logging.getLogger('postprocess')
+        self.log.debug("Processor base init")
+        self.gconf = global_conf
+        self.sims = sims
+        self.sim_groups = sim_groups
+        # A place to store any failed sims (i.e sims that are missing their data file)
+        self.failed_sims = failed_sims
+                
+    def collect_sims(self):
+        datfile = self.gconf.get('General','base_name')+'.E'
+        for root,dirs,files in os.walk(self.gconf.get('General','basedir')):
+            if 'sim_conf.ini' in files and datfile in files:
+                sim_obj = Simulation(parse_file(os.path.join(root,'sim_conf.ini')))
+                self.sims.append(sim_obj)
+            elif 'sim_conf.ini' in files:
+                sim_obj = Simulation(parse_file(os.path.join(root,'sim_conf.ini')))
+                self.log.error('The following sim is missing its data file: %s',
+                                sim_obj.conf.get('General','sim_dir'))
+                self.failed_sims.append(sim_obj)
+            if 'sorted_sweep_conf.ini' in files:
+                if 'logs' in dirs:
+                    dirs.remove('logs')
+                conf_paths = [os.path.join(root,simdir,'sim_conf.ini') for simdir in dirs]
+                self.log.debug('Sim group confs: %s',str(conf_paths))
+                confs = list(map(parse_file,conf_paths))
+                group = [Simulation(conf) for conf in confs]
+                self.sim_groups.append(group)
+        # This makes it so we can compute convergence if we have every other param fixed but we
+        # swept through # of basis terms
+        if not self.sim_groups:
+            self.sim_groups = [self.sims]
+        self.sort_sims()
+        return self.sims,self.sim_groups,self.failed_sims
+
+    def sort_sims(self):
+        """Sorts simulations by their parameters the way a human would. Called human sorting or
+        natural sorting. Thanks stackoverflow"""
+        def atoi(text):
+            return int(text) if text.isdigit() else text
+
+        def natural_keys(sim):
+            self.log.debug(sim)
+            self.log.debug(sim.conf.sections())
+            text = sim.conf.get('General','sim_dir')
+            return [ atoi(c) for c in re.split('(\d+)', text) ]
+
+        self.sims.sort(key=natural_keys)
+        for group in self.sim_groups:
+            paths = [sim.conf.get('General','sim_dir') for sim in group]
+            self.log.debug('Group paths before sorting: %s',str(paths))
+            group.sort(key=natural_keys)
+            paths = [sim.conf.get('General','sim_dir') for sim in group]
+            self.log.debug('Group paths after sorting: %s',str(paths))
+    
+    def process(self,sim):
+        """Retrieves data for a particular simulation, then processes that data"""
+        raise NotImplementedError 
+    
+    def process_all(self):
+        """Processes all the sims collected and stored in self.sims and self.sim_groups"""
+        raise NotImplementedError 
+        
 class Cruncher(Processor):
     """Crunches all the raw data. Calculates quantities specified in the global config file and
     either appends them to the existing data files or creates new ones as needed"""
 
-    def __init__(self,global_conf):
-        super().__init__(global_conf)
+    def __init__(self,global_conf,sims=[],sim_groups=[],failed_sims=[]):
+        super().__init__(global_conf,sims,sim_groups,failed_sims)
         self.log.debug("This is THE CRUNCHER!!!!!")
     
-    def get_data(self,sim):
-        """We need to override the base Processor get_data function because the Cruncher object is
-        the only object that touches raw data files spit out by the simulations. Every other child 
-        of Processor consumes files parsed and tidied up by Cruncher"""
-        self.log.debug('CRUNCHER GET_DATA')
-        self.log.info('Collecting raw data for sim %s',sim.get('General','sim_dir'))
-        sim_path = sim.get('General','sim_dir')
-        base_name = self.gconf.get('General','base_name')
-        ftype = self.gconf.get('General','save_as')
-        e_path = os.path.join(sim_path,base_name+'.E')
-        h_path = os.path.join(sim_path,base_name+'.H')
-        # Load E field data
-        try: 
-            #e_data = np.loadtxt(e_path)
-            # pandas read_csv is WAY faster than loadtxt
-            d = pandas.read_csv(e_path,delim_whitespace=True)
-            e_data = d.as_matrix()
-        except FileNotFoundError:
-            self.log.error('Following file missing: %s',e_path)
-            self.failed_sims.append(sim)
-            raise
-        # Load the H field data
+    def calculate(self,quantity,sim,args):
         try:
-            #h_data = np.loadtxt(h_path)
-            d = pandas.read_csv(h_path,delim_whitespace=True)
-            h_data = d.as_matrix()
-        except FileNotFoundError:
-            self.log.error('Following file missing: %s',h_path)
-            raise
-        pos_inds = np.zeros((e_data.shape[0],3))
-        pos_inds[:,:] = e_data[:,0:3] 
-        self.log.debug('E shape after getting: %s',str(e_data.shape))        
-        self.log.info('Collection complete!')
-        return e_data,self.e_lookup,h_data,self.h_lookup,pos_inds
-
-    def crunch(self):
-        self.log.info('Beginning data crunch ...')
-        for sim in self.sims:
-            # Set it as the current sim and grab its data
-            self.set_sim(sim)
-            self.log.info('Crunching data for %s',
-                          os.path.basename(self.sim.get('General','sim_dir')))
-            # For each quantity 
-            for quant,args in self.gconf.items('Cruncher'):
-                self.log.info('Computing %s with args %s',str(quant),str(args))
-                for argset in args.split(';'):
-                    if argset:
-                        self.calculate(quant,argset.split(','))
-                    else:
-                        self.calculate(quant,[])
-                self.log.debug('E lookup: %s',str(self.e_lookup))
-                self.log.debug('H lookup: %s',str(self.h_lookup))
-            self.write_data()
-    
-    def calculate(self,quantity,args):
-        try:
-            getattr(self,quantity)(*args)
+            getattr(self,quantity)(sim,*args)
         except KeyError:
             self.log.error("Unable to calculate the following quantity: %s",
                            quantity,exc_info=True,stack_info=True)
             raise
 
-    def write_data(self):
-        """Writes the crunched data"""
-        # Get the current path
-        base = self.sim.get('General','sim_dir')
-        fname = self.sim.get('General','base_name')
-        epath = os.path.join(base,fname+'.E')
-        hpath = os.path.join(base,fname+'.H')
-        # Save matrices in specified file tipe 
-        self.log.debug('Here are the E matrix headers: %s',str(self.e_lookup))
-        #self.log.debug('Here is the E matrix: \n %s',str(self.e_data))
-        self.log.debug('Here are the H matrix headers: %s',str(self.h_lookup))
-        #self.log.debug('Here is the H matrix: \n %s',str(self.h_data))
-        ftype = self.gconf.get('General','save_as') 
-        if ftype == 'text':
-            epath = epath+'.crnch'
-            hpath= hpath+'.crnch'
-            np.savetxt(epath,self.e_data,header=','.join(self.e_lookup.keys()))
-            np.savetxt(hpath,self.h_data,header=','.join(self.h_lookup.keys()))
-        elif ftype == 'npz':
-            # Save the headers and the data
-            np.savez(epath,headers = np.array([self.e_lookup]), data = self.e_data)
-            np.savez(hpath,headers = np.array([self.h_lookup]), data = self.h_data)
+    def process(self,sim):
+        sim_path = os.path.basename(sim.conf.get('General','sim_dir'))
+        self.log.info('Crunching data for sim %s',sim_path)
+        sim.get_raw_data()
+        if sim.failed:
+            self.log.error('Following simulation missing data: %s',sim_path)
+            self.failed_sims.append(sim)
         else:
-            raise ValueError('Specified saving in an unsupported file format')
+            # For each quantity 
+            for quant,args in self.gconf.items('Cruncher'):
+                self.log.info('Computing %s with args %s',str(quant),str(args))
+                for argset in args.split(';'):
+                    if argset:
+                        self.calculate(quant,sim,argset.split(','))
+                    else:
+                        self.calculate(quant,sim,[])
+                self.log.debug('E lookup: %s',str(sim.e_lookup))
+                self.log.debug('H lookup: %s',str(sim.h_lookup))
+            sim.write_data()
+            sim.clear_data()
+    
+    def process_all(self,parallel=False):
+        self.log.info('Beginning data crunch ...')
+        if not parallel:
+            for sim in self.sims:
+                self.process(sim)
+        else:
+            raise NotImplementedError('Parallel postproccesing not yet implemented')
 
-    def normE(self):
+    def normE(self,sim):
         """Calculate and returns the norm of E"""
         
-        if not hasattr(self,'e_data'):
-            self.log.error("You need to get your data first!")
-            quit()
-        
         # Get the magnitude of E and add it to our data
-        E_mag = np.zeros(self.e_data.shape[0])
+        E_mag = np.zeros(sim.e_data.shape[0])
         for i in range(3,9):
-            E_mag += self.e_data[:,i]*self.e_data[:,i]
+            E_mag += sim.e_data[:,i]*sim.e_data[:,i]
         E_mag = np.sqrt(E_mag)
         
         # This approach is 4 times faster than np.column_stack()
-        self.log.debug('E mat shape: %s',str(self.e_data.shape))
-        dat = np.zeros((self.e_data.shape[0],self.e_data.shape[1]+1))
+        self.log.debug('E mat shape: %s',str(sim.e_data.shape))
+        dat = np.zeros((sim.e_data.shape[0],sim.e_data.shape[1]+1))
         self.log.debug('dat mat shape: %s',str(dat.shape))
-        dat[:,:-1] = self.e_data
+        dat[:,:-1] = sim.e_data
         dat[:,-1] = E_mag
-        self.e_data = dat 
+        sim.e_data = dat 
         # Now append this quantity and its column the the header dict
-        self.e_lookup['normE'] = dat.shape[1]-1 
+        sim.e_lookup['normE'] = dat.shape[1]-1 
         return E_mag
 
-    def normEsquared(self):
+    def normEsquared(self,sim):
         """Calculates and returns normE squared"""
-        if not hasattr(self,'e_data'):
-            self.log.error("You need to get your data first!")
-            quit()
         
         # Get the magnitude of E and add it to our data
-        E_magsq = np.zeros(self.e_data.shape[0])
+        E_magsq = np.zeros(sim.e_data.shape[0])
         for i in range(3,9):
-            E_magsq += self.e_data[:,i]*self.e_data[:,i]
+            E_magsq += sim.e_data[:,i]*sim.e_data[:,i]
         
         # This approach is 4 times faster than np.column_stack()
-        dat = np.zeros((self.e_data.shape[0],self.e_data.shape[1]+1))
-        dat[:,:-1] = self.e_data
+        dat = np.zeros((sim.e_data.shape[0],sim.e_data.shape[1]+1))
+        dat[:,:-1] = sim.e_data
         dat[:,-1] = E_magsq
-        self.e_data = dat 
+        sim.e_data = dat 
         # Now append this quantity and its column the the header dict
-        self.e_lookup['normEsquared'] = dat.shape[1]-1 
+        sim.e_lookup['normEsquared'] = dat.shape[1]-1 
         return E_magsq
 
-    def normH(self):
+    def normH(self,sim):
         """Calculate and returns the norm of H"""
-        
-        if not hasattr(self,'h_data'):
-            self.log.error("You need to get your data first!")
-            quit()
         
         # Get the magnitude of H and add it to our data. This loops through each components real and
         # imaginary parts and squared it (which is what would happen if you took the complex number
         # for each component and multiplied it by its conjugate). 
-        H_mag = np.zeros(self.h_data.shape[0])
+        H_mag = np.zeros(sim.h_data.shape[0])
         for i in range(3,9):
-            H_mag += self.h_data[:,i]*self.h_data[:,i]
+            H_mag += sim.h_data[:,i]*sim.h_data[:,i]
         H_mag = np.sqrt(H_mag)
         
         # This approach is 4 times faster than np.column_stack()
-        dat = np.zeros((self.h_data.shape[0],self.h_data.shape[1]+1))
-        dat[:,:-1] = self.h_data
+        dat = np.zeros((sim.h_data.shape[0],sim.h_data.shape[1]+1))
+        dat[:,:-1] = sim.h_data
         dat[:,-1] = H_mag
-        self.h_data = dat 
+        sim.h_data = dat 
         # Now append this quantity and its column the the header dict
-        self.h_lookup['normH'] = dat.shape[1]-1 
+        sim.h_lookup['normH'] = dat.shape[1]-1 
         return H_mag
     
-    def normHsquared(self):
+    def normHsquared(self,sim):
         """Calculates and returns the norm of H squared"""
         
-        if not hasattr(self,'h_data'):
-            self.log.error("You need to get your data first!")
-            quit()
-        
         # Get the magnitude of H and add it to our data
-        H_magsq = np.zeros(self.h_data.shape[0])
+        H_magsq = np.zeros(sim.h_data.shape[0])
         for i in range(3,9):
-            H_magsq += self.h_data[:,i]*self.h_data[:,i]
+            H_magsq += sim.h_data[:,i]*sim.h_data[:,i]
         # This approach is 4 times faster than np.column_stack()
-        dat = np.zeros((self.h_data.shape[0],self.h_data.shape[1]+1))
-        dat[:,:-1] = self.h_data
+        dat = np.zeros((sim.h_data.shape[0],sim.h_data.shape[1]+1))
+        dat[:,:-1] = sim.h_data
         dat[:,-1] = H_magsq
-        self.h_data = dat 
+        sim.h_data = dat 
         # Now append this quantity and its column the the header dict
-        self.h_lookup['normHsquared'] = dat.shape[1]-1 
+        sim.h_lookup['normHsquared'] = dat.shape[1]-1 
         return H_magsq
 
     def get_nk(self,path,freq):
@@ -419,44 +411,44 @@ class Cruncher(Processor):
                                    bounds_error=False,fill_value='extrapolate')
         return f_n(freq), f_k(freq)
 
-    def genRate(self):
+    def genRate(self,sim):
         """Computes and return the generation rate at each point in space"""
 
         # We need to compute normEsquared before we can compute the generation rate
-        normEsq = self.get_scalar_quantity('normEsquared') 
+        normEsq = sim.get_scalar_quantity('normEsquared') 
         gvec = np.zeros_like(normEsq)
         # Convenient lambda function to actual compute G
         fact = c.epsilon_0/c.hbar
         # Get the indices of refraction at this frequency
-        freq = self.sim.get('Parameters','frequency')
+        freq = sim.conf.get('Parameters','frequency')
         nk = {mat[0]:(self.get_nk(mat[1],freq)) for mat in self.gconf.items('Materials')}
         self.log.debug(nk) 
-        height = self.sim.getfloat('Parameters','total_height')
+        height = sim.conf.getfloat('Parameters','total_height')
         # Get spatial discretization
-        z_samples = self.gconf.getint('General','z_samples')
-        x_samples = self.gconf.getint('General','x_samples')
-        y_samples = self.gconf.getint('General','y_samples')
+        z_samples = sim.conf.getint('General','z_samples')
+        x_samples = sim.conf.getint('General','x_samples')
+        y_samples = sim.conf.getint('General','y_samples')
         dz = height/z_samples
-        period = self.sim.getfloat('Parameters','array_period')
+        period = sim.conf.getfloat('Parameters','array_period')
         dx = period/x_samples
         dy = period/y_samples
         # Get boundaries between layers
-        air_ito = self.sim.getfloat('Parameters','air_t')
-        ito_nw = self.sim.getfloat('Parameters','ito_t')+air_ito
-        nw_sio2 = self.sim.getfloat('Parameters','alinp_height')+ito_nw
-        sio2_sub = self.sim.getfloat('Parameters','sio2_height')+nw_sio2
-        air_line = self.sim.getfloat('Parameters','substrate_t')+sio2_sub
+        air_ito = sim.conf.getfloat('Parameters','air_t')
+        ito_nw = sim.conf.getfloat('Parameters','ito_t')+air_ito
+        nw_sio2 = sim.conf.getfloat('Parameters','alinp_height')+ito_nw
+        sio2_sub = sim.conf.getfloat('Parameters','sio2_height')+nw_sio2
+        air_line = sim.conf.getfloat('Parameters','substrate_t')+sio2_sub
         # Compute ITO generation (note air generation is already set to zero)
         start = int(air_ito/dz)*x_samples*y_samples 
         end = int(ito_nw/dz)*x_samples*y_samples 
         gvec[start:end] = fact*nk['ITO'][0]*nk['ITO'][1]*normEsq[start:end]
         # Compute nw generation
         start = end
-        end = start + int(self.sim.getfloat('Parameters','alinp_height')/dz) 
+        end = start + int(sim.conf.getfloat('Parameters','alinp_height')/dz) 
         xvec = np.linspace(0,period,x_samples)
         yvec = np.linspace(0,period,y_samples)
         center = period/2
-        nw_radius = self.sim.getfloat('Parameters','nw_radius') 
+        nw_radius = sim.conf.getfloat('Parameters','nw_radius') 
         # Loop through each z layer in nw with AlInP shell
         counter = start
         for layer in range(start,end):
@@ -471,7 +463,7 @@ class Cruncher(Processor):
                     counter += 1
         # So same for SiO2 shell
         start = counter
-        end = start + int(self.sim.getfloat('Parameters','sio2_height')/dz)
+        end = start + int(sim.conf.getfloat('Parameters','sio2_height')/dz)
         for layer in range(start,end):
             for x in xvec:
                 for y in yvec:
@@ -485,20 +477,20 @@ class Cruncher(Processor):
         # The rest is just the substrate
         gvec[counter:] = fact*nk['GaAs'][0]*nk['GaAs'][1]*normEsq[counter:]
         # This approach is 4 times faster than np.column_stack()
-        assert(self.e_data.shape[0] == len(gvec))
-        dat = np.zeros((self.e_data.shape[0],self.e_data.shape[1]+1))
-        dat[:,:-1] = self.e_data
+        assert(sim.e_data.shape[0] == len(gvec))
+        dat = np.zeros((sim.e_data.shape[0],sim.e_data.shape[1]+1))
+        dat[:,:-1] = sim.e_data
         dat[:,-1] = gvec
-        self.e_data = dat 
+        sim.e_data = dat 
         # Now append this quantity and its column the the header dict
-        self.e_lookup['genRate'] = dat.shape[1]-1 
+        sim.e_lookup['genRate'] = dat.shape[1]-1 
         return gvec
 
-class Global_Cruncher(Processor):
+class Global_Cruncher(Cruncher):
     """Computes global quantities for an entire run, instead of local quantities for an individual
     simulation"""
-    def __init__(self,global_conf):
-        super().__init__(global_conf)
+    def __init__(self,global_conf,sims=[],sim_groups=[],failed_sims=[]):
+        super().__init__(global_conf,sims,sim_groups,failed_sims)
         self.log.debug('This is the global cruncher') 
 
     def calculate(self,quantity,args):
@@ -509,12 +501,13 @@ class Global_Cruncher(Processor):
                            quantity,exc_info=True,stack_info=True)
             raise
 
-    def crunch(self):
-        self.log.info('Beginning global data crunch ...')
+    def process_all(self):
         # For each quantity 
+        self.log.info('Beginning global cruncher processing ...')
         for quant,args in self.gconf.items('Global_Cruncher'):
             self.log.info('Computing %s with args %s',str(quant),str(args))
-            for argset in args.split(';'): 
+            for argset in args.split(';'):
+                self.log.info('Passing following arg set to function %s: %s',str(quant),str(argset))
                 if argset:
                     self.calculate(quant,argset.split(','))
                 else:
@@ -548,7 +541,7 @@ class Global_Cruncher(Processor):
         end = end_plane*(x_samples*y_samples)
         return start,end
 
-    def get_comp_vec(self,field,start,end):
+    def get_comp_vec(self,sim,field,start,end):
         """Returns the comparison vector"""
         # Compare all other sims to our best estimate, which is sim with highest number of
         # basis terms (last in list cuz sorting)
@@ -557,13 +550,13 @@ class Global_Cruncher(Processor):
         if field == 'E':
             ext = '.E'
             # Get the comparison vector
-            vec1 = self.e_data[start:end,3:9]
-            normvec = self.get_scalar_quantity('normE')
+            vec1 = sim.e_data[start:end,3:9]
+            normvec = sim.get_scalar_quantity('normE')
             normvec = normvec[start:end]**2
         elif field == 'H':
             ext = '.H'
-            vec1 = self.h_data[start:end,3:9]
-            normvec = self.get_scalar_quantity('normH')
+            vec1 = sim.h_data[start:end,3:9]
+            normvec = sim.get_scalar_quantity('normH')
             normvec = normvec[start:end]**2
         else:
             self.log.error('The quantity for which you want to compute the error has not yet been calculated')
@@ -583,25 +576,26 @@ class Global_Cruncher(Processor):
             end = None
             excluded = ''
         for group in self.sim_groups:
-            base = group[0].get('General','basedir')
+            base = group[0].conf.get('General','basedir')
             errpath = os.path.join(base,'localerror_%s%s.dat'%(field,excluded))
             with open(errpath,'w') as errfile:
                 self.log.info('Computing local error for sweep %s',base)
-                # Set comparison sim to current sim
-                self.set_sim(group[-1])
+                # Set the reference sim 
+                ref_sim = group[-1]
+                ref_sim.get_data()
                 # Get the comparison vector
-                vec1,normvec,ext = self.get_comp_vec(field,start,end)    
+                vec1,normvec,ext = self.get_comp_vec(ref_sim,field,start,end)    
                 # For all other sims in the groups, compare to best estimate and write to error file 
                 for i in range(0,len(group)-1):
                     sim2 = group[i]
-                    e_data,elook,h_data,hlook,inds = self.get_data(sim2)
+                    sim2.get_data()
                     if field == 'E': 
-                        vec2 = e_data[start:end,3:9]
+                        vec2 = sim2.e_data[start:end,3:9]
                     elif field == 'H':
-                        vec2 = h_data[start:end,3:9]
+                        vec2 = sim2.h_data[start:end,3:9]
                     self.log.info("Computing local error between numbasis %i and numbasis %i",
-                                  self.sim.getint('Parameters','numbasis'),
-                                  sim2.getint('Parameters','numbasis'))
+                                  ref_sim.conf.getint('Parameters','numbasis'),
+                                  sim2.conf.getint('Parameters','numbasis'))
                     # Get the array containing the magnitude of the difference vector at each point
                     # in space
                     self.log.debug('vec1 shape: %s',str(vec1.shape))
@@ -616,7 +610,8 @@ class Global_Cruncher(Processor):
                     # Compute the average of the normalized magnitude of all the difference vectors 
                     avg_diffvec_mag = np.sum(norm_mag_diff)/norm_mag_diff.size
                     self.log.info(str(avg_diffvec_mag))
-                    errfile.write('%i,%f\n'%(sim2.getint('Parameters','numbasis'),avg_diffvec_mag))
+                    errfile.write('%i,%f\n'%(sim2.conf.getint('Parameters','numbasis'),avg_diffvec_mag))
+                    sim2.clear_data()
 
     def global_error(self,field,exclude=False):
         """Computes the global error between the vector fields of two simulations. This is the sum
@@ -633,25 +628,26 @@ class Global_Cruncher(Processor):
             end = None
             excluded = ''
         for group in self.sim_groups:
-            base = group[0].get('General','basedir')
+            base = group[0].conf.get('General','basedir')
             errpath = os.path.join(base,'globalerror_%s%s.dat'%(field,excluded))
             with open(errpath,'w') as errfile:
                 self.log.info('Computing global error for sweep %s',base)
-                # Set comparison sim to current sim
-                self.set_sim(group[-1])
+                # Set reference sim
+                ref_sim = group[-1]
+                ref_sim.get_data()
                 # Get the comparison vector
-                vec1,normvec,ext = self.get_comp_vec(field,start,end)    
+                vec1,normvec,ext = self.get_comp_vec(ref_sim,field,start,end)    
                 # For all other sims in the groups, compare to best estimate and write to error file 
                 for i in range(0,len(group)-1):
                     sim2 = group[i]
-                    e_data,elook,h_data,hlook,inds = self.get_data(sim2)
+                    sim2.get_data()
                     if field == 'E': 
-                        vec2 = e_data[start:end,3:9]
+                        vec2 = sim2.e_data[start:end,3:9]
                     elif field == 'H':
-                        vec2 = h_data[start:end,3:9]
+                        vec2 = sim2.h_data[start:end,3:9]
                     self.log.info("Computing global error between numbasis %i and numbasis %i",
-                                  self.sim.getint('Parameters','numbasis'),
-                                  sim2.getint('Parameters','numbasis'))
+                                  ref_sim.conf.getint('Parameters','numbasis'),
+                                  sim2.conf.getint('Parameters','numbasis'))
                     # Get the array containing the magnitude of the difference vector at each point
                     # in space 
                     mag_diff_vec = self.diff_sq(vec1,vec2)
@@ -663,40 +659,46 @@ class Global_Cruncher(Processor):
                     # squared to mag efield squared
                     error = np.sqrt(np.sum(mag_diff_vec)/np.sum(normvec))
                     self.log.info(str(error))
-                    errfile.write('%i,%f\n'%(sim2.getint('Parameters','numbasis'),error))
+                    errfile.write('%i,%f\n'%(sim2.conf.getint('Parameters','numbasis'),error))
+                    sim2.clear_data()
 
 class Plotter(Processor):
     """Plots all the things listed in the config file"""
-    def __init__(self,global_conf):
-        super().__init__(global_conf)
+    def __init__(self,global_conf,sims=[],sim_groups=[],failed_sims=[]):
+        super().__init__(global_conf,sims,sim_groups,failed_sims)
         self.log.debug("This is the plotter")
-    
-    def plot(self):
-        self.log.info("Beginning local plotter method ...")
-        for sim in self.sims:
-            # Set it as the current sim and grab its data
-            self.set_sim(sim)
-            # For each plot 
-            self.log.info('Plotting data for sim %s',
-                          str(os.path.basename(self.sim.get('General','sim_dir'))))
-            for plot,args in self.gconf.items('Plotter'):
-                self.log.info('Plotting %s with args %s',str(plot),str(args))
-                for argset in args.split(';'):
-                    self.log.info('Passing following arg set to function %s: %s',str(plot),str(argset))
-                    if argset:
-                        self.gen_plot(plot,argset.split(','))
-                    else:
-                        self.gen_plot(plot,[])
+   
+    def process(self,sim):
+        sim.get_data()
+        sim_path = os.path.basename(sim.conf.get('General','sim_dir'))
+        self.log.info('Plotting data for sim %s',sim_path)
+        # For each plot 
+        for plot,args in self.gconf.items('Plotter'):
+            self.log.info('Plotting %s with args %s',str(plot),str(args))
+            for argset in args.split(';'):
+                self.log.info('Passing following arg set to function %s: %s',str(plot),str(argset))
+                if argset:
+                    self.gen_plot(plot,sim,argset.split(','))
+                else:
+                    self.gen_plot(plot,sim,[])
 
-    def gen_plot(self,plot,args):
+    def process_all(self,parallel=False):
+        self.log.info("Beginning local plotter method ...")
+        if not parallel:
+            for sim in self.sims:
+                self.process(sim)
+        else:
+            raise NotImplementedError
+
+    def gen_plot(self,plot,sim,args):
         try:
-            getattr(self,plot)(*args)
+            getattr(self,plot)(sim,*args)
         except KeyError:
             self.log.error("Unable to plot the following quantity: %s",
                            quantity,exc_info=True,stack_info=True)
             raise
 
-    def heatmap2d(self,x,y,cs,labels,ptype,draw=False,fixed=None,colorsMap='jet'):
+    def heatmap2d(self,sim,x,y,cs,labels,ptype,draw=False,fixed=None,colorsMap='jet'):
         """A general utility method for plotting a 2D heat map"""
         cm = plt.get_cmap(colorsMap)
         if fixed:
@@ -716,36 +718,38 @@ class Plotter(Processor):
         ax.xaxis.set_ticks(np.arange(start,end,0.1))
         start, end = ax.get_ylim()
         ax.yaxis.set_ticks(np.arange(start,end,0.1))
+        ax.set_xlim((np.amin(x),np.amax(x)))
+        ax.set_ylim((np.amin(y),np.amax(y)))
         fig.suptitle(labels[3])
         # Draw geometric indicators and labels
         if draw:
             if ptype[-1] == 'z':
                 self.log.info('draw nanowire circle')
-                cent = self.sim.getfloat('Parameters','array_period')/2.0
-                rad = self.sim.getfloat('Parameters','nw_radius')
+                cent = sim.conf.getfloat('Parameters','array_period')/2.0
+                rad = sim.conf.getfloat('Parameters','nw_radius')
                 circ = mpatches.Circle((cent,cent),radius=rad,fill=False)
                 ax.add_artist(circ)
             elif ptype[-1] == 'y' or ptype[-1] == 'x':
                 self.log.info('draw layers')
                 # Draw a line at the interface between each layer
-                ito_line = self.sim.getfloat('Parameters','air_t')
-                nw_line = self.sim.getfloat('Parameters','ito_t')+ito_line
-                sub_line = self.sim.getfloat('Parameters','nw_height')+nw_line
-                air_line = self.sim.getfloat('Parameters','substrate_t')+sub_line
+                ito_line = sim.conf.getfloat('Parameters','air_t')
+                nw_line = sim.conf.getfloat('Parameters','ito_t')+ito_line
+                sub_line = sim.conf.getfloat('Parameters','nw_height')+nw_line
+                air_line = sim.conf.getfloat('Parameters','substrate_t')+sub_line
                 for line_h in [(ito_line,'ITO'),(nw_line,'NW'),(sub_line,'Substrate'),(air_line,'Air')]:
-                    x = [0,self.sim.getfloat('Parameters','array_period')]
+                    x = [0,sim.conf.getfloat('Parameters','array_period')]
                     y = [line_h[0],line_h[0]]
                     label_y = line_h[0] + 0.01
-                    label_x = x[-1]
+                    label_x = x[-1] - .01
                     plt.text(label_x,label_y,line_h[-1],ha='right',family='sans-serif',size=12)
                     line = mlines.Line2D(x,y,linestyle='solid',linewidth=2.0,color='black')
                     ax.add_line(line)
                 # Draw two vertical lines to show the edges of the nanowire
-                cent = self.sim.getfloat('Parameters','array_period')/2.0
-                rad = self.sim.getfloat('Parameters','nw_radius')
-                shell = self.sim.getfloat('Parameters','shell_t')
-                bottom = self.sim.getfloat('Parameters','ito_t')+ito_line
-                top = self.sim.getfloat('Parameters','nw_height')+nw_line
+                cent = sim.conf.getfloat('Parameters','array_period')/2.0
+                rad = sim.conf.getfloat('Parameters','nw_radius')
+                shell = sim.conf.getfloat('Parameters','shell_t')
+                bottom = sim.conf.getfloat('Parameters','ito_t')+ito_line
+                top = sim.conf.getfloat('Parameters','nw_height')+nw_line
                 for x in (cent-rad,cent+rad,cent-rad-shell,cent+rad+shell):
                     xv = [x,x]
                     yv = [bottom,top]
@@ -753,39 +757,40 @@ class Plotter(Processor):
                     ax.add_line(line)
         if self.gconf.getboolean('General','save_plots'):
             name = labels[2]+'_'+ptype+'.pdf'
-            path = os.path.join(self.sim.get('General','sim_dir'),name)
+            path = os.path.join(sim.conf.get('General','sim_dir'),name)
             fig.savefig(path)
         if self.gconf.getboolean('General','show_plots'):
-            plt.show()
+            plt.show()             
         plt.close(fig)
 
-    def plane_2d(self,quantity,plane,pval,draw=False,fixed=None):
+    def plane_2d(self,sim,quantity,plane,pval,draw=False,fixed=None):
         """Plots a heatmap of a fixed 2D plane"""
         if plane == 'x' or plane == 'y':
             pval = int(pval)
         else:
             # Find the nearest zval to the one we want. This is necessary because comparing floats
             # rarely works
-            height = self.sim.getfloat('Parameters','total_height')
-            z_samples = self.sim.getint('General','z_samples')
+            height = sim.conf.getfloat('Parameters','total_height')
+            z_samples = sim.conf.getint('General','z_samples')
             desired_val = (height/z_samples)*int(pval)
-            ind = np.abs(self.pos_inds[:,2]-desired_val).argmin()
-            pval = self.pos_inds[ind,2]
-        period = self.sim.getfloat('Parameters','array_period')
-        dx = period/self.gconf.getfloat('General','x_samples')
-        dy = period/self.gconf.getfloat('General','y_samples')
+            ind = np.abs(sim.pos_inds[:,2]-desired_val).argmin()
+            pval = sim.pos_inds[ind,2]
+        period = sim.conf.getfloat('Parameters','array_period')
+        dx = period/sim.conf.getfloat('General','x_samples')
+        dy = period/sim.conf.getfloat('General','y_samples')
         # Maps planes to an integer for extracting data
         plane_table = {'x': 0,'y': 1,'z':2}
         # Get the scalar values
-        scalar = self.get_scalar_quantity(quantity)
+        scalar = sim.get_scalar_quantity(quantity)
         # Filter out any undesired data that isn't on the planes
-        mat = np.column_stack((self.pos_inds[:,0],self.pos_inds[:,1],self.pos_inds[:,2],scalar))
+        mat = np.column_stack((sim.pos_inds[:,0],sim.pos_inds[:,1],sim.pos_inds[:,2],scalar))
         planes = np.array([row for row in mat if row[plane_table[plane]] == pval])
+        self.log.debug("Planes shape: %s"%str(planes.shape))
         # Get all unique values for x,y,z and convert them to actual values not indices
         x,y,z = np.unique(planes[:,0])*dx,np.unique(planes[:,1])*dy,np.unique(planes[:,2])
         # Super hacky and terrible way to fix the minimum and maximum values of the color bar
         # for a plot across all sims
-        freq = self.sim.getfloat('Parameters','frequency')
+        freq = sim.conf.getfloat('Parameters','frequency')
         wvlgth = (c.c/freq)*1E9
         title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(freq,wvlgth)
         if fixed:
@@ -793,17 +798,17 @@ class Plotter(Processor):
         if plane == 'x':
             cs = planes[:,-1].reshape(z.shape[0],y.shape[0])
             labels = ('y [um]','z [um]', quantity,title)
-            self.heatmap2d(y,z,cs,labels,'plane_2d_x',draw,fixed)
+            self.heatmap2d(sim,y,z,cs,labels,'plane_2d_x',draw,fixed)
         elif plane == 'y':
             cs = planes[:,-1].reshape(z.shape[0],x.shape[0])
             labels = ('x [um]','z [um]', quantity,title)
-            self.heatmap2d(x,z,cs,labels,'plane_2d_y',draw,fixed)
+            self.heatmap2d(sim,x,z,cs,labels,'plane_2d_y',draw,fixed)
         elif plane == 'z':
             cs = planes[:,-1].reshape(y.shape[0],x.shape[0])
             labels = ('y [um]','x [um]', quantity,title)
-            self.heatmap2d(x,y,cs,labels,'plane_2d_z',draw,fixed)
+            self.heatmap2d(sim,x,y,cs,labels,'plane_2d_z',draw,fixed)
     
-    def scatter3d(self,x,y,z,cs,labels,ptype,colorsMap='jet'):
+    def scatter3d(self,sim,x,y,z,cs,labels,ptype,colorsMap='jet'):
         """A general utility method for scatter plots in 3D"""
         #fig = plt.figure(figsize=(8,6)) 
         #ax = fig.add_subplot(111,projection='3d')
@@ -826,50 +831,50 @@ class Plotter(Processor):
         ax.set_xlabel(labels[0])
         ax.set_ylabel(labels[1])
         ax.set_zlabel(labels[2])
-        fig.suptitle(os.path.basename(self.sim.get('General','sim_dir')))
+        fig.suptitle(os.path.basename(sim.conf.get('General','sim_dir')))
         if self.gconf.getboolean('General','save_plots'):
             name = labels[-1]+'_'+ptype+'.pdf'
-            path = os.path.join(self.sim.get('General','sim_dir'),name)
+            path = os.path.join(sim.conf.get('General','sim_dir'),name)
             fig.savefig(path)
         if self.gconf.getboolean('General','show_plots'):
             plt.show()
         plt.close(fig)
     
-    def full_3d(self,quantity):
+    def full_3d(self,sim,quantity):
         """Generates a full 3D plot of a specified scalar quantity"""
-        period = self.sim.getfloat('Parameters','array_period')
-        dx = period/self.gconf.getfloat('General','x_samples')
-        dy = period/self.gconf.getfloat('General','y_samples')
+        period = sim.conf.getfloat('Parameters','array_period')
+        dx = period/sim.conf.getfloat('General','x_samples')
+        dy = period/sim.conf.getfloat('General','y_samples')
         # The data just tells you what integer grid point you are on. Not what actual x,y coordinate you
         # are at
-        xpos = self.pos_inds[:,0]*dx
-        ypos = self.pos_inds[:,1]*dy
-        zpos = self.pos_inds[:,2] 
+        xpos = sim.pos_inds[:,0]*dx
+        ypos = sim.pos_inds[:,1]*dy
+        zpos = sim.pos_inds[:,2] 
         # Get the scalar
-        scalar = self.get_scalar_quantity(quantity)
+        scalar = sim.get_scalar_quantity(quantity)
         labels = ('X [um]','Y [um]','Z [um]',quantity)
         # Now plot! 
-        self.scatter3d(xpos,ypos,zpos,scalar,labels,'full_3d')
+        self.scatter3d(sim,xpos,ypos,zpos,scalar,labels,'full_3d')
         
-    def planes_3d(self,quantity,xplane,yplane):
+    def planes_3d(self,sim,quantity,xplane,yplane):
         """Plots some scalar quantity in 3D but only along specified x-z and y-z planes"""
         xplane = int(xplane)
         yplane = int(yplane)
-        period = self.sim.getfloat('Parameters','array_period')
-        dx = period/self.gconf.getfloat('General','x_samples')
-        dy = period/self.gconf.getfloat('General','y_samples')
+        period = sim.conf.getfloat('Parameters','array_period')
+        dx = period/sim.conf.getfloat('General','x_samples')
+        dy = period/sim.conf.getfloat('General','y_samples')
         # Get the scalar values
-        scalar = self.get_scalar_quantity(quantity) 
+        scalar = sim.get_scalar_quantity(quantity) 
         # Filter out any undesired data that isn't on the planes
-        mat = np.column_stack((self.pos_inds[:,0],self.pos_inds[:,1],self.pos_inds[:,2],scalar))
+        mat = np.column_stack((sim.pos_inds[:,0],sim.pos_inds[:,1],sim.pos_inds[:,2],scalar))
         planes = np.array([row for row in mat if row[0] == xplane or row[1] == yplane])
         planes[:,0] = planes[:,0]*dx
         planes[:,1] = planes[:,1]*dy
         labels = ('X [um]','Y [um]','Z [um]',quantity)
         # Now plot!
-        self.scatter3d(planes[:,0],planes[:,1],planes[:,2],planes[:,3],labels,'planes_3d')
+        self.scatter3d(sim,planes[:,0],planes[:,1],planes[:,2],planes[:,3],labels,'planes_3d')
 
-    def line_plot(self,x,y,ptype,labels):
+    def line_plot(self,sim,x,y,ptype,labels):
         """Make a simple line plot"""
         fig = plt.figure()
         plt.plot(x,y)
@@ -878,41 +883,41 @@ class Plotter(Processor):
         plt.title(labels[2])
         if self.gconf.getboolean('General','save_plots'):
             name = labels[1]+'_'+ptype+'.pdf'
-            path = os.path.join(self.sim.get('General','sim_dir'),name)
+            path = os.path.join(sim.conf.get('General','sim_dir'),name)
             fig.savefig(path)
         if self.gconf.getboolean('General','show_plots'):
             plt.show()
         plt.close(fig)
 
-    def fixed_line(self,quantity,direction,coord1,coord2):
+    def fixed_line(self,sim,quantity,direction,coord1,coord2):
         """Plot a scalar quantity on a line along a the z direction at some pair of
         coordinates in the plane perpendicular to that direction"""
         coord1 = int(coord1)
         coord2 = int(coord2)
-        period = self.sim.getfloat('Parameters','array_period')
-        dx = period/self.gconf.getfloat('General','x_samples')
-        dy = period/self.gconf.getfloat('General','y_samples')
+        period = sim.conf.getfloat('Parameters','array_period')
+        dx = period/sim.conf.getfloat('General','x_samples')
+        dy = period/sim.conf.getfloat('General','y_samples')
         # Get the scalar values
-        scalar = self.get_scalar_quantity(quantity) 
+        scalar = sim.get_scalar_quantity(quantity) 
         # Filter out any undesired data that isn't on the planes
-        mat = np.column_stack((self.pos_inds[:,0],self.pos_inds[:,1],self.pos_inds[:,2],scalar))
+        mat = np.column_stack((sim.pos_inds[:,0],sim.pos_inds[:,1],sim.pos_inds[:,2],scalar))
         planes = np.array([row for row in mat if row[0] == coord1 and row[1] == coord2])
         planes[:,0] = planes[:,0]*dx
         planes[:,1] = planes[:,1]*dy
-        freq = self.sim.getfloat('Parameters','frequency')
+        freq = sim.conf.getfloat('Parameters','frequency')
         wvlgth = (c.c/freq)*1E9
         title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(freq,wvlgth)
         labels = ('Z [um]',quantity,title) 
         ptype = "%s_line_plot_%i_%i"%(direction,coord1,coord2)
-        self.line_plot(planes[:,2],planes[:,3],ptype,labels)
+        self.line_plot(sim,planes[:,2],planes[:,3],ptype,labels)
 
 class Global_Plotter(Plotter):
     """Plots global quantities for an entire run that are not specific to a single simulation"""
-    def __init__(self,global_conf):
-        super().__init__(global_conf)
+    def __init__(self,global_conf,sims=[],sim_groups=[],failed_sims=[]):
+        super().__init__(global_conf,sims,sim_groups,failed_sims)
         self.log.debug("Global plotter init")
 
-    def plot(self):
+    def process_all(self):
         self.log.info('Beginning global plotter method ...')
         for plot,args in self.gconf.items('Global_Plotter'):
             self.log.info('Plotting %s with args %s',str(plot),str(args))
@@ -923,18 +928,26 @@ class Global_Plotter(Plotter):
                 else:
                     self.gen_plot(plot,[])
 
+    def gen_plot(self,plot,args):
+        try:
+            getattr(self,plot)(*args)
+        except KeyError:
+            self.log.error("Unable to plot the following quantity: %s",
+                           quantity,exc_info=True,stack_info=True)
+            raise
+
     def convergence(self,quantity,err_type='global',scale='linear'):
         """Plots the convergence of a field across all available simulations"""
         self.log.info('Plotting convergence')
         for group in self.sim_groups:
-            base = group[0].get('General','basedir')
+            base = group[0].conf.get('General','basedir')
             if err_type == 'local':
                 fglob = os.path.join(base,'localerror_%s*.dat'%quantity) 
             elif err_type == 'global':
                 fglob = os.path.join(base,'globalerror_%s*.dat'%quantity) 
             else:
-                log.error('Attempting to plot an unsupported error type')
-                quit()
+                self.log.error('Attempting to plot an unsupported error type')
+                raise ValueError
             paths = glob.glob(fglob)
             for path in paths:
                 labels = []
@@ -993,20 +1006,24 @@ def main():
     logger = configure_logger(args.log_level,'postprocess',
                               os.path.join(conf.get('General','basedir'),'logs'),
                               'postprocess.log')
-
+   
+    # Collect the sims once up here and reuse them later
+    proc = Processor(conf)
+    sims, sim_groups, failed_sims = proc.collect_sims()
     # Now do all the work
     if not args.no_crunch:
-        crunchr = Cruncher(conf)
-        crunchr.crunch()
+        crunchr = Cruncher(conf,sims,sim_groups,failed_sims)
+        crunchr.process_all()
     if not args.no_gcrunch:
-        gcrunchr = Global_Cruncher(conf)
-        gcrunchr.crunch()
+        gcrunchr = Global_Cruncher(conf,sims,sim_groups,failed_sims)
+        gcrunchr.process_all()
     if not args.no_plot:
-        pltr = Plotter(conf) 
-        pltr.plot()
+        pltr = Plotter(conf,sims,sim_groups,failed_sims) 
+        pltr.process_all()
     if not args.no_gplot:
-        gpltr = Global_Plotter(conf)
-        gpltr.plot()
+        gpltr = Global_Plotter(conf,sims,sim_groups,failed_sims)
+        #gpltr.collect_sims()
+        gpltr.process_all()
 
 if __name__ == '__main__':
     main()

@@ -1,4 +1,4 @@
-import S4
+#import S4
 import numpy as np
 from scipy import interpolate
 from scipy import constants
@@ -40,17 +40,36 @@ def calcnormE(data):
     for i in range(3,9):
         E_mag += data[:,i]*data[:,i]
     E_mag = np.sqrt(E_mag)
-    data = np.column_stack((data,E_mag))
-    return data, E_mag
+    new_data = np.zeros((data.shape[0],data.shape[1]+1))
+    new_data[:,:-1] = data
+    new_data[:,-1] = E_mag
+    return new_data, E_mag
+
+def comp_conv(val):
+    if str(val).strip("b'") == 'NaN':
+        return float(0)
+    else:
+        try:
+            return float(val)
+        except ValueError:
+            val = str(val).strip("b'")
+            val = val.replace('i','j')
+            return complex(val)
+
+def get_comsol(path):
+    conv = {col: comp_conv for col in range(0,2)}
+    raw = np.loadtxt(path,comments='#',converters=conv,dtype=complex)
+    return raw
 
 def plot_sim(p,save):
     # Load the data
+    coms_dat = get_comsol('/home/kyle_robertson/schoolwork/gradschool/nanowire/code/optics/comsol_data_fixed.txt')
     data = np.loadtxt('test_fields.E')
-    data, normE = calcnormE(data)
+    mat, normE = calcnormE(data)
     np.savetxt('processed_data.txt',data)
     ## Planar plot of norm of E
     pval = p['plane']
-    mat = np.column_stack((data,normE))
+    #mat = np.column_stack((data,normE))
     #planes = np.array([row for row in mat if row[0] == pval])
     #dx = p['L']/p['x_samp']
     #dy = p['L']/p['y_samp']
@@ -88,13 +107,20 @@ def plot_sim(p,save):
     #if save:
     #    plt.savefig('normE_line_plot.pdf')
     # Plot real and imaginary components
-    plt.figure(3)
-    plt.plot(line[:,2],line[:,3],'r-',label='Ex Real')
-    plt.plot(line[:,2],line[:,5],'b-',label='Ey Real')
-    #plt.plot(line[:,2],line[:,4],'g-',label='Ex Imag')
-    #plt.plot(line[:,2],line[:,6],'m-',label='Ey Imag')
-    plt.legend()
-    plt.title('Real and Imag Components on Line')
+    fig, axes = plt.subplots(2,2)
+    axes[0,0].plot(line[:,2],line[:,3],'r-',label='Ex Real S4')
+    axes[0,0].plot(line[:,2],line[:,5],'b-',label='Ey Real S4')
+    axes[0,0].legend()
+    axes[0,1].plot(line[:,2],line[:,4],'g-',label='Ex Imag S4')
+    axes[0,1].plot(line[:,2],line[:,6],'m-',label='Ey Imag S4')
+    axes[0,1].legend()
+    axes[1,0].plot(range(coms_dat.shape[0]),np.real(coms_dat[:,0]),'r-',label='Ex Real COMS')
+    axes[1,0].plot(range(coms_dat.shape[0]),np.real(coms_dat[:,1]),'b-',label='Ey Real COMS')
+    axes[1,0].legend()
+    axes[1,1].plot(range(coms_dat.shape[0]),np.imag(coms_dat[:,0]),'g-',label='Ex Imag COMS')
+    axes[1,1].plot(range(coms_dat.shape[0]),np.imag(coms_dat[:,1]),'m-',label='Ey Imag COMS')
+    axes[1,1].legend()
+    fig.suptitle('Real and Imag Components on Line')
     if save:
         plt.savefig('real_imag_line.pdf')
     plt.show()
@@ -207,7 +233,7 @@ def run_airitowiresub_sim(params):
     sim.AddLayer(Name='gaas',Thickness=.5,Material='gaas')
     # Set frequency
     f_phys = 3E14 
-    c_conv = constants.c/10E-6
+    c_conv = constants.c/10E6
     f_conv = f_phys/c_conv
     print('f_phys = ',f_phys)
     print('wavelength = ',(constants.c/f_phys)*10E6)
@@ -229,6 +255,7 @@ def main():
     parser.add_argument('--ito',action='store_true',help="Run air-ito simulation")
     parser.add_argument('--sub',action='store_true',help="Run air-ito-substrate simulation")
     parser.add_argument('--save_plots',action='store_true',help="Save all generated plots")
+    parser.add_argument('--plot',type=str,default='air',help="Plot stuff")
     args = parser.parse_args()
 
     params = {'freq':5E14,'layer_t':.5,'L':.25,'x_samp':50,'y_samp':50,'z_samp':600,'numbasis':40}
@@ -236,7 +263,7 @@ def main():
     params['plane'] = plane
     mats = {'ito':'/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/008_ITO_nk_Hz.txt',
             'gaas':'/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/006_GaAs_nk_Walker_modified_Hz.txt'}
-    os.mkdir('sanity_check_run')
+    #os.mkdir('sanity_check_run')
     basedir = os.path.join(os.getcwd(),'sanity_check_run')
     if args.air:
         path = os.path.join(basedir,'air_sim')
@@ -259,6 +286,11 @@ def main():
         os.chdir(path)
         run_airitosub_sim(params,mats)
         print('Finished ito sim')
+        plot_sim(params,args.save_plots)
+    if args.plot:
+        print('Plotting {}'.format(args.plot))
+        path = os.path.join(basedir,args.plot+'_sim')
+        os.chdir(path)
         plot_sim(params,args.save_plots)
 
 if __name__ == '__main__':

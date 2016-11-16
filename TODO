@@ -27,6 +27,7 @@ Code
        sweep, will do its job on all sims in the sweep. This will just be a simple loop/wrapper 
        around the basic "process" function. Boolean kwarg that determines whether or not to run in
        parallel. 
+
 Reading
 =======
 
@@ -36,6 +37,9 @@ Reading
     a) Handwritten notes up on Dropbox. Kind of a mess. Will need to decrpypt it in the future
 3) Genetic algorithm book that I downloaded. Should be somewhere in papers/  
 4) Software design patterns book. Stored in zotero. 
+=======
+3) Genetic algorithm book that I downloaded. Should be somewhere in papers/  
+>>>>>>> master
 
 Simulations
 ===========

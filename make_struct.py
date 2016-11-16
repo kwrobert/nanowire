@@ -37,7 +37,7 @@ def main():
         for freq, numbasis in data:
             if freq in fdir:
                 print('Frequency {} found in directory {}'.format(freq,fdir))
-                basis_path = os.path.join(fdir,'numbasis{}'.format(numbasis))
+                basis_path = os.path.join(fdir,'numbasis_{}.0000'.format(numbasis))
                 if os.path.isdir(basis_path):
                     print('Found {}'.format(basis_path))
                     new_path = os.path.join(dest_dir,os.path.basename(fdir))

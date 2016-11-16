@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.interpolate as spi
+import scipy.constants as constants
 import os
 import matplotlib
 # Enables saving plots over ssh
@@ -53,7 +54,10 @@ def parse_comsol(conf,compdir,path):
         # COpy the comsol file to the comparison dir for completeness
         #shutil.copy(path,compdir)
         # Make a softlink to the original comsol data file for completeness
-        os.symlink(path,os.path.join(compdir,os.path.basename(path)))
+        try:
+            os.symlink(path,os.path.join(compdir,os.path.basename(path)))
+        except FileExistsError:
+            pass
         # Create dictionary for converting comsol values and load raw data
         conv = {col: comp_conv for col in range(3,8)}
         raw = np.loadtxt(path,comments='%',converters=conv,dtype=complex)
@@ -103,7 +107,6 @@ def parse_s4(conf,compdir,path):
     # Do the same for the S4 file
     fdir,fname = os.path.split(path)
     freq = os.path.basename(fdir)
-    formatted = os.path.join(compdir,freq+'.formatted')
     if conf.get('General','save_as') == 'text':
         emat = np.loadtxt(path)
         # Convert pos_inds to positions
@@ -120,7 +123,7 @@ def parse_s4(conf,compdir,path):
             emat[:,1] = emat[:,1]*(period/conf.getfloat('General','y_samples'))
     
     print('S4 SHAPE: ',emat.shape)
-    return emat 
+    return emat[:,0:10] 
 
 def heatmap2d(x,y,cs,labels,ptype,path=None,colorsMap='jet'):
     """A general utility method for plotting a 2D heat map"""
@@ -158,29 +161,29 @@ def heatmap2dax(ax,x,y,cs,labels,cNorm,conf,colorsMap='jet'):
     ax.set_title(labels[3])
     ax.axis('tight')
     ## Draw a line at the interface between each layer
-    #ito_line = conf.getfloat('Fixed Parameters','air_t')
-    #nw_line = conf.getfloat('Fixed Parameters','ito_t')+ito_line
-    #sub_line = conf.getfloat('Fixed Parameters','nw_height')+nw_line
-    #air_line = sub_line+conf.getfloat('Fixed Parameters','substrate_t')
-    #for line_h in [(ito_line,'ITO'),(nw_line,'NW'),(sub_line,'Substrate'),(air_line,'Air')]:
-    #    x = [0,conf.getfloat('Fixed Parameters','array_period')]
-    #    y = [line_h[0],line_h[0]]
-    #    label_y = line_h[0] + 0.01
-    #    label_x = x[-1]
-    #    #ax.text(label_x,label_y,line_h[-1],ha='right',family='sans-serif',size=12)
-    #    line = mlines.Line2D(x,y,linestyle='solid',linewidth=2.0,color='black')
-    #    ax.add_line(line)
-    ## Draw two vertical lines to show the edges of the nanowire
-    #cent = conf.getfloat('Fixed Parameters','array_period')/2.0
-    #rad = conf.getfloat('Fixed Parameters','nw_radius')
-    #shell = conf.getfloat('Fixed Parameters','shell_t')
-    #bottom = conf.getfloat('Fixed Parameters','ito_t')+ito_line
-    #top = conf.getfloat('Fixed Parameters','nw_height')+nw_line
-    #for x in (cent-rad,cent+rad,cent-rad-shell,cent+rad+shell):
-    #    xv = [x,x]
-    #    yv = [bottom,top]
-    #    line = mlines.Line2D(xv,yv,linestyle='solid',linewidth=2.0,color='black')
-    #    ax.add_line(line)
+    ito_line = conf.getfloat('Fixed Parameters','air_t')
+    nw_line = conf.getfloat('Fixed Parameters','ito_t')+ito_line
+    sub_line = conf.getfloat('Fixed Parameters','nw_height')+nw_line
+    air_line = sub_line+conf.getfloat('Fixed Parameters','substrate_t')
+    for line_h in [(ito_line,'ITO'),(nw_line,'NW'),(sub_line,'Substrate'),(air_line,'Air')]:
+        x = [0,conf.getfloat('Fixed Parameters','array_period')]
+        y = [line_h[0],line_h[0]]
+        label_y = line_h[0] + 0.01
+        label_x = x[-1]
+        #ax.text(label_x,label_y,line_h[-1],ha='right',family='sans-serif',size=12)
+        line = mlines.Line2D(x,y,linestyle='solid',linewidth=2.0,color='black')
+        ax.add_line(line)
+    # Draw two vertical lines to show the edges of the nanowire
+    cent = conf.getfloat('Fixed Parameters','array_period')/2.0
+    rad = conf.getfloat('Fixed Parameters','nw_radius')
+    shell = conf.getfloat('Fixed Parameters','shell_t')
+    bottom = conf.getfloat('Fixed Parameters','ito_t')+ito_line
+    top = conf.getfloat('Fixed Parameters','nw_height')+nw_line
+    for x in (cent-rad,cent+rad,cent-rad-shell,cent+rad+shell):
+        xv = [x,x]
+        yv = [bottom,top]
+        line = mlines.Line2D(xv,yv,linestyle='solid',linewidth=2.0,color='black')
+        ax.add_line(line)
     return ax
 
 def plot_comsol(data,conf,data_file):
@@ -250,7 +253,10 @@ def gen_plots(s4dat,comsdat,diffdat,conf,files):
     x,y,z = np.unique(planes[:,0]),np.unique(planes[:,1]),np.unique(planes[:,2])
     cs = planes[:,-1].reshape(z.shape[0],y.shape[0])
     labels = ('y [um]','z [um]', 'M.S.E','Difference Between Data Sets')
-    cNorm = matplotlib.colors.Normalize(vmin=np.amin(cs), vmax=np.amax(cs))
+    if log:
+        cNorm = matplotlib.colors.LogNorm(vmin=np.amin(cs), vmax=np.amax(cs))
+    else:
+        cNorm = matplotlib.colors.Normalize(vmin=np.amin(cs), vmax=np.amax(cs))
     ax3 = heatmap2dax(ax3,y,z,cs,labels,cNorm,conf)
     scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
     # Fix overlap
@@ -260,7 +266,7 @@ def gen_plots(s4dat,comsdat,diffdat,conf,files):
     path = os.path.join(files[-1],fname)
     name = path+'multiplot.pdf'
     print('Saving figure %s'%name)
-    fig.suptitle('Frequency = %.4E'%comsdat[0,3])
+    fig.suptitle('Frequency = %.4E, Wavelength = %.2f nm'%(comsdat[0,3],(constants.c/comsdat[0,3])*1E9))
     fig.subplots_adjust(top=0.85)
     plt.savefig(name)
     plt.close(fig)
@@ -293,17 +299,11 @@ def compare_data(s4data,comsoldata,conf,files,interpolate=False,exclude=False):
         # Exclude the air regions and substrate regions
         arr = np.linspace(0,h,z_samples)
         dz = arr[1] - arr[0]
-        #print('dz = ',dz)
-        #print(round(conf.getfloat('Fixed Parameters','air_t')/dz))
-        #print(round(sum((conf.getfloat('Fixed Parameters','nw_height'),conf.getfloat('Fixed Parameters','air_t'),
-        #        conf.getfloat('Fixed Parameters','ito_t')))/dz))
         start_plane = int(round(conf.getfloat('Fixed Parameters','air_t')/dz))
         start = start_plane*(x_samples*y_samples)
         end_plane = int(round(sum((conf.getfloat('Fixed Parameters','nw_height'),conf.getfloat('Fixed Parameters','air_t'),
                 conf.getfloat('Fixed Parameters','ito_t')))/dz))
         end = end_plane*(x_samples*y_samples)
-        print(start)
-        print(end)
         comsol_pts = comsoldata[start:end,0:3]
         s4_points = s4data[start:end,0:3]
         s4_mag = s4data[start:end,-1]
@@ -319,22 +319,6 @@ def compare_data(s4data,comsoldata,conf,files,interpolate=False,exclude=False):
 
     if interpolate:
         print('Interpolating data sets before comparison ...')
-        # These should be zero
-        #print("These should be zero")
-        #xv,yv,zv = np.meshgrid(s4_points
-        #interp_vals_s4 = spi.griddata(s4_points,s4_mag,
-        #                 (s4_points[:,0],s4_points[:,1],s4_points[:,2]),method='linear')
-        #interp_vals_coms = spi.griddata(comsol_pts,comsol_mag,comsol_pts,method='linear')
-        #err = relative_difference(interp_vals_s4,s4_mag)
-        #print("Error between interpolated and actual S4 mag = ",err)
-        #err = relative_difference(interp_vals_coms,comsol_mag)
-        #print("Error between interpolated and actual COMSOL mag = ",err)
-        
-        # Regular grid
-        # Interpolating S4 points onto comsol data/grid
-        #for tup in zip(comsol_mag,s4_mag):
-        #    print(tup)
-        #x = input('Continue?')
         cx,cy,cz = np.unique(comsol_pts[:,0]),np.unique(comsol_pts[:,1]),np.unique(comsol_pts[:,2])
         points = (cx,cy,cz)
         dat = np.column_stack((comsol_pts,comsol_mag))
@@ -352,23 +336,6 @@ def compare_data(s4data,comsoldata,conf,files,interpolate=False,exclude=False):
         diff_vec, err = relative_difference(interp_vals_coms,s4_mag)
         print("The error between interpolated COMSOL and S4 = ",err)
         diff_dat = np.column_stack((s4_points,diff_vec))
-
-        # These should be the same
-
-        ## This is the S4 data on the COMSOL points
-        #cx,cy,cz = np.meshgrid(np.unique(comsol_pts[:,0]),
-        #                       np.unique(comsol_pts[:,1]),np.unique(comsol_pts[:,2]))
-        #interp_vals_s4 = spi.griddata(s4_points,s4_mag,(cx,cy,cz),method='linear')
-        ## This is the COMSOL data on the S4 points
-        #interp_vals_coms = spi.griddata(comsol_pts,comsol_mag,s4_points,method='linear')
-        #print(interp_vals_s4)
-        #print(interp_vals_coms)
-        #print('Computing error')
-        #err = relative_difference(interp_vals_s4,comsol_mag) 
-        #print("The error between interpolated S4 and COMSOL = ",err)
-        #print(s4data[:,-1])
-        #err = relative_difference(interp_vals_coms,s4_mag) 
-        #print("The error between interpolated COMSOL and S4 = ",err)
     else:
         # Just get error without interpolating 
         print('Not interpolating data sets before comparison ...')
@@ -395,6 +362,8 @@ def main():
     and air region from comparison?""")
     parser.add_argument('-o','--output',type=str,default='comparison_results',help="""Name for the
     output directory of all the comparison results. Not an absolute path""")
+    parser.add_argument('--log',action='store_true',default=False,help="""Plot difference data on a
+    log scale""")
     args = parser.parse_args()
 
     # First lets create a subdirectory within the S4 directory to store all our comparison results
@@ -447,7 +416,7 @@ def main():
             comsoldata[:,-1] = mag[::-1]
             # Now do the actual comparison    
             diff, err = compare_data(s4data,comsoldata,conf,(f[0],f[1],comp_dir),args.interpolate,args.exclude)
-            gen_plots(s4data,comsoldata,diff,conf,(f[0],f[1],comp_dir))
+            gen_plots(s4data,comsoldata,diff,conf,(f[0],f[1],comp_dir),args.log)
             efile.write('%f, %f\n'%(freq,err))
             #plot_comsol(comsoldata,conf,f[1])
             #plot_diff(diff_dat,conf,files)
@@ -455,7 +424,9 @@ def main():
             errs.append(err)
     fig = plt.figure(3)
     plt.title("Errors between COMSOL and S4")
-    plt.plot(freqs,errs)
+    plt.plot(freqs,errs,'b-o')
+    plt.plot([freqs[0],freqs[-1]],[.01,.01],'k-',linewidth=2.0)
+    plt.yticks(np.arange(min(errs),max(errs)+.01,.01))
     plt.xlabel('Frequency (Hz)')
     plt.ylabel('M.S.E of normE')
     eplot = os.path.join(comp_dir,'error_plot.pdf')

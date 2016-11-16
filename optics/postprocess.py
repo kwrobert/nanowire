@@ -5,6 +5,7 @@ import argparse as ap
 import os
 import configparser as confp 
 import re
+import glob
 import logging
 from collections import OrderedDict
 import matplotlib
@@ -71,6 +72,7 @@ class Processor(object):
         else:
             self.sims = sims
             self.sims_groups = sim_groups
+        
         # Sort on the sim dir to prevent weirdness when calculating convergence. Sorts by ascending
         # param values and works for multiple variable params
         self.sort_sims()
@@ -79,21 +81,28 @@ class Processor(object):
                          ('Ex_imag',6),('Ey_imag',7),('Ez_imag',8)])
         self.h_lookup = OrderedDict([('x',0),('y',1),('z',2),('Hx_real',3),('Hy_real',4),('Hz_real',5),
                          ('Hx_imag',6),('Hy_imag',7),('Hz_imag',8)])
+        # A place to store any failed sims (i.e sims that are missing their data file)
+        self.failed_sims = []
 
     def collect_sims(self):
         self.sims = []
         self.sim_groups = []
+        datfile = self.gconf.get('General','base_name')+'.E'
         for root,dirs,files in os.walk(self.gconf.get('General','basedir')):
-            if 'sim_conf.ini' in files:
+            if 'sim_conf.ini' in files and datfile in files:
                 obj = parse_file(os.path.join(root,'sim_conf.ini'))
                 self.sims.append(obj)
+            elif 'sim_conf.ini' in files:
+                obj = parse_file(os.path.join(root,'sim_conf.ini'))
+                self.log.error('The following sim is missing its data file: %s',
+                                obj.get('General','sim_dir'))
+                self.failed_sims.append(obj)
             if 'sorted_sweep_conf.ini' in files:
                 if 'logs' in dirs:
                     dirs.remove('logs')
                 conf_paths = [os.path.join(root,simdir,'sim_conf.ini') for simdir in dirs]
                 self.log.debug('Sim group confs: %s',str(conf_paths))
                 self.sim_groups.append(list(map(parse_file,conf_paths)))
-                self.log.debug('Sim groups: %s',str(self.sim_groups))
 
     def sort_sims(self):
         """Sorts simulations by their parameters the way a human would. Called human sorting or
@@ -102,6 +111,8 @@ class Processor(object):
             return int(text) if text.isdigit() else text
 
         def natural_keys(sim):
+            self.log.debug(sim)
+            self.log.debug(sim.sections())
             text = sim.get('General','sim_dir')
             return [ atoi(c) for c in re.split('(\d+)', text) ]
 
@@ -144,6 +155,7 @@ class Processor(object):
                 
             except FileNotFoundError:
                 self.log.error('Following file missing: %s',e_path)
+                self.failed_sims.append(sim)
             # Load the H field data
             try:
                 h_data = np.loadtxt(h_path)
@@ -158,6 +170,7 @@ class Processor(object):
                         self.log.debug('File is missing headers')
             except FileNotFoundError:
                 self.log.error('Following file missing: %s',h_path)
+                self.failed_sims.append(sim)
             pos_inds = np.zeros((e_data.shape[0],3))
             pos_inds[:,:] = e_data[:,0:3] 
         # If data was saved in in npz format
@@ -175,6 +188,7 @@ class Processor(object):
                     self.log.debug('Here is the E field header lookup: %s',str(e_lookup))
             except IOError:
                 self.log.error('Following file missing or unloadable: %s',e_path)
+                self.failed_sims.append(sim)
             try:
                 with np.load(h_path) as loaded:
                     h_data = loaded['data']            
@@ -182,6 +196,7 @@ class Processor(object):
                     self.log.debug('Here is the H field header lookup: %s',str(h_lookup))
             except IOError:
                 self.log.error('Following file missing or unloadable: %s',h_path)
+                self.failed_sims.append(sim)
             pos_inds = np.zeros((e_data.shape[0],3))
             pos_inds[:,:] = e_data[:,0:3]
         else:
@@ -236,6 +251,7 @@ class Cruncher(Processor):
             e_data = d.as_matrix()
         except FileNotFoundError:
             self.log.error('Following file missing: %s',e_path)
+            self.failed_sims.append(sim)
             raise
         # Load the H field data
         try:
@@ -429,7 +445,7 @@ class Cruncher(Processor):
         ito_nw = self.sim.getfloat('Parameters','ito_t')+air_ito
         nw_sio2 = self.sim.getfloat('Parameters','alinp_height')+ito_nw
         sio2_sub = self.sim.getfloat('Parameters','sio2_height')+nw_sio2
-        air_line = sub_line+self.sim.getfloat('Parameters','substrate_t')
+        air_line = self.sim.getfloat('Parameters','substrate_t')+sio2_sub
         # Compute ITO generation (note air generation is already set to zero)
         start = int(air_ito/dz)*x_samples*y_samples 
         end = int(ito_nw/dz)*x_samples*y_samples 
@@ -455,7 +471,7 @@ class Cruncher(Processor):
                     counter += 1
         # So same for SiO2 shell
         start = counter
-        end = start + self.sim.float('Parameters','sio2_height')
+        end = start + int(self.sim.getfloat('Parameters','sio2_height')/dz)
         for layer in range(start,end):
             for x in xvec:
                 for y in yvec:
@@ -469,12 +485,13 @@ class Cruncher(Processor):
         # The rest is just the substrate
         gvec[counter:] = fact*nk['GaAs'][0]*nk['GaAs'][1]*normEsq[counter:]
         # This approach is 4 times faster than np.column_stack()
+        assert(self.e_data.shape[0] == len(gvec))
         dat = np.zeros((self.e_data.shape[0],self.e_data.shape[1]+1))
         dat[:,:-1] = self.e_data
         dat[:,-1] = gvec
         self.e_data = dat 
         # Now append this quantity and its column the the header dict
-        self.e_lookup['generation_rate'] = dat.shape[1]-1 
+        self.e_lookup['genRate'] = dat.shape[1]-1 
         return gvec
 
 class Global_Cruncher(Processor):
@@ -560,12 +577,15 @@ class Global_Cruncher(Processor):
         # If we need to exclude calculate the indices
         if exclude:
             start,end = self.get_slice()    
+            excluded = '_excluded'
         else:
             start = 0
             end = None
+            excluded = ''
         for group in self.sim_groups:
             base = group[0].get('General','basedir')
-            with open(os.path.join(base,'localerror_%s.dat'%field),'w') as errfile:
+            errpath = os.path.join(base,'localerror_%s%s.dat'%(field,excluded))
+            with open(errpath,'w') as errfile:
                 self.log.info('Computing local error for sweep %s',base)
                 # Set comparison sim to current sim
                 self.set_sim(group[-1])
@@ -607,13 +627,15 @@ class Global_Cruncher(Processor):
         # If we need to exclude calculate the indices
         if exclude:
             start,end = self.get_slice()    
+            excluded = '_excluded'
         else:
             start = 0
             end = None
-        
+            excluded = ''
         for group in self.sim_groups:
             base = group[0].get('General','basedir')
-            with open(os.path.join(base,'globalerror_%s.dat'%field),'w') as errfile:
+            errpath = os.path.join(base,'globalerror_%s%s.dat'%(field,excluded))
+            with open(errpath,'w') as errfile:
                 self.log.info('Computing global error for sweep %s',base)
                 # Set comparison sim to current sim
                 self.set_sim(group[-1])
@@ -709,7 +731,7 @@ class Plotter(Processor):
                 ito_line = self.sim.getfloat('Parameters','air_t')
                 nw_line = self.sim.getfloat('Parameters','ito_t')+ito_line
                 sub_line = self.sim.getfloat('Parameters','nw_height')+nw_line
-                air_line = sub_line+self.sim.getfloat('Parameters','substrate_t')
+                air_line = self.sim.getfloat('Parameters','substrate_t')+sub_line
                 for line_h in [(ito_line,'ITO'),(nw_line,'NW'),(sub_line,'Substrate'),(air_line,'Air')]:
                     x = [0,self.sim.getfloat('Parameters','array_period')]
                     y = [line_h[0],line_h[0]]
@@ -903,39 +925,45 @@ class Global_Plotter(Plotter):
 
     def convergence(self,quantity,err_type='global',scale='linear'):
         """Plots the convergence of a field across all available simulations"""
-        self.log.info('Actually plotting convergence')
+        self.log.info('Plotting convergence')
         for group in self.sim_groups:
             base = group[0].get('General','basedir')
             if err_type == 'local':
-                path = os.path.join(base,'localerror_%s.dat'%quantity) 
+                fglob = os.path.join(base,'localerror_%s*.dat'%quantity) 
             elif err_type == 'global':
-                path = os.path.join(base,'globalerror_%s.dat'%quantity) 
+                fglob = os.path.join(base,'globalerror_%s*.dat'%quantity) 
             else:
                 log.error('Attempting to plot an unsupported error type')
                 quit()
-            labels = []
-            errors = []
-            with open(path,'r') as datf:
-                for line in datf.readlines():
-                    lab, err = line.split(',')
-                    labels.append(lab)
-                    errors.append(err)
-            x = range(len(errors))
-            fig = plt.figure(figsize=(9,7))
-            plt.ylabel('M.S.E of %s'%quantity)
-            plt.xlabel('Number of Fourier Terms')
-            plt.plot(labels,errors,linestyle='-',marker='o',color='b')
-            plt.yscale(scale)
-            #plt.xticks(x,labels,rotation='vertical')
-            plt.tight_layout()
-            plt.title(os.path.basename(base))
-            if self.gconf.getboolean('General','save_plots'):
-                name = '%s_%sconvergence_%s.pdf'%(os.path.basename(base),err_type,quantity)
-                path = os.path.join(base,name)
-                fig.savefig(path)
-            if self.gconf.getboolean('General','show_plots'):
-                plt.show() 
-            plt.close(fig)
+            paths = glob.glob(fglob)
+            for path in paths:
+                labels = []
+                errors = []
+                with open(path,'r') as datf:
+                    for line in datf.readlines():
+                        lab, err = line.split(',')
+                        labels.append(lab)
+                        errors.append(err)
+                x = range(len(errors))
+                fig = plt.figure(figsize=(9,7))
+                plt.ylabel('M.S.E of %s'%quantity)
+                plt.xlabel('Number of Fourier Terms')
+                plt.plot(labels,errors,linestyle='-',marker='o',color='b')
+                plt.yscale(scale)
+                #plt.xticks(x,labels,rotation='vertical')
+                plt.tight_layout()
+                plt.title(os.path.basename(base))
+                if self.gconf.getboolean('General','save_plots'):
+                    if '_excluded' in path:
+                        excluded='_excluded'
+                    else:
+                        excluded=''
+                    name = '%s_%sconvergence_%s%s.pdf'%(os.path.basename(base),err_type,quantity,excluded)
+                    path = os.path.join(base,name)
+                    fig.savefig(path)
+                if self.gconf.getboolean('General','show_plots'):
+                    plt.show() 
+                plt.close(fig)
 
 def main():
     parser = ap.ArgumentParser(description="""A wrapper around s4_sim.py to automate parameter

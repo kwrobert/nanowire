@@ -1,10 +1,53 @@
+Code
+====
+
 1) Fix simulation subproccesing in sim_wrapper so we get output/feedback from S4 library when
    verbosity > 1
 2) Fix automatic post processing so we get feedback to stdout as well as logs
-3) Add parallelization amoung list of SSH accessible hosts (paramiko, need pub keys exchanged ahead
-of time)
-4) Add error checking of plane values in setup.ini to make sure they do not exceed number of samples
-5) Parallelize postprocessing
-7) Add capability to look up minimum number of basis terms to sim_wrapper 
-8) Write script to compute and plot time scaling with # of basis terms
-9) Add function to compute and plot generation rate in postprocess
+3) Add error checking of plane values in setup.ini to make sure they do not exceed number of samples
+4) Parallelize postprocessing
+5) Add capability to look up minimum number of basis terms to sim_wrapper 
+    a) Will need to create a database. Store number of basis terms for each combination of
+       frequency and some reasonable number of geometric parameters. 
+5) Fix comsol_compare.py so it grabs quantities by column header 
+6) Add averaging over frequency *** 
+7) Add counter to simulation sweeps so we know how many are left to run 
+8) Fix limits on 2D color plots to remove whitespace
+9) Fix API of the optics code, mainly the postprocess.py file. Right now it has all this convoluted
+   fucked up logic and setting the data for a single sim as an attribute makes parallization
+   impossible. We should fix things as follows: 
+    a) Each processor object should have a function that accepts a single sim config object as an
+       argument, and does its job on that simulation. We can then easily parallelize this. Call this
+       function "process", raise NotImplementedError in base class but override in child classes. 
+    b) Will need to remove the dependency on the self.data attribute. Every function that performs
+       some operation on data needs to explicitly receive that data as an argument. Note we can
+       still keep the header attributes as it will force our data to maintain the proper column
+       structure. This point is mainly relevant to Cruncher and Global_Cruncher 
+    c) Can still have some large, monolithic function that, given some master config file for a
+       sweep, will do its job on all sims in the sweep. This will just be a simple loop/wrapper 
+       around the basic "process" function. Boolean kwarg that determines whether or not to run in
+       parallel. 
+Reading
+=======
+
+1) Read Rays paper and identify any gaps in their optimization that we could fill
+    a) Notes in Zotero
+2) Find/ask for generation rate document Anna made and read it
+    a) Handwritten notes up on Dropbox. Kind of a mess. Will need to decrpypt it in the future
+3) Genetic algorithm book that I downloaded. Should be somewhere in papers/  
+4) Software design patterns book. Stored in zotero. 
+
+Simulations
+===========
+
+1) Run a full convergence analysis for different system sizes
+    a) p̶e̶r̶i̶o̶d̶ ̶2̶0̶0̶ ̶n̶m̶,̶ ̶r̶a̶d̶i̶u̶s̶ ̶7̶5̶
+    b) p̶e̶r̶i̶o̶d̶ ̶3̶0̶0̶ ̶n̶m̶,̶ ̶r̶a̶d̶i̶u̶s̶ ̶6̶0̶
+    c) Need to find sims that failed, re-run, then complete postprocessing 
+2) Run simulation with fixed total nanowire radius, but vary ratio between shell thickness
+   and core radius 
+   
+Other
+====
+
+1) Create documentation for the code and all calculations 

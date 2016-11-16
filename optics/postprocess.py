@@ -21,6 +21,9 @@ import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
 # Literally just for the initial data load
 import pandas
+import multiprocessing as mp
+import multiprocessing.dummy as mpd
+#import pickle
 
 def configure_logger(level,logger_name,log_dir,logfile):
     # Get numeric level safely
@@ -318,13 +321,16 @@ class Cruncher(Processor):
             sim.write_data()
             sim.clear_data()
     
-    def process_all(self,parallel=False):
+    def process_all(self):
         self.log.info('Beginning data crunch ...')
-        if not parallel:
+        if not self.gconf.getboolean('General','post_parallel'):
             for sim in self.sims:
                 self.process(sim)
         else:
-            raise NotImplementedError('Parallel postproccesing not yet implemented')
+            num_procs = mp.cpu_count() - self.gconf.getint('General','reserved_cores')
+            self.log.info('Crunching sims in parallel using %s cores ...',str(num_procs))
+            pool = mpd.Pool(processes=num_procs)
+            pool.map(self.process,self.sims)
 
     def normE(self,sim):
         """Calculate and returns the norm of E"""
@@ -612,6 +618,7 @@ class Global_Cruncher(Cruncher):
                     self.log.info(str(avg_diffvec_mag))
                     errfile.write('%i,%f\n'%(sim2.conf.getint('Parameters','numbasis'),avg_diffvec_mag))
                     sim2.clear_data()
+                ref_sim.clear_data()
 
     def global_error(self,field,exclude=False):
         """Computes the global error between the vector fields of two simulations. This is the sum
@@ -661,6 +668,7 @@ class Global_Cruncher(Cruncher):
                     self.log.info(str(error))
                     errfile.write('%i,%f\n'%(sim2.conf.getint('Parameters','numbasis'),error))
                     sim2.clear_data()
+                ref_sim.clear_data()
 
 class Plotter(Processor):
     """Plots all the things listed in the config file"""
@@ -681,14 +689,20 @@ class Plotter(Processor):
                     self.gen_plot(plot,sim,argset.split(','))
                 else:
                     self.gen_plot(plot,sim,[])
+        sim.clear_data()
 
-    def process_all(self,parallel=False):
+    def process_all(self):
         self.log.info("Beginning local plotter method ...")
-        if not parallel:
-            for sim in self.sims:
-                self.process(sim)
-        else:
-            raise NotImplementedError
+        #if not self.gconf.getboolean('General','post_parallel'):
+        #    for sim in self.sims:
+        #        self.process(sim)
+        #else:
+        #    num_procs = mp.cpu_count() - self.gconf.getint('General','reserved_cores')
+        #    self.log.info('Plotting sims in parallel using %s cores ...',str(num_procs))
+        #    pool = mpd.Pool(processes=num_procs)
+        #    pool.map(self.process,self.sims)
+        for sim in self.sims:
+            self.process(sim)
 
     def gen_plot(self,plot,sim,args):
         try:

@@ -62,6 +62,17 @@ def parse_file(path):
         parser.readfp(config_file)
     return parser
 
+def dir_keys(path):
+    """A function to take a path, and return a list of all the numbers in the path. This is
+    mainly used for sorting by the parameters they contain"""
+
+    regex = '[-+]?[0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?' # matching any floating point
+    m = re.findall(regex, path)
+    if(m): val = m
+    else: raise ValueError('Your path does not contain any numbers')
+    val = list(map(float,val))
+    return val
+
 class Simulation(object):
     """An object that represents a simulation. It contains the data for the sim, the data file
     headers, and its configuration object as attributes. This object contains all the information
@@ -259,20 +270,12 @@ class Processor(object):
     def sort_sims(self):
         """Sorts simulations by their parameters the way a human would. Called human sorting or
         natural sorting. Thanks stackoverflow"""
-        def atoi(text):
-            return int(text) if text.isdigit() else text
-
-        def natural_keys(sim):
-            self.log.debug(sim)
-            self.log.debug(sim.conf.sections())
-            text = sim.conf.get('General','sim_dir')
-            return [ atoi(c) for c in re.split('(\d+)', text) ]
-
-        self.sims.sort(key=natural_keys)
+        
+        self.sims.sort(key=dir_keys)
         for group in self.sim_groups:
             paths = [sim.conf.get('General','sim_dir') for sim in group]
             self.log.debug('Group paths before sorting: %s',str(paths))
-            group.sort(key=natural_keys)
+            group.sort(key=dir_keys)
             paths = [sim.conf.get('General','sim_dir') for sim in group]
             self.log.debug('Group paths after sorting: %s',str(paths))
     

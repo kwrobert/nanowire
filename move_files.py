@@ -16,11 +16,17 @@ def parse_file(path):
         parser.readfp(config_file)
     return parser
 
-def atoi(text):
-    return int(text) if text.isdigit() else text
+def dir_keys(path):
+    """A function to take a path, and return a list of all the numbers in the path. This is
+    mainly used for sorting 
+        by the parameters they contain"""
 
-def natural_keys(text):
-    return [ atoi(c) for c in re.split('(\d+)', text) ]
+    regex = '[-+]?[0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?' # matching any floating point
+    m = re.findall(regex, path)
+    if(m): val = m
+    else: raise ValueError('Your path does not contain any numbers')
+    val = list(map(float,val))
+    return val
 
 def get_freq(path):
     with open(path,'r') as f:
@@ -55,20 +61,24 @@ def main():
         input('Continue?')
 
     cf = parse_file(confpath)    
-    freqs = cf.get('Sorting Parameters','frequency').split(',')
+    desired_freqs = cf.get('Sorting Parameters','frequency').split(',')
+    desired_freqs[-1] = desired_freqs[-1][:-2]
+    print(desired_freqs[-1])
     comsglob = osp.join(coms_dir,'frequency*')
-    comsfiles = sorted(glob.glob(comsglob),key=natural_keys)
+    comsfiles = sorted(glob.glob(comsglob),key=dir_keys)
     freqs = []
     for f in comsfiles:
         freq = get_freq(f)
         freqs.append(freq)
-    desired_freqs = freqs[0::2]
+    #desired_freqs = freqs[0::2]
     print(desired_freqs)
     for dfreq in desired_freqs:
         for comsfile in comsfiles:
             freq = get_freq(comsfile)
             if freq == dfreq:
                 found = True
+                print('Desired: ',dfreq)
+                print('COMSOL: ',freq)
                 print("Found desired freq %s in file %s, copying now"%(dfreq,comsfile))
                 shutil.copy(comsfile,args.output)
                 break

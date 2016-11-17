@@ -41,7 +41,6 @@ def comp_conv(val):
             return complex(val)
 
 def parse_comsol(conf,compdir,path):
-    print('Parsing new COMSOL data')
     # If the formatted file exists use it, otherwise parse the file provided at the command line
     fdir,fname = os.path.split(path)
     formatted = os.path.join(compdir,fname)
@@ -103,7 +102,6 @@ def parse_comsol(conf,compdir,path):
         return new_data
 
 def parse_s4(conf,compdir,path):
-    print('Parsing new S4 data')
     # Do the same for the S4 file
     fdir,fname = os.path.split(path)
     freq = os.path.basename(fdir)
@@ -196,8 +194,8 @@ def plot_comsol(data,conf,data_file):
     heatmap2d(y,z,cs,labels,'plane_2d_x',data_file.rstrip('.txt'))
 
 def plot_diff(data,conf,files):
-    print(data.shape)
-    print(data)
+    #print(data.shape)
+    #print(data)
     planes = np.array([row for row in data if np.abs(row[0]-.125) < .00001])
     print(planes)
     x,y,z = np.unique(planes[:,0]),np.unique(planes[:,1]),np.unique(planes[:,2])
@@ -205,10 +203,10 @@ def plot_diff(data,conf,files):
     labels = ('y [um]','z [um]', 'normE')
     fname = os.path.split(os.path.dirname(files[0]))[-1]
     path = os.path.join(files[-1],fname)
-    print(path)
+    #print(path)
     heatmap2d(y,z,cs,labels,'difference_magnitude',path)
 
-def gen_plots(s4dat,comsdat,diffdat,conf,files):
+def gen_plots(s4dat,comsdat,diffdat,conf,files,log):
     fig, (ax1,ax2,ax3) = plt.subplots(figsize=(13,6),ncols=3)
     # Define normalization for colorbar,
     s4min,s4max = np.amin(s4dat[:,-1]),np.amax(s4dat[:,-1])
@@ -344,11 +342,17 @@ def compare_data(s4data,comsoldata,conf,files,interpolate=False,exclude=False):
         print("The error between COMSOL and S4 = ",err)
     return diff_dat, err
 
-def atoi(text):
-    return int(text) if text.isdigit() else text
+def dir_keys(path):
+    """A function to take a path, and return a list of all the numbers in the path. This is
+    mainly used for sorting 
+        by the parameters they contain"""
 
-def natural_keys(text):
-    return [ atoi(c) for c in re.split('(\d+)', text) ]
+    regex = '[-+]?[0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?' # matching any floating point
+    m = re.findall(regex, path)
+    if(m): val = m
+    else: raise ValueError('Your path does not contain any numbers')
+    val = list(map(float,val))
+    return val
 
 def main():
     parser = ap.ArgumentParser(description="""Compares the data between a provided RCWA data file and COMSOL
@@ -395,22 +399,25 @@ def main():
     s4_files = glob.glob(sg,recursive=True)
     cg = os.path.join(coms_dir,'frequency*.txt')
     coms_files = glob.glob(cg)
-    print('S4 len: ',len(s4_files))
-    print('COMSOL len: ',len(coms_files))
-    files = zip(sorted(s4_files,key=natural_keys),sorted(coms_files,key=natural_keys))
+    print('Number of S4 files: %i'%len(s4_files))
+    print('Number of COMSOL files: %i'%len(coms_files))
+    files = zip(sorted(s4_files,key=dir_keys),sorted(coms_files,key=dir_keys))
     err_file = os.path.join(comp_dir,'errors.txt')
     freqs = []
     errs = []
     with open(err_file,'w') as efile:
         efile.write('# freq (Hz), error\n')
         for f in files:
-            print('S4 file: ',f[0])
-            print('COMSOL file: ',f[1])
+            print('*'*50)
+            print('Comparing following files: ')
+            print('S4 File: %s'%f[0])
+            print('COMSOL File: %s'%f[1])
             # Parse the files
             s4data = parse_s4(conf,comp_dir,f[0])
             comsoldata = parse_comsol(conf,comp_dir,f[1])
             # Get frequency for err file
             freq = comsoldata[0,3]
+            print('COMSOL Frequency: {:G}'.format(freq))
             # We need to flip the comsol magnitude over before comparing
             mag = comsoldata[:,-1]
             comsoldata[:,-1] = mag[::-1]

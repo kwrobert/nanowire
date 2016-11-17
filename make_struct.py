@@ -2,6 +2,7 @@ import os
 import glob
 import argparse as ap
 import shutil as sh
+import re
 
 def main():
     parser = ap.ArgumentParser(description="""Uses minimum basis term file to extract the data for a
@@ -28,23 +29,30 @@ def main():
         pass
 
     with open(min_file,'r') as f:
-        data = [('{:.4E}'.format(float(line.split(',')[0])),str(line.split(',')[1].strip('\n'))) for line in f.readlines()[1:]]
+        data = [('{:G}'.format(float(line.split(',')[0])),str(line.split(',')[1].strip('\n'))) for line in f.readlines()[1:]]
     print(data)
     
     dir_glob = os.path.join(s4_dir,"frequency*")
     freq_dirs = glob.glob(dir_glob)
     for fdir in freq_dirs:
         for freq, numbasis in data:
-            if freq in fdir:
+            print('Frequency {} has minimum basis of {}'.format(freq,numbasis))
+            dat = freq.split('E')
+            regex = dat[0][0:4]+"[0-9]+E\\"+dat[1]
+            regex = regex.replace('.','\.')
+            m = re.search(regex,fdir)
+            if m:
+                print(m.group(0))
                 print('Frequency {} found in directory {}'.format(freq,fdir))
-                basis_path = os.path.join(fdir,'numbasis_{}.0000'.format(numbasis))
+                basis_path = os.path.join(fdir,'numbasis_{}'.format(numbasis))
                 if os.path.isdir(basis_path):
-                    print('Found {}'.format(basis_path))
+                    print('Found min basis path {}'.format(basis_path))
                     new_path = os.path.join(dest_dir,os.path.basename(fdir))
                     print('Copying {} to {}'.format(basis_path,new_path))
                     sh.copytree(basis_path,new_path)
                 else:
                     print('Missing {} !!!!'.format(basis_path))
+                break
 
 if __name__ == '__main__':
     main()

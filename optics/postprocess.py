@@ -242,6 +242,7 @@ class Processor(object):
         self.failed_sims = failed_sims
                 
     def collect_sims(self):
+        """Collect all the simulations beneath the base of the directory tree"""
         datfile = self.gconf.get('General','base_name')+'.E'
         for root,dirs,files in os.walk(self.gconf.get('General','basedir')):
             if 'sim_conf.ini' in files and datfile in files:

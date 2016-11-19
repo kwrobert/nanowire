@@ -33,11 +33,13 @@ def main():
     periods = ['array_period_0.25']
     systems = {'array_period_0.25':['nw_radius_0.075','nw_radius_0.06'],
                'array_period_0.3':['nw_radius_0.075']}
-    fig, axes = plt.subplots(3,2)
-    counter = 0
+
     for period,radii in systems.items():
         for radius in radii:
+            fig, axes = plt.subplots(2,1)
             for field in fields:
+                
+
                 tglob = os.path.join(path,field,period+"*",radius,'frequency_3.2962*/time_scaling.dat')
                 tlist = glob.glob(tglob)
                 if tlist:
@@ -47,12 +49,11 @@ def main():
                     quit()
                 print(tpath)
                 numbasis, tdata = np.loadtxt(tpath,unpack=True,skiprows=1,delimiter=',')
-                axes[counter][0].plot(numbasis,tdata,'-o',label=field)
-                axes[counter][0].legend(loc='best')
-                axes[counter][0].set_xlabel('Number of Basis Terms')
-                axes[counter][0].set_ylabel('Wall Clock Time (seconds)')
-                axes[counter][0].set_title('%s, %s'%(period,radius))
-            for field in fields:
+                axes[0].plot(numbasis,tdata,'-o',label=field)
+                axes[0].legend(loc='best')
+                axes[0].set_xlabel('Number of Basis Terms')
+                axes[0].set_ylabel('Wall Clock Time (seconds)')
+                axes[0].set_title('%s, %s'%(period,radius))
                 mglob = os.path.join(path,field,period+"*",radius,'minimum_basis_terms_global_t0.05.dat')
                 mlist = glob.glob(mglob)
                 if mlist:
@@ -62,15 +63,55 @@ def main():
                     quit()
                 print(mpath)
                 freq, mdata = np.loadtxt(mpath,unpack=True,skiprows=1,delimiter=',')
-                axes[counter][1].plot(freq,mdata,'-o',label=field)
-                axes[counter][1].legend(loc='best')
-                axes[counter][1].set_ylabel('Number of Basis Terms')
-                axes[counter][1].set_xlabel('Frequency (Hz)')
-                axes[counter][1].set_title('%s, %s, Threshold = .05'%(period,radius))
-            counter += 1
-    fig.subplots_adjust(hspace=.25)
-    plt.savefig(os.path.join(path,'vec_field_timescaling_comparison.pdf'))
-    plt.show()
+                axes[1].plot(freq,mdata,'-o',label=field)
+                #axes[1].legend(loc='best')
+                axes[1].set_ylabel('Number of Basis Terms')
+                axes[1].set_xlabel('Frequency (Hz)')
+                axes[1].set_title('%s, %s, Threshold = .05'%(period,radius))
+            fig.subplots_adjust(hspace=.35)
+            plt.savefig(os.path.join(path,'%s_%s_vec_field_timescaling_comparison.pdf'%(period,radius)))
+            #plt.show()
+
+    #fig, axes = plt.subplots(3,2)
+    #counter = 0
+    #for period,radii in systems.items():
+    #    for radius in radii:
+    #        for field in fields:
+    #            
+    #            fig, axes = plt.subplots(3,2)
+    #            tglob = os.path.join(path,field,period+"*",radius,'frequency_3.2962*/time_scaling.dat')
+    #            tlist = glob.glob(tglob)
+    #            if tlist:
+    #                tpath = tlist[0]
+    #            else:
+    #                print(tglob)
+    #                quit()
+    #            print(tpath)
+    #            numbasis, tdata = np.loadtxt(tpath,unpack=True,skiprows=1,delimiter=',')
+    #            axes[counter][0].plot(numbasis,tdata,'-o',label=field)
+    #            axes[counter][0].legend(loc='best')
+    #            axes[counter][0].set_xlabel('Number of Basis Terms')
+    #            axes[counter][0].set_ylabel('Wall Clock Time (seconds)')
+    #            axes[counter][0].set_title('%s, %s'%(period,radius))
+    #        for field in fields:
+    #            mglob = os.path.join(path,field,period+"*",radius,'minimum_basis_terms_global_t0.05.dat')
+    #            mlist = glob.glob(mglob)
+    #            if mlist:
+    #                mpath = mlist[0]
+    #            else:
+    #                print(mglob)
+    #                quit()
+    #            print(mpath)
+    #            freq, mdata = np.loadtxt(mpath,unpack=True,skiprows=1,delimiter=',')
+    #            axes[counter][1].plot(freq,mdata,'-o',label=field)
+    #            axes[counter][1].legend(loc='best')
+    #            axes[counter][1].set_ylabel('Number of Basis Terms')
+    #            axes[counter][1].set_xlabel('Frequency (Hz)')
+    #            axes[counter][1].set_title('%s, %s, Threshold = .05'%(period,radius))
+    #        counter += 1
+    #fig.subplots_adjust(hspace=.25)
+    #plt.savefig(os.path.join(path,'vec_field_timescaling_comparison.pdf'))
+    #plt.show()
 
     #time_glob = os.path.join(path,'**/frequency_3.2962*/**/time_scaling.dat')
     #print(time_glob)

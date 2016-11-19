@@ -70,20 +70,39 @@ def main():
     for f in comsfiles:
         freq = get_freq(f)
         freqs.append(freq)
-    #desired_freqs = freqs[0::2]
-    print(desired_freqs)
+    counter = 0
     for dfreq in desired_freqs:
+        found = False
+        print('Desired Frequency: %s'%str(dfreq))
         for comsfile in comsfiles:
             freq = get_freq(comsfile)
+            print('COMSOL Frequency: %s'%str(freq))
             if freq == dfreq:
                 found = True
-                print('Desired: ',dfreq)
-                print('COMSOL: ',freq)
+                print('**************************************************************')
                 print("Found desired freq %s in file %s, copying now"%(dfreq,comsfile))
+                print('**************************************************************')
                 shutil.copy(comsfile,args.output)
+                counter += 1
                 break
         if not found:
+            print('**************************************************************')
             print('No comsol file with freq=%s'%str(dfreq))
+            print('Seeking file with minimal difference')
+            mindiff = 1E20
+            minfile = None
+            for comsfile in comsfiles:
+                freq = get_freq(comsfile)
+                diff = abs(float(dfreq)-float(freq))
+                if diff < mindiff:
+                    mindiff = diff
+                    minfile = comsfile
+                    minfreq = freq
+            print('Using file %s with frequency %s'%(minfile,minfreq))
+            print('**************************************************************')
+            shutil.copy(minfile,args.output)
+            counter += 1
+    print('Number of COMSOL files moved: %i'%counter)
 
 if __name__ == '__main__':
     main()

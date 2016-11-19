@@ -62,16 +62,6 @@ def parse_file(path):
         parser.readfp(config_file)
     return parser
 
-def dir_keys(path):
-    """A function to take a path, and return a list of all the numbers in the path. This is
-    mainly used for sorting by the parameters they contain"""
-
-    regex = '[-+]?[0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?' # matching any floating point
-    m = re.findall(regex, path)
-    if(m): val = m
-    else: raise ValueError('Your path does not contain any numbers')
-    val = list(map(float,val))
-    return val
 
 class Simulation(object):
     """An object that represents a simulation. It contains the data for the sim, the data file
@@ -240,11 +230,30 @@ class Processor(object):
         self.sim_groups = sim_groups
         # A place to store any failed sims (i.e sims that are missing their data file)
         self.failed_sims = failed_sims
-                
+    
+    def dir_keys(self,path):
+        """A function to take a path, and return a list of all the numbers in the path. This is
+        mainly used for sorting by the parameters they contain"""
+
+        regex = '[-+]?[0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?' # matching any floating point
+        m = re.findall(regex, path)
+        if(m): val = m
+        else: raise ValueError('Your path does not contain any numbers')
+        val = list(map(float,val))
+        return val
+    
+    def _sim_sorter(self,sim):
+        """A wrapper function around dir_keys that takes a sim object as an arg, extracts it path,
+        then passes that to dir_keys"""
+        path = sim.conf.get('General','sim_dir')
+        key = self.dir_keys(path)
+        return key
+
     def collect_sims(self):
         datfile = self.gconf.get('General','base_name')+'.E'
         for root,dirs,files in os.walk(self.gconf.get('General','basedir')):
             if 'sim_conf.ini' in files and datfile in files:
+                self.log.info('Gather sim at %s',root)
                 sim_obj = Simulation(parse_file(os.path.join(root,'sim_conf.ini')))
                 self.sims.append(sim_obj)
             elif 'sim_conf.ini' in files:
@@ -253,6 +262,7 @@ class Processor(object):
                                 sim_obj.conf.get('General','sim_dir'))
                 self.failed_sims.append(sim_obj)
             if 'sorted_sweep_conf.ini' in files:
+                self.log.info('Gather sim group at %s',root)
                 if 'logs' in dirs:
                     dirs.remove('logs')
                 conf_paths = [os.path.join(root,simdir,'sim_conf.ini') for simdir in dirs]
@@ -271,11 +281,11 @@ class Processor(object):
         """Sorts simulations by their parameters the way a human would. Called human sorting or
         natural sorting. Thanks stackoverflow"""
         
-        self.sims.sort(key=dir_keys)
+        self.sims.sort(key=self._sim_sorter)
         for group in self.sim_groups:
             paths = [sim.conf.get('General','sim_dir') for sim in group]
             self.log.debug('Group paths before sorting: %s',str(paths))
-            group.sort(key=dir_keys)
+            group.sort(key=self._sim_sorter)
             paths = [sim.conf.get('General','sim_dir') for sim in group]
             self.log.debug('Group paths after sorting: %s',str(paths))
     

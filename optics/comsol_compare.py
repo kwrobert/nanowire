@@ -275,9 +275,9 @@ def relative_difference(x,y):
         print("You have attempted to compare datasets with an unequal number of points!!!!")
         quit()
     else:
-        diff = (x-y)**2
-        rel_diff  = np.sum(diff)/np.sum(x**2)
-        return diff, rel_diff
+        diff = x-y
+        rel_diff  = np.sum(diff**2)/np.sum(x**2)
+        return np.abs(diff), rel_diff
 
 def compare_data(s4data,comsoldata,conf,files,interpolate=False,exclude=False):
     """ The points extracted from COMSOL and S4 are not exactly the same, so we need to interpolate S4

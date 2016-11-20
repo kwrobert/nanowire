@@ -83,17 +83,22 @@ class Simulation(object):
 
     def load_txt(self,path):
         try: 
-            # pandas read_csv is WAY faster than loadtxt
-            d = pandas.read_csv(path,delim_whitespace=True)
-            data = d.as_matrix()
             with open(path,'r') as dfile:
-                hline = dfile.readlines()[0]
+                hline = dfile.readline()
                 if hline[0] == '#':
                     # We have headers in the file
+                    # pandas read_csv is WAY faster than loadtxt. We've already read the header line
+                    # so we pass header=None
+                    d = pandas.read_csv(dfile,delim_whitespace=True,header=None,skip_blank_lines=True)
+                    data = d.as_matrix()
                     headers = hline.strip('#\n').split(',')
                     lookup = {headers[ind]:ind for ind in range(len(headers))}
                     self.log.debug('Here is the E field header lookup: %s',str(lookup))
                 else:
+                    # Make sure we seek to beginning of file so we don't lose the first row
+                    dfile.seek(0)
+                    d = pandas.read_csv(dfile,delim_whitespace=True,header=None,skip_blank_lines=True)
+                    data = d.as_matrix()
                     self.log.debug('File is missing headers')
                     lookup = None
         except FileNotFoundError:
@@ -237,9 +242,12 @@ class Processor(object):
 
         regex = '[-+]?[0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?' # matching any floating point
         m = re.findall(regex, path)
-        if(m): val = m
-        else: raise ValueError('Your path does not contain any numbers')
-        val = list(map(float,val))
+        if m: 
+            val = m
+            val = list(map(float,val))
+        else: 
+            self.log.info('Your path does not contain any numbers')
+            val = os.path.basename(path)
         return val
     
     def _sim_sorter(self,sim):
@@ -318,6 +326,7 @@ class Cruncher(Processor):
         sim_path = os.path.basename(sim.conf.get('General','sim_dir'))
         self.log.info('Crunching data for sim %s',sim_path)
         sim.get_raw_data()
+        self.log.debug('SHAPE BEFORE CALCULATING: %s'%str(sim.e_data.shape))
         if sim.failed:
             self.log.error('Following simulation missing data: %s',sim_path)
             self.failed_sims.append(sim)
@@ -330,8 +339,10 @@ class Cruncher(Processor):
                         self.calculate(quant,sim,argset.split(','))
                     else:
                         self.calculate(quant,sim,[])
+                    self.log.debug('SHAPE AFTER CALCULATING: %s'%str(sim.e_data.shape))
                 self.log.debug('E lookup: %s',str(sim.e_lookup))
                 self.log.debug('H lookup: %s',str(sim.h_lookup))
+                
             sim.write_data()
             sim.clear_data()
     
@@ -432,22 +443,23 @@ class Cruncher(Processor):
         return f_n(freq), f_k(freq)
 
     def genRate(self,sim):
-        """Computes and return the generation rate at each point in space"""
-
         # We need to compute normEsquared before we can compute the generation rate
         normEsq = sim.get_scalar_quantity('normEsquared') 
-        gvec = np.zeros_like(normEsq)
-        # Convenient lambda function to actual compute G
+        # Prefactor for generation rate
         fact = c.epsilon_0/c.hbar
         # Get the indices of refraction at this frequency
         freq = sim.conf.get('Parameters','frequency')
         nk = {mat[0]:(self.get_nk(mat[1],freq)) for mat in self.gconf.items('Materials')}
         self.log.debug(nk) 
-        height = sim.conf.getfloat('Parameters','total_height')
         # Get spatial discretization
         z_samples = sim.conf.getint('General','z_samples')
         x_samples = sim.conf.getint('General','x_samples')
         y_samples = sim.conf.getint('General','y_samples')
+        # Reshape into an actual 3D matrix. Rows correspond to different y fixed x, columns to fixed
+        # y variable x, and each layer in depth is a new z value
+        normEsq = np.reshape(normEsq,(z_samples+1,x_samples,y_samples))
+        gvec = np.zeros_like(normEsq)
+        height = sim.conf.getfloat('Parameters','total_height')
         dz = height/z_samples
         period = sim.conf.getfloat('Parameters','array_period')
         dx = period/x_samples
@@ -458,44 +470,46 @@ class Cruncher(Processor):
         nw_sio2 = sim.conf.getfloat('Parameters','alinp_height')+ito_nw
         sio2_sub = sim.conf.getfloat('Parameters','sio2_height')+nw_sio2
         air_line = sim.conf.getfloat('Parameters','substrate_t')+sio2_sub
-        # Compute ITO generation (note air generation is already set to zero)
-        start = int(air_ito/dz)*x_samples*y_samples 
-        end = int(ito_nw/dz)*x_samples*y_samples 
-        gvec[start:end] = fact*nk['ITO'][0]*nk['ITO'][1]*normEsq[start:end]
-        # Compute nw generation
+        # ITO Generation
+        start = int(air_ito/dz)+1
+        end = int(ito_nw/dz)+1
+        self.log.debug('ITO START = %i'%start)
+        self.log.debug('ITO LAYER SHAPE = %s'%str(normEsq[start:end,:,:].shape))
+        gvec[start:end,:,:] = fact*nk['ITO'][0]*nk['ITO'][1]*normEsq[start:end,:,:]
+        # NW/Shell/Cyclotene Generation
+        center = period/2.0
+        core_radius = sim.conf.getfloat('Parameters','nw_radius') 
+        core_radius_sq = core_radius*core_radius
+        total_radius = core_radius + sim.conf.getfloat('Parameters','shell_t')
+        total_radius_sq = total_radius*total_radius
+        # Build the matrices containing the NK profile in the x-y plane
+        al_nk_mat = np.zeros_like(gvec[0,:,:])
+        si_nk_mat = np.zeros_like(gvec[0,:,:])
+        for xi in range(x_samples):
+            for yi in range(y_samples):
+                dist = ((xi*dx)-center)**2 + ((yi*dy)-center)**2 
+                if  dist <= core_radius_sq:
+                    al_nk_mat[yi,xi] = fact*nk['GaAs'][0]*nk['GaAs'][1]
+                    si_nk_mat[yi,xi] = fact*nk['GaAs'][0]*nk['GaAs'][1]
+                elif core_radius_sq <= dist <= total_radius_sq:
+                    al_nk_mat[yi,xi] = fact*nk['AlInP'][0]*nk['AlInP'][1]
+                    si_nk_mat[yi,xi] = fact*nk['SiO2'][0]*nk['SiO2'][1]
+                else:
+                    al_nk_mat[yi,xi] = fact*nk['Cyclotene'][0]*nk['Cyclotene'][1]
+                    si_nk_mat[yi,xi] = fact*nk['Cyclotene'][0]*nk['Cyclotene'][1]
+        # Generation for AlInP shell region
         start = end
-        end = start + int(sim.conf.getfloat('Parameters','alinp_height')/dz) 
-        xvec = np.linspace(0,period,x_samples)
-        yvec = np.linspace(0,period,y_samples)
-        center = period/2
-        nw_radius = sim.conf.getfloat('Parameters','nw_radius') 
-        # Loop through each z layer in nw with AlInP shell
-        counter = start
-        for layer in range(start,end):
-            for x in xvec:
-                for y in yvec:
-                    if (x-center)**2 + (y-center)**2 <= nw_radius:
-                        gvec[counter] = fact*nk['GaAs'][0]*nk['GaAs'][1]*normEsq[counter] 
-                    elif nw_radius < (x-center)**2 + (y-center)**2 <= core_rad:
-                        gvec[counter] = fact*nk['AlInP'][0]*nk['AlInP'][1]*normEsq[counter]
-                    else:
-                        gvec[counter] = fact*nk['Cyclotene'][0]*nk['Cyclotene'][1]*normEsq[counter]
-                    counter += 1
-        # So same for SiO2 shell
-        start = counter
-        end = start + int(sim.conf.getfloat('Parameters','sio2_height')/dz)
-        for layer in range(start,end):
-            for x in xvec:
-                for y in yvec:
-                    if (x-center)**2 + (y-center)**2 <= nw_radius:
-                        gvec[counter] = fact*nk['GaAs'][0]*nk['GaAs'][1]*normEsq[counter] 
-                    elif nw_radius < (x-center)**2 + (y-center)**2 <= core_rad:
-                        gvec[counter] = fact*nk['SiO2'][0]*nk['SiO2'][1]*normEsq[counter]
-                    else:
-                        gvec[counter] = fact*nk['Cyclotene'][0]*nk['Cyclotene'][1]*normEsq[counter]
-                    counter += 1
+        end = int(nw_sio2/dz)+1
+        gvec[start:end+1,:,:] = (al_nk_mat*normEsq[start:end+1,:,:])
+        # Generation for SiO2 shell region
+        start = end 
+        end = int(sio2_sub/dz)+1
+        gvec[start:end+1,:,:] = (si_nk_mat*normEsq[start:end+1,:,:])
         # The rest is just the substrate
-        gvec[counter:] = fact*nk['GaAs'][0]*nk['GaAs'][1]*normEsq[counter:]
+        start = end
+        gvec[end:,:,:] = fact*nk['GaAs'][0]*nk['GaAs'][1]*normEsq[end:,:,:]
+        # Reshape back to 1D array
+        gvec = gvec.reshape((x_samples*y_samples*(z_samples+1)))
         # This approach is 4 times faster than np.column_stack()
         assert(sim.e_data.shape[0] == len(gvec))
         dat = np.zeros((sim.e_data.shape[0],sim.e_data.shape[1]+1))

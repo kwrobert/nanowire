@@ -290,6 +290,7 @@ function build_sim(conf)
     height = getfloat(conf,'Parameters','total_height') 
     dz = height/z_samp
     zvec = List.range(0,height,dz)
+    print(#zvec)
     for i,z in ipairs(zvec) do 
         sim:GetFieldPlane(z,{x_samp,y_samp},'FileAppend',output_file)
     end

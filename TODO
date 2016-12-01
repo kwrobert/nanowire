@@ -26,18 +26,23 @@ Code
 12) Add functions that collect/return sims based on some criteria. Ex: Collect all sims with specific 
     frequency. Return all sims with particular system params. 
     a) collect_all(),collect_by_param,get_all,get_by_param
-13) Port some of the logic in sim_wrapper to lua. This will allow us to perhaps reuse solutions when
-    sweeping through layer thicknesses. 
+13) Port some of the logic in sim_wrapper to lua. This will allow us to perhaps reuse solutions
     a) This will only be a useful task if we can confirm that S4 will resuse the results of previous
-       computations when some parameter is changed. I think the only time this is possible is when
-       only a layer thickness is updated for the following reason:
-       I) Updating the array period changes the periodicity of the lattice and therefore the
-          underlying Fourier series for the solution. 
-       II) Changing the frequency changes the entire solution. 
-       II) Changing 
+       computations when some parameter is changed. This is possible when:
+       I) Updating the number of basis terms. S4 still have to compute the solution but it reuses
+          the solution to the eigensystem and whatnot. So this is great news, as we can do adaptive
+          convergence in lua. 
+          i) THIS DOESN'T SEEM TO WORK. OUTPUT FILE CONTAINS NAN'S WHEN JUST UPDATING NUMBER OF
+             BASIS TERMS. NEED TO RESET EXCITATION AND FREQUENCY WHICH CAUSES THE ENTIRE SOLUTION TO 
+             BE RECOMPUTED
+       II) Updating layer thicknesses. The solution is analytic in z, so basically nothing needs to
+           be recomputed. There is a specific function in S4 for updating layer thicknesses. 
 14) Fix drawing feature in 2D plots so it shifts the lines for the nanowire depending on which z cut
     plane you are at. Right now it draws te lines for the nanowire as if it were on the the plane
     that cuts through the center of the x-y plane 
+15) Double check error calculations in postprocess. I think we are dividing the sum of the magnitude 
+    squared of the difference vector at each point in space by the sum of just the magnitude of the 
+    electric field of the reference simulation. This would return overly pessimistic results. 
 
 Reading
 =======

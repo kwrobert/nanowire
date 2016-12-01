@@ -1,20 +1,37 @@
-require 'pl'
-S4 = require 'RCWA'
+local pl = require('pl.import_into')()
+--require('pl')
+local S4 = require('RCWA')
 ----------------------------------------------------
 -- Functions 
 ----------------------------------------------------
 
-function getint(conf,section,parameter)
-    val = math.floor(conf[section][parameter])
+pl.class.Simulator()
+
+function Simulator:_init(conf)
+    self.sim = S4.NewSimulation()
+    self.conf = self:parse_config(conf)
+end
+
+function Simulator:getint(section,parameter)
+    val = math.floor(self.conf[section][parameter])
     return val 
 end
 
-function getfloat(conf,section,parameter)
-    val = tonumber(conf[section][parameter])
+function Simulator:getfloat(section,parameter)
+    val = tonumber(self.conf[section][parameter])
     return val 
 end
 
-function interp1d(x, y, xval,extrapolate)
+function Simulator:getbool(section,parameter)
+    val = self.conf[section][parameter] 
+    if val == 'True' or val == 'true' or val == 'yes' then
+        return true
+    else
+        return false
+    end
+end
+
+function Simulator:interp1d(x, y, xval,extrapolate)
     -- A function to compute linear interpolation of 1 dimensional data with extrapolation 
     --
     -- Set default values
@@ -53,16 +70,16 @@ function interp1d(x, y, xval,extrapolate)
     return val
 end
 
-function parse_nk(path)
+function Simulator:parse_nk(path)
     -- Set path to current input file
     io.input(path)
     -- Skip the header line
     io.read()
-    freqvec = List()
-    nvec = List()
-    kvec = List()
+    freqvec = pl.List()
+    nvec = pl.List()
+    kvec = pl.List()
     -- Get the columns
-    for freq,n,k in input.fields(3) do
+    for freq,n,k in pl.input.fields(3) do
         freqvec:append(freq)
         nvec:append(n)
         kvec:append(k)
@@ -70,7 +87,7 @@ function parse_nk(path)
     return freqvec:reverse(),nvec:reverse(),kvec:reverse()
 end
 
-function interpolate(conf)
+function Simulator:interpolate(conf)
     -- Perform interpolation of conf objects
     
     -- For each section of parameters in the configuration table
@@ -87,7 +104,7 @@ function interpolate(conf)
                 -- Get the value of tha param name. Note this only works if the sought
                 -- param is in the same section as the discovered interp string
                 -- TODO: Fix this so it searches the conf table for the proper KEY recursively
-                repl_val = conf[sect][match] 
+                repl_val = self.conf[sect][match] 
                 -- Now replace the interpolation string by the actual value of the 
                 -- sought parameter 
                 rep_par = string.gsub(value,"%%%(([^)]+)%)s",repl_val)
@@ -99,35 +116,35 @@ function interpolate(conf)
     return conf
 end
 
-function get_epsilon(freq,path)
-    freqvec,nvec,kvec= parse_nk(path)
-    n = interp1d(freqvec,nvec,freq,true)
-    k = interp1d(freqvec,kvec,freq,true)
+function Simulator:get_epsilon(freq,path)
+    freqvec,nvec,kvec = self:parse_nk(path)
+    n = self:interp1d(freqvec,nvec,freq,true)
+    k = self:interp1d(freqvec,kvec,freq,true)
     eps_r = n*n - k*k
     eps_i = 2*n*k
     return eps_r,eps_i
 end
 
-function get_incident_amplitude(freq,period,path)
+function Simulator:get_incident_amplitude(freq,period,path)
     -- Set path to current input file
     io.input(path)
     -- Skip the header line
     io.read()
-    freqvec = List()
-    pvec = List()
+    freqvec = pl.List()
+    pvec = pl.List()
     -- Get the columns
-    for freqval,p in input.fields(2) do
+    for freqval,p in pl.input.fields(2) do
         freqvec:append(freqval)
         pvec:append(p)
     end
-    power = interp1d(freqvec:reverse(),pvec:reverse(),freq,true)
+    power = self:interp1d(freqvec:reverse(),pvec:reverse(),freq,true)
     mu_0 = (4*math.pi)*1E-7 
     c = 299792458
     E = math.sqrt(c*mu_0*power)
     return E
 end 
 
-function write_config(conf,path)
+function Simulator:write_config(conf,path)
     io.output(path)
     for sec,params in pairs(conf) do
         io.write(string.format('[%s]\n',sec))
@@ -138,15 +155,15 @@ function write_config(conf,path)
     io.flush()
 end
 
-function parse_config(path)
-    conf = config.read(path)
-    conf = interpolate(conf)
+function Simulator:parse_config(path)
+    conf = pl.config.read(path)
+    conf = self:interpolate(conf)
     -- Evaluate expressions
     for par, val in pairs(conf['Parameters']) do
         if type(val) == 'string' then
-            if stringx.startswith(val,'`') and stringx.endswith(val,'`') then
-                tmp = stringx.strip(val,'`')
-                tmp = stringx.join('',{'result = ',tmp})
+            if pl.stringx.startswith(val,'`') and pl.stringx.endswith(val,'`') then
+                tmp = pl.stringx.strip(val,'`')
+                tmp = pl.stringx.join('',{'result = ',tmp})
                 f = loadstring(tmp)
                 f()
                 conf['Parameters'][par] = result
@@ -155,18 +172,13 @@ function parse_config(path)
     end
     arr = {conf['Parameters']['nw_height'],conf['Parameters']['substrate_t'],
            conf['Parameters']['ito_t'],conf['Parameters']['air_t']}
-    height,n = seq.sum(arr,tonumber)
+    height,n = pl.seq.sum(arr,tonumber)
     conf['Parameters']['total_height'] = height
-    write_config(conf,path)
+    self:write_config(conf,path)
     return conf 
 end
 
-function build_sim(conf)
-    -- Runs the nanowire simulation
-    --
-    -- Get desired # of basis terms. Note that this is an upper bound and may not be
-    -- the actual number of basis terms used
-    num_basis = getint(conf,'Parameters','numbasis')
+function Simulator:set_lattice()
     -- These lattice vectors can be a little confusing. Everything in S4 is normalized so that speed
     -- of light, vacuum permittivity and permeability are all normalized to 1. This means frequencies
     -- must be specified in units of inverse length. This can be clarified as follows 
@@ -176,88 +188,103 @@ function build_sim(conf)
     -- where the speed of light has been converted to your base length unit of choice.
     -- 4. Supply that value to the SetFrequency method
     -- Note: The origin is as the corner of the unit cell
-    vec_mag = getfloat(conf,'Parameters','array_period')
-    sim = S4.NewSimulation()
-    sim:SetLattice({vec_mag,0},{0,vec_mag})
-    sim:SetNumG(num_basis)
+    vec_mag = self:getfloat('Parameters','array_period')
+    self.sim:SetLattice({vec_mag,0},{0,vec_mag})
+end
+
+function Simulator:set_basis(num_basis)
+    -- Set desired # of basis terms. Note that this is an upper bound and may not be
+    -- the actual number of basis terms used
+    num = tonumber(num_basis)
+    self.sim:SetNumG(num)
+end
+
+function Simulator:configure()
     -- Configure simulation options
     --
     -- Clean up values
-    for key,val in pairs(conf['Simulation']) do
-        if type(val) == 'number' or stringx.isdigit(val) then
-            conf['Simulation'][key] = math.floor(val)
+    for key,val in pairs(self.conf['Simulation']) do
+        if type(val) == 'number' or pl.stringx.isdigit(val) then
+            self.conf['Simulation'][key] = math.floor(val)
         elseif val == 'True' then
-            conf['Simulation'][key] = true 
+            self.conf['Simulation'][key] = true 
         elseif val == 'False' then
-            conf['Simulation'][key] = false
+            self.conf['Simulation'][key] = false
         end
     end
     -- Actually set the values
-    sim:SetVerbosity(getint(conf,'Simulation','Verbosity'))
-    sim:SetLatticeTruncation(conf['Simulation']['LatticeTruncation'])
-    if conf['Simulation']['DiscretizedEpsilon'] then 
-        sim:UseDiscretizedEpsilon() 
-        sim:SetResolution(getint(conf['Simulation']['DiscretizationResolution']))
+    self.sim:SetVerbosity(self:getint('Simulation','Verbosity'))
+    self.sim:SetLatticeTruncation(self.conf['Simulation']['LatticeTruncation'])
+    if self.conf['Simulation']['DiscretizedEpsilon'] then 
+        self.sim:UseDiscretizedEpsilon() 
+        self.sim:SetResolution(self:getint('Simulation','DiscretizationResolution'))
     end
-    if conf['Simulation']['PolarizationDecomposition'] then 
-        sim:UsePolarizationDecomposition() 
-        if conf['Simulation']['PolarizationBasis'] == 'Jones' then
-            sim:UseJonesVectorBasis()
-        elseif conf['Simulation']['PolarizationBasis'] == 'Normal' then
-            sim:UseNormalVectorBasis()
+    if self.conf['Simulation']['PolarizationDecomposition'] then 
+        self.sim:UsePolarizationDecomposition() 
+        if self.conf['Simulation']['PolarizationBasis'] == 'Jones' then
+            self.sim:UseJonesVectorBasis()
+        elseif self.conf['Simulation']['PolarizationBasis'] == 'Normal' then
+            self.sim:UseNormalVectorBasis()
         else 
             print("Using default vector field")
-        end
+        end                                    
     end
-    if conf['Simulation']['LanczosSmoothing'] then
-        sim:UseLanczosSmoothing()
+    if self.conf['Simulation']['LanczosSmoothing'] then
+        self.sim:UseLanczosSmoothing()
     end
-    if conf['Simulation']['SubpixelSmoothing'] then
-        sim:UseSubpixelSmoothing()
-        sim:SetResolution(getint(conf['Simulation']['DiscretizationResolution']))
+    if self.conf['Simulation']['SubpixelSmoothing'] then
+        self.sim:UseSubpixelSmoothing()
+        self.sim:SetResolution(self:getint('Simulation','DiscretizationResolution'))
     end
-    if conf['Simulation']['ConserveMemory'] then
-        sim:UseLessMemory()
+    if self.conf['Simulation']['ConserveMemory'] then
+        self.sim:UseLessMemory()
     end
-    
-    f_phys = getfloat(conf,'Parameters','frequency')
-    for mat,path in pairs(conf['Materials']) do
-        eps_r,eps_i = get_epsilon(f_phys,path)
-        sim:SetMaterial(mat,{eps_r,eps_i})
+end
+
+function Simulator:build_device()
+    -- Builds out the device geometry and materials 
+    f_phys = self:getfloat('Parameters','frequency')
+    for mat,path in pairs(self.conf['Materials']) do
+        eps_r,eps_i = self:get_epsilon(f_phys,path)
+        self.sim:SetMaterial(mat,{eps_r,eps_i})
     end
 
     -- Set up material
-    sim:SetMaterial('vacuum',{1,0})
+    self.sim:SetMaterial('vacuum',{1,0})
     -- Add layers. NOTE!!: Order here DOES MATTER, as incident light will be directed at the FIRST
     -- LAYER SPECIFIED
-    sim:AddLayer('air',getfloat(conf,'Parameters','air_t'),'vacuum')
-    sim:AddLayer('ito',getfloat(conf,'Parameters','ito_t'),'ITO')
-    sim:AddLayer('nanowire_alshell',getfloat(conf,'Parameters','alinp_height'),'Cyclotene')
+    self.sim:AddLayer('air',self:getfloat('Parameters','air_t'),'vacuum')
+    self.sim:AddLayer('ito',self:getfloat('Parameters','ito_t'),'ITO')
+    self.sim:AddLayer('nanowire_alshell',self:getfloat('Parameters','alinp_height'),'Cyclotene')
     -- Add patterning to section with AlInP shell
-    core_rad = getfloat(conf,'Parameters','nw_radius')
-    shell_rad = core_rad + getfloat(conf,'Parameters','shell_t')
-    sim:SetLayerPatternCircle('nanowire_alshell','AlInP',{vec_mag/2,vec_mag/2},shell_rad)
-    sim:SetLayerPatternCircle('nanowire_alshell','GaAs',{vec_mag/2,vec_mag/2},core_rad)
-    --sim:SetLayerPatternCircle('nanowire_alshell','AlInP',{0,0},shell_rad)
-    --sim:SetLayerPatternCircle('nanowire_alshell','GaAs',{0,0},core_rad)
+    core_rad = self:getfloat('Parameters','nw_radius')
+    shell_rad = core_rad + self:getfloat('Parameters','shell_t')
+    self.sim:SetLayerPatternCircle('nanowire_alshell','AlInP',{vec_mag/2,vec_mag/2},shell_rad)
+    self.sim:SetLayerPatternCircle('nanowire_alshell','GaAs',{vec_mag/2,vec_mag/2},core_rad)
+    --self.sim:SetLayerPatternCircle('nanowire_alshell','AlInP',{0,0},shell_rad)
+    --self.sim:SetLayerPatternCircle('nanowire_alshell','GaAs',{0,0},core_rad)
     -- Si layer and patterning 
-    sim:AddLayer('nanowire_sishell',getfloat(conf,'Parameters','sio2_height'),'Cyclotene')
+    self.sim:AddLayer('nanowire_sishell',self:getfloat('Parameters','sio2_height'),'Cyclotene')
     -- Add patterning to layer with SiO2 shell 
-    sim:SetLayerPatternCircle('nanowire_sishell','SiO2',{vec_mag/2,vec_mag/2},shell_rad)
-    sim:SetLayerPatternCircle('nanowire_sishell','GaAs',{vec_mag/2,vec_mag/2},core_rad)
+    self.sim:SetLayerPatternCircle('nanowire_sishell','SiO2',{vec_mag/2,vec_mag/2},shell_rad)
+    self.sim:SetLayerPatternCircle('nanowire_sishell','GaAs',{vec_mag/2,vec_mag/2},core_rad)
     -- Substrate layer and air transmission region
-    sim:AddLayer('substrate',getfloat(conf,'Parameters','substrate_t'),'GaAs')
-    --sim:AddLayerCopy('air_below',Thickness=conf.getfloat('Parameters','air_t'),Layer='air') 
+    self.sim:AddLayer('substrate',self:getfloat('Parameters','substrate_t'),'GaAs')
+    --self.sim:AddLayerCopy('air_below',Thickness=conf.self:getfloat('Parameters','air_t'),Layer='air') 
+end
 
+function Simulator:set_excitation()
+    -- Defines the excitation of the simulation
+    f_phys = self:getfloat('Parameters','frequency')
     c = 299792458
     print(string.format('Physical Frequency = %E',f_phys))
-    c_conv = c/getfloat(conf,"General","base_unit")
+    c_conv = c/self:getfloat("General","base_unit")
     f_conv = f_phys/c_conv
     print(string.format('Converted Frequency = %f',f_conv))
-    sim:SetFrequency(f_conv)
+    self.sim:SetFrequency(f_conv)
 
     -- Define incident light. Normally incident with frequency dependent amplitude
-    E_mag = get_incident_amplitude(f_phys,vec_mag,conf["General"]["input_power"])
+    E_mag = self:get_incident_amplitude(f_phys,vec_mag,self.conf["General"]["input_power"])
     -- To define circularly polarized light, basically just stick a j (imaginary number) in front of
     -- one of your components. The handedness is determined by the component you stick the j in front
     -- of. From POV of source, looking away from source toward direction of propagation, right handed
@@ -266,49 +293,168 @@ function build_sim(conf)
     -- counterclockwise. 
     -- In S4, if indicent angles are 0, p-polarization is along x-axis. The minus sign on front of the 
     -- x magnitude is just to get things to look like Anna's simulations.
-    sim:SetExcitationPlanewave({0,0},{-E_mag,0},{-E_mag,90})
+    self.sim:SetExcitationPlanewave({0,0},{-E_mag,0},{-E_mag,90})
+end
+
+function Simulator:clean_files(path)
+    -- Deletes all output files with a given base path
+    glob = pl.stringx.join('',{path,".*"})
+    cwd = pl.path:currentdir()
+    existing_files = pl.dir.getfiles(cwd,glob)
+    if existing_files[1] then
+        for key,afile in pairs(existing_files) do
+            pl.file.delete(afile)
+        end
+    end
+end
+function Simulator:get_fields()
+    -- Gets the fields throughout the device
+    
     -- Get gnoplot output of vector field
-    -- prefix = path.join(conf['General']['sim_dir'],'vecfield')
+    -- prefix = pl.path.join(conf['General']['sim_dir'],'vecfield')
     -- print(prefix)
     -- sim:SetBasisFieldDumpPrefix(prefix)
     -- Get layer patterning  
-    -- out = path.join(conf['General']['sim_dir'],'out.ps')
+    -- out = pl.path.join(conf['General']['sim_dir'],'out.ps')
     -- sim:OutputLayerPatternRealization('nanowire_alshell',50,50,out)
     --sim.OutputStructurePOVRay(Filename='out.pov')
-    output_file = path.join(conf['General']['sim_dir'],conf["General"]["base_name"])
-    glob = stringx.join('',{output_file,".*"})
-    cwd = path:currentdir()
-    existing_files = dir.getfiles(cwd,glob)
-    if existing_files[1] then
-        for key,afile in pairs(existing_files) do
-            file.delete(afile)
+    output_file = pl.path.join(self.conf['General']['sim_dir'],self.conf["General"]["base_name"])
+    self:clean_files(output_file)
+    x_samp = self:getint('General','x_samples')
+    y_samp = self:getint('General','y_samples')
+    z_samp = self:getint('General','z_samples')
+    height = self:getfloat('Parameters','total_height') 
+    dz = height/z_samp
+    zvec = pl.List.range(0,height,dz)
+    if self:getbool('General','adaptive_convergence') then
+        self:adaptive_convergence(x_samp,y_samp,zvec,output_file)
+    else
+        numbasis = self:getint('Parameters','numbasis')
+        self:set_basis(numbasis)
+        for i,z in ipairs(zvec) do 
+            self.sim:GetFieldPlane(z,{x_samp,y_samp},'FileAppend',output_file)
         end
     end
-    x_samp = getint(conf,'General','x_samples')
-    y_samp = getint(conf,'General','y_samples')
-    z_samp = getint(conf,'General','z_samples')
-    height = getfloat(conf,'Parameters','total_height') 
+    
+end
+
+function Simulator:get_indices() 
+    x_samp = self:getint('General','x_samples')
+    y_samp = self:getint('General','y_samples')
+    z_samp = self:getint('General','z_samples')
+    height = self:getfloat('Parameters','total_height') 
     dz = height/z_samp
-    zvec = List.range(0,height,dz)
-    print(#zvec)
-    for i,z in ipairs(zvec) do 
-        sim:GetFieldPlane(z,{x_samp,y_samp},'FileAppend',output_file)
+    start_plane = math.floor(self:getfloat('Parameters','air_t')/dz)
+    first = math.floor(start_plane*(x_samp*y_samp))
+    end_plane = math.floor((self:getfloat('Parameters','nw_height')+self:getfloat('Parameters','air_t')+
+            self:getfloat('Parameters','ito_t'))/dz)
+    last = math.floor(end_plane*(x_samp*y_samp))
+    return first,last
+end
+
+function Simulator:calc_diff(d1,d2,exclude) 
+    --Pluck out the fields, excluding region outside nanowire
+    exc = exclude or true
+    if exc then
+        start_row,end_row = self:get_indices()
+    else
+        start_row = 1
+        end_row = -1
     end
+    f1 = pl.array2d.slice(d1,start_row,4,end_row,-1)
+    f2 = pl.array2d.slice(d2,start_row,4,end_row,-1)    
+    --print(pl.pretty.write(f1,''))
+    --print(pl.pretty.write(f2,''))
+    -- Get all the differences between the two
+    diffs = pl.array2d.map2('-',2,2,f1,f2)
+    -- This is a 2D table where each row contains the difference between the two electric
+    -- field vectors at each point in space, which is itself a vector. We want the magnitude
+    -- squared of this difference vector 
+    -- First square the components
+    diffsq = pl.array2d.map2('*',2,2,diffs,diffs)
+    rows,cols = pl.array2d.size(diffsq)
+    -- Now sum the components squared 
+    magdiffsq = pl.array2d.reduce_rows('+',diffsq)
+    -- We now compute the norm of the efield from out initial sim at each point in space
+    esq = pl.array2d.map2('*',2,2,f1,f1)
+    normsq = pl.array2d.reduce_rows('+',esq)
+    norm = pl.tablex.map(math.sqrt,normsq)
+    -- Error as a percentage should be the square root of the ratio of sum of mag diff vec 
+    -- squared to mag efield squared
+    diff = math.sqrt(pl.tablex.reduce('+',magdiffsq)/pl.tablex.reduce('+',norm))
+    print('Percent Difference: '..diff)
+    return diff
+end
+
+function Simulator:adaptive_convergence(x_samp,y_samp,zvec,output,max)
+    max_iter = max or 5
+    print('Beginning adaptive convergence procedure ...')
+    -- Gets the fields throughout the device
+    percent_diff = 1
+    d1 = output_file..'1'
+    start_basis = self:getint('Parameters','numbasis')
+    self:set_basis(start_basis)
+    print('Starting with '..start_basis..' number of basis terms')
+    for i, z in ipairs(zvec) do
+        self.sim:GetFieldPlane(z,{x_samp,y_samp},'FileAppend',d1)
+    end
+    data1 = pl.data.read(d1..'.E',{no_convert=true})
+    new_basis = start_basis + 10
+    iter = 1
+    -- Calculate indices to select only nanowire layers
+    
+    while percent_diff > .1 and iter < max_iter do
+        print('ITERATION '..iter)
+        d2 = output_file..'2'
+        self.sim:SetNumG(new_basis)
+        self:set_excitation()
+        print('Computing solution with '..new_basis..' number of basis terms')
+        for i,z in ipairs(zvec) do 
+            self.sim:GetFieldPlane(z,{x_samp,y_samp},'FileAppend',d2)
+        end
+        data2 = pl.data.read(d2..'.E',{no_convert=true})
+        percent_diff = self:calc_diff(data1,data2)
+        data1 = data2 
+        -- Clean up the files
+        self:clean_files(d1)
+        pl.file.move(d2..'.E',d1..'.E')
+        pl.file.move(d2..'.H',d1..'.H')
+        iter = iter+1
+        new_basis = new_basis + 10
+    end
+    -- Move files to expected name and record number of basis terms
+    if percent_diff > .1 then
+        print('Exceeded maximum number of iterations!')
+    else
+        print('Converged at '..new_basis..' basis terms')
+    end
+    pl.file.move(d1..'.E',output_file..'.E')
+    pl.file.move(d1..'.H',output_file..'.H')
+    conv_file = pl.path.join(self.conf['General']['sim_dir'],'converged_at.txt')
+    pl.file.write(conv_file,tostring(new_basis)..'\n')
 end
 ----------------------------------------------------
 -- Main program 
 ----------------------------------------------------
 function main() 
-    args = lapp [[
+    args = pl.lapp [[
 A program that uses the S4 RCWA simulation library to simulate 
 the optical properties of a single nanowire in a square lattice
     <config_file> (string) Absolute path to simulation INI file
 ]]
-    if not path.isfile(args['config_file']) then
+    if not pl.path.isfile(args['config_file']) then
         error('The config file specified does not exist or is not a file')
     end
-    conf = parse_config(args['config_file'])
-    build_sim(conf)
+    simulator = Simulator(args['config_file'])
+    --conf = parse_config(args['config_file'])
+    --build_sim(conf)
+    simulator:set_lattice()
+    simulator:configure()
+    simulator:build_device()
+    simulator:set_excitation()
+    --simulator:set_basis(simulator.conf['Parameters']['numbasis'])
+    simulator:get_fields()
+    --simulator:adaptive_convergence()
 end
 
 main()

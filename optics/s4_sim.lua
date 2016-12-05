@@ -386,8 +386,8 @@ function Simulator:calc_diff(d1,d2,exclude)
     return diff
 end
 
-function Simulator:adaptive_convergence(x_samp,y_samp,zvec,output,max)
-    max_iter = max or 5
+function Simulator:adaptive_convergence(x_samp,y_samp,zvec,output)
+
     print('Beginning adaptive convergence procedure ...')
     -- Gets the fields throughout the device
     percent_diff = 1
@@ -399,12 +399,14 @@ function Simulator:adaptive_convergence(x_samp,y_samp,zvec,output,max)
         self.sim:GetFieldPlane(z,{x_samp,y_samp},'FileAppend',d1)
     end
     data1 = pl.data.read(d1..'.E',{no_convert=true})
-    new_basis = start_basis + 10
     iter = 1
     -- Calculate indices to select only nanowire layers
-    
-    while percent_diff > .1 and iter < max_iter do
+    new_basis = start_basis 
+    max_diff = self:getfloat('General','max_diff') or .1
+    max_iter = self:getfloat('General','max_iter') or 12
+    while percent_diff > max_diff and iter < max_iter do
         print('ITERATION '..iter)
+        new_basis = new_basis + 10
         d2 = output_file..'2'
         self.sim:SetNumG(new_basis)
         self:set_excitation()
@@ -420,17 +422,17 @@ function Simulator:adaptive_convergence(x_samp,y_samp,zvec,output,max)
         pl.file.move(d2..'.E',d1..'.E')
         pl.file.move(d2..'.H',d1..'.H')
         iter = iter+1
-        new_basis = new_basis + 10
     end
     -- Move files to expected name and record number of basis terms
     if percent_diff > .1 then
         print('Exceeded maximum number of iterations!')
+        conv_file = pl.path.join(self.conf['General']['sim_dir'],'not_converged_at.txt')
     else
         print('Converged at '..new_basis..' basis terms')
+        conv_file = pl.path.join(self.conf['General']['sim_dir'],'converged_at.txt')
     end
     pl.file.move(d1..'.E',output_file..'.E')
     pl.file.move(d1..'.H',output_file..'.H')
-    conv_file = pl.path.join(self.conf['General']['sim_dir'],'converged_at.txt')
     pl.file.write(conv_file,tostring(new_basis)..'\n')
 end
 ----------------------------------------------------

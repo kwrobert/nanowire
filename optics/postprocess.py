@@ -80,6 +80,7 @@ class Simulation(object):
                          ('Ex_imag',6),('Ey_imag',7),('Ez_imag',8)])
         self.h_lookup = OrderedDict([('x',0),('y',1),('z',2),('Hx_real',3),('Hy_real',4),('Hz_real',5),
                          ('Hx_imag',6),('Hy_imag',7),('Hz_imag',8)])
+        self.avgs = {}
 
     def load_txt(self,path):
         try: 
@@ -123,9 +124,7 @@ class Simulation(object):
         return data,lookup
 
     def get_raw_data(self):
-        """We need to override the base Processor get_data function because the Cruncher object is
-        the only object that touches raw data files spit out by the simulations. Every other child 
-        of Processor consumes files parsed and tidied up by Cruncher"""
+        """Collect raw, unprocessed data spit out by S4 simulations"""
         self.log.info('Collecting raw data for sim %s',self.conf.get('General','sim_dir'))
         sim_path = self.conf.get('General','sim_dir')
         base_name = self.conf.get('General','base_name')
@@ -174,6 +173,25 @@ class Simulation(object):
         self.log.info('Collection complete!')
         return e_data,e_lookup,h_data,h_lookup,pos_inds
 
+    def get_avgs(self):
+        """Load all averages"""
+        # Get the current path
+        base = self.conf.get('General','sim_dir')
+        ftype = self.conf.get('General','save_as') 
+        if ftype == 'text':
+            globstr = os.path.join(base,'*avg.crnch')
+            for f in glob.glob(globstr):
+                fname = os.path.basename(f)
+                key = fname[0:fname.index('.')]
+                self.avgs[key] = np.loadtxt(f)
+            self.log.info('Available averages: %s'%str(self.avgs.keys()))
+        elif ftype == 'npz':
+            path = os.path.join(base,'all.avg.npz')
+            with np.load(path) as avgs_file:
+                for arr in avgs_file.files:
+                    self.avgs[arr] = avgs_file[arr]
+            self.log.info('Available averages: %s'%str(self.avgs.keys()))
+        
     def write_data(self):
         """Writes the data"""
         # Get the current path
@@ -192,10 +210,17 @@ class Simulation(object):
             hpath= hpath+'.crnch'
             np.savetxt(epath,self.e_data,header=','.join(self.e_lookup.keys()))
             np.savetxt(hpath,self.h_data,header=','.join(self.h_lookup.keys()))
+            # Save any local averages we have computed
+            for avg, mat in self.avgs.items():
+                dpath = os.path.join(base,avg+'.avg.crnch')
+                np.savetxt(dpath,mat)
         elif ftype == 'npz':
             # Save the headers and the data
             np.savez(epath,headers = np.array([self.e_lookup]), data = self.e_data)
             np.savez(hpath,headers = np.array([self.h_lookup]), data = self.h_data)
+            # Save any local averages we have computed
+            dpath = os.path.join(base,'all.avg')
+            np.savez(dpath,**self.avgs)
         else:
             raise ValueError('Specified saving in an unsupported file format')
 
@@ -224,6 +249,7 @@ class Simulation(object):
         self.e_data = None
         self.h_data = None
         self.pos_inds = None
+        self.avgs = {}
 
 class Processor(object):
     """Base data processor class that has some methods every other processor needs"""
@@ -444,7 +470,10 @@ class Cruncher(Processor):
 
     def genRate(self,sim):
         # We need to compute normEsquared before we can compute the generation rate
-        normEsq = sim.get_scalar_quantity('normEsquared') 
+        try: 
+            normEsq = sim.get_scalar_quantity('normEsquared') 
+        except KeyError:
+            normEsq = self.normEsquared(sim)
         # Prefactor for generation rate
         fact = c.epsilon_0/c.hbar
         # Get the indices of refraction at this frequency
@@ -519,6 +548,86 @@ class Cruncher(Processor):
         # Now append this quantity and its column the the header dict
         sim.e_lookup['genRate'] = dat.shape[1]-1 
         return gvec
+    
+    def angularAvg(self,sim,quantity):
+        """Perform an angular average of some quantity for either the E or H field"""
+        quant = sim.get_scalar_quantity(quantity)
+        # Get spatial discretization
+        z_samples = sim.conf.getint('General','z_samples')
+        x_samples = sim.conf.getint('General','x_samples')
+        y_samples = sim.conf.getint('General','y_samples')
+        rsamp = sim.conf.getint('General','r_samples') 
+        thsamp = sim.conf.getint('General','theta_samples')
+        # Reshape into an actual 3D matrix. Rows correspond to different y fixed x, columns to fixed
+        # y variable x, and each layer in depth is a new z value
+        values = np.reshape(quant,(z_samples+1,x_samples,y_samples))
+        height = sim.conf.getfloat('Parameters','total_height')
+        dz = height/z_samples
+        period = sim.conf.getfloat('Parameters','array_period')
+        dx = period/x_samples
+        dy = period/y_samples
+        x = np.linspace(0,period,x_samples)
+        y = np.linspace(0,period,y_samples)
+        # Maximum r value such that circle and square unit cell have equal area
+        rmax = period/np.sqrt(np.pi)
+        # Diff between rmax and unit cell boundary at point of maximum difference
+        delta = rmax - period/2.0 
+        # Extra indices we need to expand layers by
+        x_inds = int(np.ceil(delta/dx))
+        y_inds = int(np.ceil(delta/dy))
+        # Use periodic BCs to extend the data in the x-y plane
+        ext_vals = np.zeros((values.shape[0],values.shape[1]+2*x_inds,values.shape[2]+2*y_inds))
+        # Left-Right extensions. This indexing madness extracts the slice we want, flips it along the correct dimension
+        # then sticks in the correct spot in the extended array
+        ext_vals[:,x_inds:-x_inds,0:y_inds] = values[:,:,0:y_inds][:,:,::-1]
+        ext_vals[:,x_inds:-x_inds,-y_inds:] = values[:,:,-y_inds:][:,:,::-1]
+        # Top-Bottom extensions
+        ext_vals[:,0:x_inds,y_inds:-y_inds] = values[:,0:x_inds,:][:,::-1,:]
+        ext_vals[:,-x_inds:,y_inds:-y_inds] = values[:,-x_inds:,:][:,::-1,:]
+        # Corners, slightly trickier
+        # Top left
+        ext_vals[:,0:x_inds,0:y_inds] = ext_vals[:,x_inds:2*x_inds,0:y_inds][:,::-1,:]
+        # Bottom left
+        ext_vals[:,-x_inds:,0:y_inds] = ext_vals[:,-2*x_inds:-x_inds,0:y_inds][:,::-1,:]
+        # Top right
+        ext_vals[:,0:x_inds,-y_inds:] = ext_vals[:,0:x_inds,-2*y_inds:-y_inds][:,:,::-1]
+        # Bottom right
+        ext_vals[:,-x_inds:,-y_inds:] = ext_vals[:,-x_inds:,-2*y_inds:-y_inds][:,:,::-1]
+        # Now the center
+        ext_vals[:,x_inds:-x_inds,y_inds:-y_inds] = values[:,:,:]
+        # Extend the points arrays to include these new regions
+        x = np.concatenate((np.array([dx*i for i in range(-x_inds,0)]),x,np.array([x[-1]+dx*i for i in range(1,x_inds+1)])))
+        y = np.concatenate((np.array([dy*i for i in range(-y_inds,0)]),y,np.array([y[-1]+dy*i for i in range(1,y_inds+1)])))
+        # The points on which we have data
+        points = (x,y)
+        # The points corresponding to "rings" in cylindrical coordinates. Note we construct these
+        # rings around the origin so we have to shift them to actually correspond to the center of
+        # the nanowire
+        rvec = np.linspace(0,rmax,rsamp)
+        thvec = np.linspace(0,2*np.pi,thsamp)
+        cyl_coords = np.zeros((len(rvec)*len(thvec),2))
+        start = 0
+        for r in rvec:
+            xring = r*np.cos(thvec)
+            yring = r*np.sin(thvec)
+            cyl_coords[start:start+len(thvec),0] = xring
+            cyl_coords[start:start+len(thvec),1] = yring
+            start += len(thvec)
+        cyl_coords += period/2.0        
+        # For every z layer in the 3D matrix of our quantity
+        avgs = np.zeros((ext_vals.shape[0],len(rvec)))
+        i = 0
+        for layer in ext_vals:
+            interp_vals = interpolate.interpn(points,layer,cyl_coords,method='linear')
+            rings = interp_vals.reshape((len(rvec),len(thvec)))
+            avg = np.average(rings,axis=1)
+            avgs[i,:] = avg
+            i += 1
+        avgs = avgs[:,::-1]
+        # Save to avgs dict for this sim
+        key = quantity+'_angularAvg'
+        sim.avgs[key] = avgs
+        return avgs
 
 class Global_Cruncher(Cruncher):
     """Computes global quantities for an entire run, instead of local quantities for an individual
@@ -698,6 +807,24 @@ class Global_Cruncher(Cruncher):
                     sim2.clear_data()
                 ref_sim.clear_data()
 
+    def global_avg(self,quantity,avg_type):
+        """Combine local average of a specific quantity for all leaves in each group"""
+        for group in self.sim_groups:
+            base = group[0].conf.get('General','basedir')
+            self.log.info('Computing global averages for group at %s'%base)
+            key = '%s_%s'%(quantity,avg_type)
+            group[0].get_avgs()
+            first = group[0].avgs[key]
+            group[0].clear_data()
+            group_avg = np.zeros((len(group),first.shape[0],first.shape[1]))
+            group_avg[0,:,:] = first
+            for i in range(1,len(group)):
+                group[i].get_avgs()
+                group_avg[i,:,:] = group[i].avgs[key]
+            group_avg = np.average(group_avg,axis=0)
+            path = os.path.join(base,'%s_%s_global.avg.crnch'%(quantity,avg_type))
+            np.savetxt(path,group_avg)
+
 class Plotter(Processor):
     """Plots all the things listed in the config file"""
     def __init__(self,global_conf,sims=[],sim_groups=[],failed_sims=[]):
@@ -721,14 +848,6 @@ class Plotter(Processor):
 
     def process_all(self):
         self.log.info("Beginning local plotter method ...")
-        #if not self.gconf.getboolean('General','post_parallel'):
-        #    for sim in self.sims:
-        #        self.process(sim)
-        #else:
-        #    num_procs = mp.cpu_count() - self.gconf.getint('General','reserved_cores')
-        #    self.log.info('Plotting sims in parallel using %s cores ...',str(num_procs))
-        #    pool = mpd.Pool(processes=num_procs)
-        #    pool.map(self.process,self.sims)
         for sim in self.sims:
             self.process(sim)
 
@@ -1019,6 +1138,38 @@ class Global_Plotter(Plotter):
                 if self.gconf.getboolean('General','show_plots'):
                     plt.show() 
                 plt.close(fig)
+
+    
+    def global_avg(self,quantity,avg_type):
+        """Combine local average of a specific quantity for all leaves in each group"""
+        for group in self.sim_groups:
+            base = group[0].conf.get('General','basedir')
+            self.log.info('Computing global averages for group at %s'%base)
+            key = '%s_%s'%(quantity,avg_type)
+            path = os.path.join(base,'%s_%s_global.avg.crnch'%(quantity,avg_type))
+            cs = np.loadtxt(path)
+            cm = plt.get_cmap('jet')
+            cNorm = matplotlib.colors.Normalize(vmin=np.amin(cs), vmax=np.amax(cs))
+            scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
+            fig = plt.figure(figsize=(9,7))
+            ax = fig.add_subplot(111)
+            labels = ('Radial Distance','Depth',quantity,avg_type)
+            ax.pcolormesh(cs,cmap=cm,norm=cNorm,alpha=.5)
+            scalarMap.set_array(cs)
+            cb = fig.colorbar(scalarMap)
+            cb.set_label(labels[2])
+            ax.set_xlabel(labels[0])
+            ax.set_ylabel(labels[1])
+            rmax = group[0].conf.getfloat('Parameters','array_period')/np.sqrt(np.pi)
+            dr = rmax/group[0].conf.getint('General','r_samples')
+            dz = group[0].conf.getfloat('Parameters','total_height')/group[0].conf.getfloat('General','z_samples')
+            fig.canvas.draw()
+            xlabels = ['%.2f'%(int(item.get_text())*dr) for item in ax.get_xticklabels()]
+            ylabels = ['%.2f'%(int(item.get_text())*dz) for item in ax.get_yticklabels()]
+            ax.set_xticklabels(xlabels)
+            ax.set_yticklabels(ylabels)
+            fig.suptitle(labels[3])
+            fig.savefig(os.path.join(base,'%s_%s_global.avg.pdf'%(quantity,avg_type)))
 
 def main():
     parser = ap.ArgumentParser(description="""A wrapper around s4_sim.py to automate parameter

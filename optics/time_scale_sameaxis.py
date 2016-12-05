@@ -36,7 +36,7 @@ def main():
 
     for period,radii in systems.items():
         for radius in radii:
-            fig, axes = plt.subplots(2,1)
+            fig, axes = plt.subplots(1,1)
             for field in fields:
                 
 
@@ -49,12 +49,12 @@ def main():
                     quit()
                 print(tpath)
                 numbasis, tdata = np.loadtxt(tpath,unpack=True,skiprows=1,delimiter=',')
-                axes[0].plot(numbasis,tdata,'-o',label=field)
-                axes[0].legend(loc='best')
-                axes[0].set_xlabel('Number of Basis Terms')
-                axes[0].set_ylabel('Wall Clock Time (seconds)')
-                axes[0].set_title('%s, %s'%(period,radius))
-                mglob = os.path.join(path,field,period+"*",radius,'minimum_basis_terms_global_t0.05.dat')
+                axes.plot(numbasis,tdata,'-o',label=field)
+                axes.legend(loc='best')
+                axes.set_xlabel('Number of Basis Terms')
+                axes.set_ylabel('Wall Clock Time (seconds)')
+                #axes.set_title('%s, %s'%(period,radius))
+                mglob = os.path.join(path,field,period+"*",radius,'minimum_basis_terms_global_t0.1.dat')
                 mlist = glob.glob(mglob)
                 if mlist:
                     mpath = mlist[0]
@@ -63,13 +63,17 @@ def main():
                     quit()
                 print(mpath)
                 freq, mdata = np.loadtxt(mpath,unpack=True,skiprows=1,delimiter=',')
-                axes[1].plot(freq,mdata,'-o',label=field)
-                #axes[1].legend(loc='best')
-                axes[1].set_ylabel('Number of Basis Terms')
-                axes[1].set_xlabel('Frequency (Hz)')
-                axes[1].set_title('%s, %s, Threshold = .05'%(period,radius))
-            fig.subplots_adjust(hspace=.35)
-            plt.savefig(os.path.join(path,'%s_%s_vec_field_timescaling_comparison.pdf'%(period,radius)))
+                #axes.plot(freq,mdata,'-o',label=field)
+                #axes.legend(loc='best')
+                #axes.set_ylabel('Number of Basis Terms')
+                #axes.set_xlabel('Frequency (Hz)')
+                #ymin,ymax = axes.get_ylim()
+                #print(ymin)
+                #print(ymax)
+                #axes.set_ylim((ymin-10,ymax+30))
+                #axes.set_title('%s, %s, Threshold = .1'%(period,radius))
+            #fig.subplots_adjust(hspace=.35)
+            plt.savefig(os.path.join(path,'%s_%s_vec_field_convergence_comparison.png'%(period,radius)),transparent=True)
             #plt.show()
 
     #fig, axes = plt.subplots(3,2)

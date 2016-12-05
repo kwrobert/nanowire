@@ -115,13 +115,16 @@ def parse_s4(conf,compdir,path):
     elif conf.get('General','save_as') == 'npz': 
         with np.load(path) as data:
             emat = data['data']
+            headers = data['headers'][0]
+            print(headers)
             # Convert pos_inds to positions
             period = conf.getfloat('Fixed Parameters','array_period')
             emat[:,0] = emat[:,0]*(period/conf.getfloat('General','x_samples'))
             emat[:,1] = emat[:,1]*(period/conf.getfloat('General','y_samples'))
+            normCol = headers['normE']
     
     print('S4 SHAPE: ',emat.shape)
-    return emat[:,0:10] 
+    return emat[:,0:normCol+1] 
 
 def heatmap2d(x,y,cs,labels,ptype,path=None,colorsMap='jet'):
     """A general utility method for plotting a 2D heat map"""

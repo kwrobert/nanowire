@@ -7,8 +7,8 @@ Code
 3) Add error checking of plane values in setup.ini to make sure they do not exceed number of samples
 4) P̶a̶r̶a̶l̶l̶e̶l̶i̶z̶e̶ ̶p̶o̶s̶t̶p̶r̶o̶c̶e̶s̶s̶i̶n̶g̶
    a) See commit message for commit dbc074a4ca8f342a79dc8c9982426bab00492b11  
-5) Add capability to look up minimum number of basis terms to sim_wrapper or adapatively converge
-   given some base number of terms.  
+5) Add capability to look up minimum number of basis terms to sim_wrapper or a̶d̶a̶p̶a̶t̶i̶v̶e̶l̶y̶ ̶c̶o̶n̶v̶e̶r̶g̶e̶
+ ̶ ̶ ̶g̶i̶v̶e̶n̶ ̶s̶o̶m̶e̶ ̶b̶a̶s̶e̶ ̶n̶u̶m̶b̶e̶r̶ ̶o̶f̶ ̶t̶e̶r̶m̶s̶.  
     a) Will need to create a database. Store number of basis terms for each combination of
        frequency and some reasonable number of geometric parameters. 
 5) Fix comsol_compare.py so it grabs quantities by column header 
@@ -40,9 +40,7 @@ Code
 14) Fix drawing feature in 2D plots so it shifts the lines for the nanowire depending on which z cut
     plane you are at. Right now it draws te lines for the nanowire as if it were on the the plane
     that cuts through the center of the x-y plane 
-15) Double check error calculations in postprocess. I think we are dividing the sum of the magnitude 
-    squared of the difference vector at each point in space by the sum of just the magnitude of the 
-    electric field of the reference simulation. This would return overly pessimistic results. 
+15) Add config params to 
 
 Reading
 =======

@@ -241,16 +241,18 @@ def gen_plots(s4dat,comsdat,diffdat,conf,files,log):
     labels = ('y [um]','z [um]', 'normE', 'S4 Data')
     ax1 = heatmap2dax(ax1,y,z,cs,labels,cNorm,conf)
     # Plots comsol data
-    xval = .12755
+    xval = .15
     mat = np.column_stack((comsdat[:,0],comsdat[:,1],comsdat[:,2],comsdat[:,-1]))
-    planes = np.array([row for row in mat if np.abs(row[0]-.12755) < .00001])
+    print(mat)
+    planes = np.array([row for row in mat if np.abs(row[0]-xval) < .005])
+    print(planes)
     x,y,z = np.unique(planes[:,0]),np.unique(planes[:,1]),np.unique(planes[:,2])
     cs = planes[:,-1].reshape(z.shape[0],y.shape[0])
     labels = ('y [um]','z [um]', 'normE','COMSOL Data')
     ax2 = heatmap2dax(ax2,y,z,cs,labels,cNorm,conf)
     scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
     # Plots diff data
-    planes = np.array([row for row in diffdat if np.abs(row[0]-.125) < .00001])
+    planes = np.array([row for row in diffdat if np.abs(row[0]-xval) < .005])
     x,y,z = np.unique(planes[:,0]),np.unique(planes[:,1]),np.unique(planes[:,2])
     cs = planes[:,-1].reshape(z.shape[0],y.shape[0])
     labels = ('y [um]','z [um]', 'M.S.E','Difference Between Data Sets')
@@ -426,7 +428,7 @@ def main():
             comsoldata[:,-1] = mag[::-1]
             # Now do the actual comparison    
             diff, err = compare_data(s4data,comsoldata,conf,(f[0],f[1],comp_dir),args.interpolate,args.exclude)
-            gen_plots(s4data,comsoldata,diff,conf,(f[0],f[1],comp_dir),args.log)
+            #gen_plots(s4data,comsoldata,diff,conf,(f[0],f[1],comp_dir),args.log)
             efile.write('%f, %f\n'%(freq,err))
             #plot_comsol(comsoldata,conf,f[1])
             #plot_diff(diff_dat,conf,files)

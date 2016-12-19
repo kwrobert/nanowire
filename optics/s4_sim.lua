@@ -164,6 +164,8 @@ function Simulator:parse_config(path)
             if pl.stringx.startswith(val,'`') and pl.stringx.endswith(val,'`') then
                 tmp = pl.stringx.strip(val,'`')
                 tmp = pl.stringx.join('',{'result = ',tmp})
+                -- This loads the lua statement contained in tmp and evaluates it, making result
+                -- available in the current scope
                 f = loadstring(tmp)
                 f()
                 conf['Parameters'][par] = result
@@ -374,20 +376,19 @@ function Simulator:calc_diff(d1,d2,exclude)
     diffsq = pl.array2d.map2('*',2,2,diffs,diffs)
     rows,cols = pl.array2d.size(diffsq)
     -- Now sum the components squared 
-    magdiffsq = pl.array2d.reduce_rows('+',diffsq)
+    magdiffsq = pl.array2d.reduce_cols('+',diffsq)
     -- We now compute the norm of the efield from out initial sim at each point in space
     esq = pl.array2d.map2('*',2,2,f1,f1)
-    normsq = pl.array2d.reduce_rows('+',esq)
-    norm = pl.tablex.map(math.sqrt,normsq)
+    normsq = pl.array2d.reduce_cols('+',esq)
+    --norm = pl.tablex.map(math.sqrt,normsq)
     -- Error as a percentage should be the square root of the ratio of sum of mag diff vec 
     -- squared to mag efield squared
-    diff = math.sqrt(pl.tablex.reduce('+',magdiffsq)/pl.tablex.reduce('+',norm))
+    diff = math.sqrt(pl.tablex.reduce('+',magdiffsq)/pl.tablex.reduce('+',normsq))
     print('Percent Difference: '..diff)
     return diff
 end
 
 function Simulator:adaptive_convergence(x_samp,y_samp,zvec,output)
-
     print('Beginning adaptive convergence procedure ...')
     -- Gets the fields throughout the device
     percent_diff = 1
@@ -435,6 +436,30 @@ function Simulator:adaptive_convergence(x_samp,y_samp,zvec,output)
     pl.file.move(d1..'.H',output_file..'.H')
     pl.file.write(conv_file,tostring(new_basis)..'\n')
 end
+
+function Simulator:get_fluxes() 
+    -- Gets the incident, reflected, and transmitted powers
+    -- Note: these all return real and imag components of forward and backward waves
+    -- as follows: forward_real,backward_real,forward_imaginary,backward_imaginary
+    print('Computing fluxes ...')
+    path = pl.path.join(self.conf['General']['sim_dir'],'fluxes.dat')
+    outf = io.open(path,'w')
+    outf:write('# Layer,ForwardReal,BackwardReal,ForwardImag,BackwardImag\n')
+    for i,layer in ipairs({'air','ito','nanowire_alshell','substrate'}) do
+        inc_fr,inc_br,inc_fi,inc_bi = self.sim:GetPowerFlux(layer)
+        row = string.format('%s,%s,%s,%s,%s\n',layer,inc_fr,inc_br,inc_fi,inc_bi)
+        outf:write(row)
+    end
+    z = self:getfloat('Parameters','substrate_t')
+    trans_fr,trans_br,trans_fi,trans_bi = self.sim:GetPowerFlux('substrate',z)
+    row = string.format('substrate_bottom,%s,%s,%s,%s\n',trans_fr,trans_br,trans_fi,trans_bi)
+    outf:write(row)
+    z = self:getfloat('Parameters','air_t')
+    trans_fr,trans_br,trans_fi,trans_bi = self.sim:GetPowerFlux('air',z)
+    row = string.format('air_bottom,%s,%s,%s,%s\n',trans_fr,trans_br,trans_fi,trans_bi)
+    outf:write(row)
+    outf:close()
+end
 ----------------------------------------------------
 -- Main program 
 ----------------------------------------------------
@@ -454,9 +479,8 @@ the optical properties of a single nanowire in a square lattice
     simulator:configure()
     simulator:build_device()
     simulator:set_excitation()
-    --simulator:set_basis(simulator.conf['Parameters']['numbasis'])
     simulator:get_fields()
-    --simulator:adaptive_convergence()
+    simulator:get_fluxes()
 end
 
 main()

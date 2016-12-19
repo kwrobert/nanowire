@@ -1,6 +1,7 @@
 import numpy as np
 from scipy import interpolate
 import scipy.constants as c
+import scipy.integrate as intg
 import argparse as ap
 import os
 import configparser as confp 
@@ -310,6 +311,7 @@ class Processor(object):
         if not self.sim_groups:
             self.sim_groups = [self.sims]
         self.sort_sims()
+        self.log.debug('Sims: %s'%str(self.sims))
         return self.sims,self.sim_groups,self.failed_sims
 
     def sort_sims(self):
@@ -629,6 +631,37 @@ class Cruncher(Processor):
         sim.avgs[key] = avgs
         return avgs
 
+    def transmissionData(self,sim):
+        """Computes reflection, transmission, and absorbance"""
+        base = sim.conf.get('General','sim_dir')
+        path = os.path.join(base,'fluxes.dat')
+        data = {}
+        with open(path,'r') as f:
+            d = f.readlines()
+            headers = d.pop(0)
+            for line in d:
+                els = line.split(',')
+                key = els.pop(0)
+                data[key] = list(map(float,els))
+        # NOTE: Take only the real part of the power as per https://en.wikipedia.org/wiki/Poynting_vector#Time-averaged_Poynting_vector
+        p_inc = data['air'][0]
+        p_ref = np.abs(data['air'][1]) 
+        p_trans = data['substrate_bottom'][0] 
+        reflectance = p_ref / p_inc
+        transmission = p_trans / p_inc
+        absorbance = 1 - reflectance - transmission
+        tot = reflectance+transmission+absorbance
+        delta = np.abs(tot-1)
+        self.log.info('Total = %f'%tot)
+        assert(delta < .0001)
+        outpath = os.path.join(base,'ref_trans_abs.dat')
+        with open(outpath,'w') as out:
+            out.write('# Reflectance,Transmission,Absorbance\n')
+            out.write('%f,%f,%f'%(reflectance,transmission,absorbance))
+        return reflectance,transmission,absorbance
+
+        
+            
 class Global_Cruncher(Cruncher):
     """Computes global quantities for an entire run, instead of local quantities for an individual
     simulation"""
@@ -824,6 +857,38 @@ class Global_Cruncher(Cruncher):
             group_avg = np.average(group_avg,axis=0)
             path = os.path.join(base,'%s_%s_global.avg.crnch'%(quantity,avg_type))
             np.savetxt(path,group_avg)
+
+    def Jsc(self):
+        """Computes photocurrent density"""
+        for group in self.sim_groups:
+            base = group[0].conf.get('General','basedir')
+            self.log.info('Computing photocurrent density for group at %s'%base)
+            Jsc = np.zeros(len(group))
+            freqs = np.zeros(len(group))
+            # Assuming the leaves contain frequency values, sum over all of them
+            for i in range(len(group)):
+                sim = group[i]
+                dpath = os.path.join(sim.conf.get('General','sim_dir'),'ref_trans_abs.dat')
+                with open(dpath,'r') as f:
+                    ref,trans,absorb = list(map(float,f.readlines()[1].split(',')))
+                freq = sim.conf.getfloat('Parameters','frequency')
+                freqs[i] = freq
+                fact = c.e/c.h
+                # Get solar power from AMD1.5 spectrum
+                path = sim.conf.get('General','input_power')
+                freq_vec,p_vec = np.loadtxt(path,skiprows=1,unpack=True)
+                # Get p at freq by interpolation 
+                f_p = interpolate.interp1d(freq_vec,p_vec,kind='nearest',
+                                           bounds_error=False,fill_value='extrapolate')
+                sun_pow = f_p(freq) 
+                Jsc[i] = (absorb*sun_pow)/freq
+            # Use Simpsons rule to perform the integration
+            Jsc = fact*intg.simps(Jsc,x=freqs)
+            outf = os.path.join(base,'jsc.dat')
+            with open(outf,'w') as out:
+                out.write('%f\n'%Jsc)
+            print('Jsc = %f'%Jsc)
+
 
 class Plotter(Processor):
     """Plots all the things listed in the config file"""
@@ -1170,6 +1235,38 @@ class Global_Plotter(Plotter):
             ax.set_yticklabels(ylabels)
             fig.suptitle(labels[3])
             fig.savefig(os.path.join(base,'%s_%s_global.avg.pdf'%(quantity,avg_type)))
+
+    
+    def transmission_data(self,absorbance=True,reflectance=True,transmission=True):
+        """Plot transmissions, absorption, and reflectance assuming leaves are frequency"""
+        for group in self.sim_groups:
+            base = group[0].conf.get('General','basedir')
+            self.log.info('Plotting transmission data for group at %s'%base)
+            # Assuming the leaves contain frequency values, sum over all of them
+            freqs = []
+            refl_l = []
+            trans_l = []
+            absorb_l = []
+            for sim in group:
+                dpath = os.path.join(sim.conf.get('General','sim_dir'),'ref_trans_abs.dat')
+                with open(dpath,'r') as f:
+                    ref,trans,absorb = list(map(float,f.readlines()[1].split(',')))
+                freq = sim.conf.getfloat('Parameters','frequency')
+                freqs.append(freq)
+                trans_l.append(trans)
+                refl_l.append(ref)
+                absorb_l.append(absorb)
+            plt.figure()
+            if absorbance:
+                plt.plot(freqs,absorb_l,label='Absorption')
+            if reflectance:
+                plt.plot(freqs,refl_l,label='Reflectance')
+            if transmission:
+                plt.plot(freqs,trans_l,label='Transmission')
+            plt.legend(loc='best')
+            figp = os.path.join(base,'transmission_plots.pdf')
+            plt.xlabel('Frequency (Hz)') 
+            plt.savefig(figp)
 
 def main():
     parser = ap.ArgumentParser(description="""A wrapper around s4_sim.py to automate parameter

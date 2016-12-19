@@ -40,7 +40,11 @@ Code
 14) Fix drawing feature in 2D plots so it shifts the lines for the nanowire depending on which z cut
     plane you are at. Right now it draws te lines for the nanowire as if it were on the the plane
     that cuts through the center of the x-y plane 
-15) Add config params to 
+15) Decouple data collection so we only collect the data we need to collect. Its stupid to collect
+    E/H field data if we just want to compute transmission/reflection 
+16) We can reduce the angular average to just 1/8th of the square unit cell because of the symmetry
+    of the cell. 
+17) Set all input wave amplitudes to one and weight everything by the solar spectrum after the fact
 
 Reading
 =======

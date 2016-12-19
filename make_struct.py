@@ -44,7 +44,10 @@ def main():
             if m:
                 print(m.group(0))
                 print('Frequency {} found in directory {}'.format(freq,fdir))
-                basis_path = os.path.join(fdir,'numbasis_{}'.format(numbasis))
+                basis_glob = os.path.join(fdir,'numbasis_{}*'.format(numbasis))
+                basis_path = glob.glob(basis_glob)
+                assert len(basis_path) == 1
+                basis_path = basis_path[0]
                 if os.path.isdir(basis_path):
                     print('Found min basis path {}'.format(basis_path))
                     new_path = os.path.join(dest_dir,os.path.basename(fdir))

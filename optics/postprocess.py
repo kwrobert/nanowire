@@ -277,7 +277,7 @@ class Processor(object):
             val = os.path.basename(path)
         return val
     
-    def _sim_sorter(self,sim):
+    def sim_key(self,sim):
         """A wrapper function around dir_keys that takes a sim object as an arg, extracts it path,
         then passes that to dir_keys"""
         path = sim.conf.get('General','sim_dir')
@@ -318,14 +318,40 @@ class Processor(object):
         """Sorts simulations by their parameters the way a human would. Called human sorting or
         natural sorting. Thanks stackoverflow"""
         
-        self.sims.sort(key=self._sim_sorter)
+        self.sims.sort(key=self.sim_key)
         for group in self.sim_groups:
             paths = [sim.conf.get('General','sim_dir') for sim in group]
             self.log.debug('Group paths before sorting: %s',str(paths))
-            group.sort(key=self._sim_sorter)
+            group.sort(key=self.sim_key)
             paths = [sim.conf.get('General','sim_dir') for sim in group]
             self.log.debug('Group paths after sorting: %s',str(paths))
-    
+
+    def get_param_vals(self,par):
+        """Return all possible values of the provided parameter for this sweep"""
+        vals = []
+        for sim in self.sims:
+            val = sim.conf.get('Parameters',par)
+            if val not in vals:
+                vals.append(val)
+        return sorted(vals)
+
+    def filter_by_param(self,pars):
+        """Accepts a dict where the keys are parameter names and the values are a list of possible 
+        values for that parameter. Any simulation whose parameter does not match any of the provided 
+        values is removed from the sims list attribute"""
+        
+        assert(type(pars) == dict)
+        filt = lambda sim,par,vals: sim.conf.get('Parameters',par) in vals
+        for par,vals in pars.items():
+            self.sims = [sim for sim in self.sims if filt(sim,par,vals)]
+            groups = []
+            for group in self.sim_groups:
+                filt_group = [sim for sim in group if filt(sim,par,vals)]
+                groups.append(filt_group)
+            self.sim_groups = groups
+        assert(len(self.sims) >= 1)
+        return self.sims,self.sim_groups
+
     def process(self,sim):
         """Retrieves data for a particular simulation, then processes that data"""
         raise NotImplementedError 
@@ -476,8 +502,8 @@ class Cruncher(Processor):
             normEsq = sim.get_scalar_quantity('normEsquared') 
         except KeyError:
             normEsq = self.normEsquared(sim)
-        # Prefactor for generation rate
-        fact = c.epsilon_0/c.hbar
+        # Prefactor for generation rate. Not we gotta convert from m^3 to cm^3, hence 1e6 factor
+        fact = c.epsilon_0/(c.hbar*1e6) 
         # Get the indices of refraction at this frequency
         freq = sim.conf.get('Parameters','frequency')
         nk = {mat[0]:(self.get_nk(mat[1],freq)) for mat in self.gconf.items('Materials')}
@@ -654,6 +680,10 @@ class Cruncher(Processor):
         delta = np.abs(tot-1)
         self.log.info('Total = %f'%tot)
         assert(delta < .0001)
+        self.log.debug('Reflectance %f'%reflectance)       
+        self.log.debug('Transmission %f'%transmission)       
+        self.log.debug('Absorbance %f'%absorbance)       
+        assert(reflectance >= 0 and transmission >= 0 and absorbance >= 0)
         outpath = os.path.join(base,'ref_trans_abs.dat')
         with open(outpath,'w') as out:
             out.write('# Reflectance,Transmission,Absorbance\n')
@@ -840,6 +870,57 @@ class Global_Cruncher(Cruncher):
                     sim2.clear_data()
                 ref_sim.clear_data()
 
+    def adjacent_error(self,field,exclude=False):
+        """Computes the global error between the vector fields of two simulations. This is the sum
+        of the magnitude squared of the difference vectors divided by the sum of the magnitude
+        squared of the comparison efield vector over the desired section of the simulation cell.
+        This computes error between adjacent sims in a sweep through basis terms."""
+
+        self.log.info('Running the global error computation for quantity %s',field) 
+        # If we need to exclude calculate the indices
+        if exclude:
+            start,end = self.get_slice()    
+            excluded = '_excluded'
+        else:
+            start = 0
+            end = None
+            excluded = ''
+        for group in self.sim_groups:
+            base = group[0].conf.get('General','basedir')
+            errpath = os.path.join(base,'adjacenterror_%s%s.dat'%(field,excluded))
+            with open(errpath,'w') as errfile:
+                self.log.info('Computing adjacent error for sweep %s',base)
+                # For all other sims in the groups, compare to best estimate and write to error file 
+                for i in range(1,len(group)):
+                    # Set reference sim
+                    ref_sim = group[i]
+                    ref_sim.get_data()
+                    # Get the comparison vector
+                    vec1,normvec,ext = self.get_comp_vec(ref_sim,field,start,end)    
+                    sim2 = group[i-1]
+                    sim2.get_data()
+                    if field == 'E': 
+                        vec2 = sim2.e_data[start:end,3:9]
+                    elif field == 'H':
+                        vec2 = sim2.h_data[start:end,3:9]
+                    self.log.info("Computing adjacent error between numbasis %i and numbasis %i",
+                                  ref_sim.conf.getint('Parameters','numbasis'),
+                                  sim2.conf.getint('Parameters','numbasis'))
+                    # Get the array containing the magnitude of the difference vector at each point
+                    # in space 
+                    mag_diff_vec = self.diff_sq(vec1,vec2)
+                    # Check for equal lengths between norm array and diff mag array 
+                    if len(mag_diff_vec) != len(normvec):
+                        self.log.error("The normalization vector has an incorrect number of elements!!!")
+                        quit()
+                    # Error as a percentage should be the square root of the ratio of sum of mag diff vec 
+                    # squared to mag efield squared
+                    error = np.sqrt(np.sum(mag_diff_vec)/np.sum(normvec))
+                    self.log.info(str(error))
+                    errfile.write('%i,%f\n'%(sim2.conf.getint('Parameters','numbasis'),error))
+                    sim2.clear_data()
+                    ref_sim.clear_data()
+
     def global_avg(self,quantity,avg_type):
         """Combine local average of a specific quantity for all leaves in each group"""
         for group in self.sim_groups:
@@ -863,8 +944,9 @@ class Global_Cruncher(Cruncher):
         for group in self.sim_groups:
             base = group[0].conf.get('General','basedir')
             self.log.info('Computing photocurrent density for group at %s'%base)
-            Jsc = np.zeros(len(group))
+            Jsc_vals = np.zeros(len(group))
             freqs = np.zeros(len(group))
+            wvlgths = np.zeros(len(group))
             # Assuming the leaves contain frequency values, sum over all of them
             for i in range(len(group)):
                 sim = group[i]
@@ -872,18 +954,24 @@ class Global_Cruncher(Cruncher):
                 with open(dpath,'r') as f:
                     ref,trans,absorb = list(map(float,f.readlines()[1].split(',')))
                 freq = sim.conf.getfloat('Parameters','frequency')
+                wvlgth = c.c/freq
+                wvlgth_nm = wvlgth*1e9
                 freqs[i] = freq
-                fact = c.e/c.h
-                # Get solar power from AMD1.5 spectrum
-                path = sim.conf.get('General','input_power')
-                freq_vec,p_vec = np.loadtxt(path,skiprows=1,unpack=True)
-                # Get p at freq by interpolation 
-                f_p = interpolate.interp1d(freq_vec,p_vec,kind='nearest',
+                wvlgths[i] = wvlgth_nm
+                # Get solar power from chosen spectrum
+                path = self.gconf.get('General','input_power_wv')
+                wv_vec,p_vec = np.loadtxt(path,skiprows=2,usecols=(0,2),unpack=True,delimiter=',')
+                # Get p at wvlength by interpolation 
+                p_wv = interpolate.interp1d(wv_vec,p_vec,kind='linear',
                                            bounds_error=False,fill_value='extrapolate')
-                sun_pow = f_p(freq) 
-                Jsc[i] = (absorb*sun_pow)/freq
+                sun_pow = p_wv(wvlgth_nm) 
+                Jsc_vals[i] = absorb*sun_pow*wvlgth
             # Use Simpsons rule to perform the integration
-            Jsc = fact*intg.simps(Jsc,x=freqs)
+            # factor of 10 to convert A*m^-2 to mA*cm^-2
+            wvlgths = wvlgths[::-1]
+            Jsc = intg.simps(Jsc_vals,x=wvlgths,even='avg')
+            wv_fact = c.e/(c.c*c.h*10)
+            Jsc = Jsc*wv_fact
             outf = os.path.join(base,'jsc.dat')
             with open(outf,'w') as out:
                 out.write('%f\n'%Jsc)
@@ -1171,6 +1259,8 @@ class Global_Plotter(Plotter):
                 fglob = os.path.join(base,'localerror_%s*.dat'%quantity) 
             elif err_type == 'global':
                 fglob = os.path.join(base,'globalerror_%s*.dat'%quantity) 
+            elif err_type == 'adjacent':
+                fglob = os.path.join(base,'adjacenterror_%s*.dat'%quantity) 
             else:
                 self.log.error('Attempting to plot an unsupported error type')
                 raise ValueError
@@ -1228,11 +1318,11 @@ class Global_Plotter(Plotter):
             rmax = group[0].conf.getfloat('Parameters','array_period')/np.sqrt(np.pi)
             dr = rmax/group[0].conf.getint('General','r_samples')
             dz = group[0].conf.getfloat('Parameters','total_height')/group[0].conf.getfloat('General','z_samples')
-            fig.canvas.draw()
-            xlabels = ['%.2f'%(int(item.get_text())*dr) for item in ax.get_xticklabels()]
-            ylabels = ['%.2f'%(int(item.get_text())*dz) for item in ax.get_yticklabels()]
-            ax.set_xticklabels(xlabels)
-            ax.set_yticklabels(ylabels)
+            #fig.canvas.draw()
+            #xlabels = ['%.2f'%(int(item.get_text())*dr) for item in ax.get_xticklabels()]
+            #ylabels = ['%.2f'%(int(item.get_text())*dz) for item in ax.get_yticklabels()]
+            #ax.set_xticklabels(xlabels)
+            #ax.set_yticklabels(ylabels)
             fig.suptitle(labels[3])
             fig.savefig(os.path.join(base,'%s_%s_global.avg.pdf'%(quantity,avg_type)))
 
@@ -1285,6 +1375,8 @@ def main():
             operations. Useful when you only want to crunch your data without plotting""")
     parser.add_argument('--log_level',type=str,default='info',choices=['debug','info','warning','error','critical'],
                         help="""Logging level for the run""")
+    parser.add_argument('--filter_by',nargs='*',help="""List of parameters you wish to filter by,
+            specified like: p1:v1,v2,v3 p2:v1,v2,v3""")
     args = parser.parse_args()
     if os.path.isfile(args.config_file):
         conf = parse_file(os.path.abspath(args.config_file))
@@ -1296,10 +1388,20 @@ def main():
     logger = configure_logger(args.log_level,'postprocess',
                               os.path.join(conf.get('General','basedir'),'logs'),
                               'postprocess.log')
-   
+  
+
     # Collect the sims once up here and reuse them later
     proc = Processor(conf)
     sims, sim_groups, failed_sims = proc.collect_sims()
+    # Filter if specified
+    if args.filter_by:
+        filt_dict = {}
+        for item in args.filter_by:
+            par,vals = item.split(':')
+            vals = vals.split(',')
+            filt_dict[par] = vals
+        logger.info('Here is the filter dictionary: %s'%filt_dict)
+        sims, sim_groups = proc.filter_by_param(filt_dict)
     # Now do all the work
     if not args.no_crunch:
         crunchr = Cruncher(conf,sims,sim_groups,failed_sims)

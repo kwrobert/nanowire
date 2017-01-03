@@ -256,20 +256,20 @@ function Simulator:build_device()
     -- Add layers. NOTE!!: Order here DOES MATTER, as incident light will be directed at the FIRST
     -- LAYER SPECIFIED
     self.sim:AddLayer('air',self:getfloat('Parameters','air_t'),'vacuum')
-    self.sim:AddLayer('ito',self:getfloat('Parameters','ito_t'),'ITO')
-    self.sim:AddLayer('nanowire_alshell',self:getfloat('Parameters','alinp_height'),'Cyclotene')
+    --self.sim:AddLayer('ito',self:getfloat('Parameters','ito_t'),'ITO')
+    self.sim:AddLayer('nanowire_alshell',self:getfloat('Parameters','alinp_height'),'vacuum')
     -- Add patterning to section with AlInP shell
     core_rad = self:getfloat('Parameters','nw_radius')
     shell_rad = core_rad + self:getfloat('Parameters','shell_t')
-    self.sim:SetLayerPatternCircle('nanowire_alshell','AlInP',{vec_mag/2,vec_mag/2},shell_rad)
+    --self.sim:SetLayerPatternCircle('nanowire_alshell','AlInP',{vec_mag/2,vec_mag/2},shell_rad)
     self.sim:SetLayerPatternCircle('nanowire_alshell','GaAs',{vec_mag/2,vec_mag/2},core_rad)
     --self.sim:SetLayerPatternCircle('nanowire_alshell','AlInP',{0,0},shell_rad)
     --self.sim:SetLayerPatternCircle('nanowire_alshell','GaAs',{0,0},core_rad)
     -- Si layer and patterning 
-    self.sim:AddLayer('nanowire_sishell',self:getfloat('Parameters','sio2_height'),'Cyclotene')
+    --self.sim:AddLayer('nanowire_sishell',self:getfloat('Parameters','sio2_height'),'Cyclotene')
     -- Add patterning to layer with SiO2 shell 
-    self.sim:SetLayerPatternCircle('nanowire_sishell','SiO2',{vec_mag/2,vec_mag/2},shell_rad)
-    self.sim:SetLayerPatternCircle('nanowire_sishell','GaAs',{vec_mag/2,vec_mag/2},core_rad)
+    --self.sim:SetLayerPatternCircle('nanowire_sishell','SiO2',{vec_mag/2,vec_mag/2},shell_rad)
+    --self.sim:SetLayerPatternCircle('nanowire_sishell','GaAs',{vec_mag/2,vec_mag/2},core_rad)
     -- Substrate layer and air transmission region
     self.sim:AddLayer('substrate',self:getfloat('Parameters','substrate_t'),'GaAs')
     --self.sim:AddLayerCopy('air_below',Thickness=conf.self:getfloat('Parameters','air_t'),Layer='air') 
@@ -286,7 +286,7 @@ function Simulator:set_excitation()
     self.sim:SetFrequency(f_conv)
 
     -- Define incident light. Normally incident with frequency dependent amplitude
-    E_mag = self:get_incident_amplitude(f_phys,vec_mag,self.conf["General"]["input_power"])
+    --E_mag = self:get_incident_amplitude(f_phys,vec_mag,self.conf["General"]["input_power"])
     -- To define circularly polarized light, basically just stick a j (imaginary number) in front of
     -- one of your components. The handedness is determined by the component you stick the j in front
     -- of. From POV of source, looking away from source toward direction of propagation, right handed
@@ -295,6 +295,7 @@ function Simulator:set_excitation()
     -- counterclockwise. 
     -- In S4, if indicent angles are 0, p-polarization is along x-axis. The minus sign on front of the 
     -- x magnitude is just to get things to look like Anna's simulations.
+    E_mag = 1
     self.sim:SetExcitationPlanewave({0,0},{-E_mag,0},{-E_mag,90})
 end
 
@@ -358,12 +359,14 @@ end
 function Simulator:calc_diff(d1,d2,exclude) 
     --Pluck out the fields, excluding region outside nanowire
     exc = exclude or true
+    exc = false
     if exc then
         start_row,end_row = self:get_indices()
     else
         start_row = 1
         end_row = -1
     end
+    --print(pl.pretty.write(d1))
     f1 = pl.array2d.slice(d1,start_row,4,end_row,-1)
     f2 = pl.array2d.slice(d2,start_row,4,end_row,-1)    
     --print(pl.pretty.write(f1,''))
@@ -446,7 +449,7 @@ function Simulator:get_fluxes()
     path = pl.path.join(self.conf['General']['sim_dir'],'fluxes.dat')
     outf = io.open(path,'w')
     outf:write('# Layer,ForwardReal,BackwardReal,ForwardImag,BackwardImag\n')
-    for i,layer in ipairs({'air','ito','nanowire_alshell','substrate'}) do
+    for i,layer in ipairs({'air','nanowire_alshell','substrate'}) do
         inc_fr,inc_br,inc_fi,inc_bi = self.sim:GetPowerFlux(layer)
         row = string.format('%s,%s,%s,%s,%s\n',layer,inc_fr,inc_br,inc_fi,inc_bi)
         outf:write(row)

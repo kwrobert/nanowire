@@ -45,6 +45,7 @@ Code
 16) We can reduce the angular average to just 1/8th of the square unit cell because of the symmetry
     of the cell. 
 17) Set all input wave amplitudes to one and weight everything by the solar spectrum after the fact
+18) We need to adjust the number of sampling points based on the array dimensions.  
 
 Reading
 =======

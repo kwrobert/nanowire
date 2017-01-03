@@ -287,10 +287,10 @@ def run_sim(jobtup):
     ini_file = os.path.join(jobpath,'sim_conf.ini')
     if timed:
         log.debug('Executing script with timing wrapper ...')
-        cmd = '/usr/bin/time -vv -o %s /usr/bin/lua %s %s'%(tout,script,ini_file)
+        cmd = 'command time -vv -o %s lua %s %s'%(tout,script,ini_file)
         #cmd = '/usr/bin/perf stat -o timing.dat -r 5 /usr/bin/lua %s %s'%(script,ini_file)
     else:
-        cmd = '/usr/bin/lua %s %s'%(script,ini_file)
+        cmd = 'command lua %s %s'%(script,ini_file)
     log.debug('Subprocess command: %s',cmd)
     relpath = os.path.relpath(jobpath,jobconf.get('General','treebase'))
     log.info("Starting simulation for %s ....",relpath)

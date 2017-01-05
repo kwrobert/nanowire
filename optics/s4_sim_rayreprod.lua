@@ -248,31 +248,21 @@ function Simulator:build_device()
     f_phys = self:getfloat('Parameters','frequency')
     for mat,path in pairs(self.conf['Materials']) do
         eps_r,eps_i = self:get_epsilon(f_phys,path)
-        self.sim:SetMaterial(mat,{eps_r,eps_i})
+        print(mat)
+        print('Eps Real = '..eps_r)
+        self.sim:AddMaterial(mat,{eps_r,eps_i})
     end
-
-    -- Set up material
-    self.sim:SetMaterial('vacuum',{1,0})
+    self.sim:AddMaterial('vacuum',{1,0})
     -- Add layers. NOTE!!: Order here DOES MATTER, as incident light will be directed at the FIRST
     -- LAYER SPECIFIED
     self.sim:AddLayer('air',self:getfloat('Parameters','air_t'),'vacuum')
-    --self.sim:AddLayer('ito',self:getfloat('Parameters','ito_t'),'ITO')
     self.sim:AddLayer('nanowire_alshell',self:getfloat('Parameters','alinp_height'),'vacuum')
     -- Add patterning to section with AlInP shell
     core_rad = self:getfloat('Parameters','nw_radius')
-    shell_rad = core_rad + self:getfloat('Parameters','shell_t')
-    --self.sim:SetLayerPatternCircle('nanowire_alshell','AlInP',{vec_mag/2,vec_mag/2},shell_rad)
+    print('Radius = '..core_rad)
+    print('Period = '..vec_mag)
     self.sim:SetLayerPatternCircle('nanowire_alshell','GaAs',{vec_mag/2,vec_mag/2},core_rad)
-    --self.sim:SetLayerPatternCircle('nanowire_alshell','AlInP',{0,0},shell_rad)
-    --self.sim:SetLayerPatternCircle('nanowire_alshell','GaAs',{0,0},core_rad)
-    -- Si layer and patterning 
-    --self.sim:AddLayer('nanowire_sishell',self:getfloat('Parameters','sio2_height'),'Cyclotene')
-    -- Add patterning to layer with SiO2 shell 
-    --self.sim:SetLayerPatternCircle('nanowire_sishell','SiO2',{vec_mag/2,vec_mag/2},shell_rad)
-    --self.sim:SetLayerPatternCircle('nanowire_sishell','GaAs',{vec_mag/2,vec_mag/2},core_rad)
-    -- Substrate layer and air transmission region
-    self.sim:AddLayer('substrate',self:getfloat('Parameters','substrate_t'),'GaAs')
-    --self.sim:AddLayerCopy('air_below',Thickness=conf.self:getfloat('Parameters','air_t'),Layer='air') 
+    self.sim:AddLayer('substrate',0,'GaAs')
 end
 
 function Simulator:set_excitation()
@@ -286,7 +276,8 @@ function Simulator:set_excitation()
     self.sim:SetFrequency(f_conv)
 
     -- Define incident light. Normally incident with frequency dependent amplitude
-    --E_mag = self:get_incident_amplitude(f_phys,vec_mag,self.conf["General"]["input_power"])
+    E_mag = self:get_incident_amplitude(f_phys,vec_mag,self.conf["General"]["input_power"])
+    print('E_mag = '..E_mag)
     -- To define circularly polarized light, basically just stick a j (imaginary number) in front of
     -- one of your components. The handedness is determined by the component you stick the j in front
     -- of. From POV of source, looking away from source toward direction of propagation, right handed
@@ -296,7 +287,7 @@ function Simulator:set_excitation()
     -- In S4, if indicent angles are 0, p-polarization is along x-axis. The minus sign on front of the 
     -- x magnitude is just to get things to look like Anna's simulations.
     E_mag = 1
-    self.sim:SetExcitationPlanewave({0,0},{-E_mag,0},{-E_mag,90})
+    self.sim:SetExcitationPlanewave({0,0},{E_mag,0},{0,0})
 end
 
 function Simulator:clean_files(path)
@@ -312,15 +303,6 @@ function Simulator:clean_files(path)
 end
 function Simulator:get_fields()
     -- Gets the fields throughout the device
-    
-    -- Get gnoplot output of vector field
-    -- prefix = pl.path.join(conf['General']['sim_dir'],'vecfield')
-    -- print(prefix)
-    -- sim:SetBasisFieldDumpPrefix(prefix)
-    -- Get layer patterning  
-    -- out = pl.path.join(conf['General']['sim_dir'],'out.ps')
-    -- sim:OutputLayerPatternRealization('nanowire_alshell',50,50,out)
-    --sim.OutputStructurePOVRay(Filename='out.pov')
     output_file = pl.path.join(self.conf['General']['sim_dir'],self.conf["General"]["base_name"])
     self:clean_files(output_file)
     x_samp = self:getint('General','x_samples')
@@ -335,11 +317,25 @@ function Simulator:get_fields()
         numbasis = self:getint('Parameters','numbasis')
         self:set_basis(numbasis)
         for i,z in ipairs(zvec) do 
-            print(z)
             self.sim:GetFieldPlane(z,{x_samp,y_samp},'FileAppend',output_file)
         end
     end
-    
+    -- Get gnoplot output of vector field
+    -- For some reason this needs to be done after we compute the fields 
+    prefix = pl.path.join(conf['General']['sim_dir'],'vecfield')
+    print(prefix)
+    self.sim:SetBasisFieldDumpPrefix(prefix)
+    -- Get layer patterning  
+    out = pl.path.join(conf['General']['sim_dir'],'pattern.dat')
+    self.sim:OutputLayerPatternRealization('nanowire_alshell',25,25,out)
+    --for x=0,vec_mag,0.02 do
+    --	for y=0,vec_mag,0.02 do
+    --		er,ei = self.sim:GetEpsilon({x,y,1.6}) -- returns real and imag parts
+    --		io.stderr:write(x .. '\t' .. y .. '\t' .. er .. '\t' .. ei .. '\n')
+    --	end
+    --	io.stderr:write('\n')
+    --end
+    --self.sim:OutputStructurePOVRay(Filename='out.pov')
 end
 
 function Simulator:get_indices() 
@@ -464,6 +460,22 @@ function Simulator:get_fluxes()
     outf:write(row)
     outf:close()
 end
+
+function Simulator:get_energy_integrals()
+    -- Gets energy density integrals
+    --layers = {'air','ito','nanowire_alshell','nanowire_sishell','substrate'}    
+    layers = {'air','nanowire_alshell','substrate'}    
+    print('Computing energy densities ...')
+    path = pl.path.join(self.conf['General']['sim_dir'],'energy_densities.dat')
+    outf = io.open(path,'w')
+    outf:write('# Layer, Real, Imaginary\n')
+    for i,layer in ipairs(layers) do
+        r,i = self.sim:GetLayerElectricEnergyDensityIntegral(layer)
+        row = string.format('layer,%s,%s',r,i)
+        outf:write(row)
+    end
+    outf:close()
+end
 ----------------------------------------------------
 -- Main program 
 ----------------------------------------------------
@@ -485,6 +497,7 @@ the optical properties of a single nanowire in a square lattice
     simulator:set_excitation()
     simulator:get_fields()
     simulator:get_fluxes()
+    simulator:get_energy_integrals()
 end
 
 main()

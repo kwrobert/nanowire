@@ -311,15 +311,6 @@ function Simulator:clean_files(path)
 end
 function Simulator:get_fields()
     -- Gets the fields throughout the device
-    
-    -- Get gnoplot output of vector field
-    -- prefix = pl.path.join(conf['General']['sim_dir'],'vecfield')
-    -- print(prefix)
-    -- sim:SetBasisFieldDumpPrefix(prefix)
-    -- Get layer patterning  
-    -- out = pl.path.join(conf['General']['sim_dir'],'out.ps')
-    -- sim:OutputLayerPatternRealization('nanowire_alshell',50,50,out)
-    --sim.OutputStructurePOVRay(Filename='out.pov')
     output_file = pl.path.join(self.conf['General']['sim_dir'],self.conf["General"]["base_name"])
     self:clean_files(output_file)
     x_samp = self:getint('General','x_samples')
@@ -339,6 +330,14 @@ function Simulator:get_fields()
         end
     end
     
+    -- Get gnoplot output of vector field
+    prefix = pl.path.join(conf['General']['sim_dir'],'vecfield')
+    print(prefix)
+    self.sim:SetBasisFieldDumpPrefix(prefix)
+    -- Get layer patterning  
+    out = pl.path.join(conf['General']['sim_dir'],'out.ps')
+    self.sim:OutputLayerPatternRealization('nanowire_alshell',50,50,out)
+    self.sim:OutputStructurePOVRay('out.pov')
 end
 
 function Simulator:get_indices() 
@@ -461,6 +460,21 @@ function Simulator:get_fluxes()
     outf:write(row)
     outf:close()
 end
+
+function Simulator:get_energy_integrals()
+    -- Gets energy density integrals
+    layers = {'air','ito','nanowire_alshell','nanowire_sishell','substrate'}    
+    print('Computing energy densities ...')
+    path = pl.path.join(self.conf['General']['sim_dir'],'energy_densities.dat')
+    outf = io.open(path,'w')
+    outf:write('# Layer, Real, Imaginary\n')
+    for i,layer in ipairs(layers) do
+        r,i = self.sim:GetLayerElectricEnergyDensityIntegral(layer)
+        row = string.format('layer,%s,%s',r,i)
+        outf:write(row)
+    end
+    outf:close()
+end
 ----------------------------------------------------
 -- Main program 
 ----------------------------------------------------
@@ -482,6 +496,7 @@ the optical properties of a single nanowire in a square lattice
     simulator:set_excitation()
     simulator:get_fields()
     simulator:get_fluxes()
+    simulator:get_energy_integrals()
 end
 
 main()

@@ -333,7 +333,7 @@ class Processor(object):
             val = sim.conf.get('Parameters',par)
             if val not in vals:
                 vals.append(val)
-        return sorted(vals)
+        return vals
 
     def filter_by_param(self,pars):
         """Accepts a dict where the keys are parameter names and the values are a list of possible 
@@ -673,13 +673,17 @@ class Cruncher(Processor):
         p_inc = data['air'][0]
         p_ref = np.abs(data['air'][1]) 
         p_trans = data['substrate_bottom'][0] 
+        #p_inc = np.sqrt(data['air'][0]**2+data['air'][2]**2)
+        #p_ref = np.sqrt(data['air'][1]**2+data['air'][3]**2) 
+        #p_trans = np.sqrt(data['substrate_bottom'][0]**2+data['substrate_bottom'][2]**2)
         reflectance = p_ref / p_inc
         transmission = p_trans / p_inc
-        absorbance = 1 - reflectance - transmission
-        tot = reflectance+transmission+absorbance
-        delta = np.abs(tot-1)
-        self.log.info('Total = %f'%tot)
-        assert(delta < .0001)
+        #absorbance = 1 - reflectance - transmission
+        absorbance = 1 - reflectance
+        #tot = reflectance+transmission+absorbance
+        #delta = np.abs(tot-1)
+        #self.log.info('Total = %f'%tot)
+        #assert(delta < .0001)
         self.log.debug('Reflectance %f'%reflectance)       
         self.log.debug('Transmission %f'%transmission)       
         self.log.debug('Absorbance %f'%absorbance)       
@@ -957,6 +961,51 @@ class Global_Cruncher(Cruncher):
                 wvlgth = c.c/freq
                 wvlgth_nm = wvlgth*1e9
                 freqs[i] = freq
+                wvlgths[i] = wvlgth
+                # Get solar power from chosen spectrum
+                path = self.gconf.get('General','input_power_wv')
+                wv_vec,p_vec = np.loadtxt(path,skiprows=2,usecols=(0,2),unpack=True,delimiter=',')
+                # Get p at wvlength by interpolation 
+                p_wv = interpolate.interp1d(wv_vec,p_vec,kind='linear',
+                                           bounds_error=False,fill_value='extrapolate')
+                sun_pow = p_wv(wvlgth_nm) 
+                Jsc_vals[i] = absorb*sun_pow*wvlgth_nm
+            # Use Simpsons rule to perform the integration
+            # factor of 10 to convert A*m^-2 to mA*cm^-2
+            wvlgths = wvlgths[::-1]
+            Jsc_vals = Jsc_vals[::-1]
+            plt.figure()
+            plt.plot(wvlgths,Jsc_vals)
+            plt.show()
+            #Jsc = intg.simps(Jsc_vals,x=wvlgths,even='avg')
+            Jsc = intg.trapz(Jsc_vals,x=wvlgths)
+            wv_fact = c.e/(c.c*c.h*10)
+            Jsc = Jsc*wv_fact
+            outf = os.path.join(base,'jsc.dat')
+            with open(outf,'w') as out:
+                out.write('%f\n'%Jsc)
+            print('Jsc = %f'%Jsc)
+
+    def weighted_transmissionData(self):
+        """Computes spectrally weighted absorption,transmission, and reflection""" 
+        for group in self.sim_groups:
+            base = group[0].conf.get('General','basedir')
+            self.log.info('Computing spectrally weighted transmission data for group at %s'%base)
+            abs_vals = np.zeros(len(group))
+            ref_vals = np.zeros(len(group))
+            trans_vals = np.zeros(len(group))
+            freqs = np.zeros(len(group))
+            wvlgths = np.zeros(len(group))
+            # Assuming the leaves contain frequency values, sum over all of them
+            for i in range(len(group)):
+                sim = group[i]
+                dpath = os.path.join(sim.conf.get('General','sim_dir'),'ref_trans_abs.dat')
+                with open(dpath,'r') as f:
+                    ref,trans,absorb = list(map(float,f.readlines()[1].split(',')))
+                freq = sim.conf.getfloat('Parameters','frequency')
+                wvlgth = c.c/freq
+                wvlgth_nm = wvlgth*1e9
+                freqs[i] = freq
                 wvlgths[i] = wvlgth_nm
                 # Get solar power from chosen spectrum
                 path = self.gconf.get('General','input_power_wv')
@@ -965,18 +1014,23 @@ class Global_Cruncher(Cruncher):
                 p_wv = interpolate.interp1d(wv_vec,p_vec,kind='linear',
                                            bounds_error=False,fill_value='extrapolate')
                 sun_pow = p_wv(wvlgth_nm) 
-                Jsc_vals[i] = absorb*sun_pow*wvlgth
-            # Use Simpsons rule to perform the integration
-            # factor of 10 to convert A*m^-2 to mA*cm^-2
+                abs_vals[i] = sun_pow*absorb
+                ref_vals[i] = sun_pow*ref
+                trans_vals[i] = sun_pow*trans
+            # Now integrate all the weighted spectra and divide by the width of the spectra
             wvlgths = wvlgths[::-1]
-            Jsc = intg.simps(Jsc_vals,x=wvlgths,even='avg')
-            wv_fact = c.e/(c.c*c.h*10)
-            Jsc = Jsc*wv_fact
-            outf = os.path.join(base,'jsc.dat')
-            with open(outf,'w') as out:
-                out.write('%f\n'%Jsc)
-            print('Jsc = %f'%Jsc)
-
+            abs_vals = abs_vals[::-1]
+            ref_vals = ref_vals[::-1]
+            trans_vals = trans_vals[::-1]
+            width = max(wvlgths) - min(wvlgths)
+            wght_ref = intg.trapz(ref_vals,x=wvlgths)/width 
+            wght_abs = intg.trapz(abs_vals,x=wvlgths)/width
+            wght_trans = intg.trapz(trans_vals,x=wvlgths)/width
+            out = os.path.join(base,'weighted_transmission_data.dat')
+            with open(out,'w') as outf:
+                outf.write('# Reflection, Transmission, Absorbtion\n')
+                outf.write('%f,%f,%f'%(wght_ref,wght_trans,wght_abs))
+        return None 
 
 class Plotter(Processor):
     """Plots all the things listed in the config file"""
@@ -1405,7 +1459,9 @@ def main():
     # Now do all the work
     if not args.no_crunch:
         crunchr = Cruncher(conf,sims,sim_groups,failed_sims)
-        crunchr.process_all()
+        #crunchr.process_all()
+        for sim in crunchr.sims:
+            crunchr.transmissionData(sim)
     if not args.no_gcrunch:
         gcrunchr = Global_Cruncher(conf,sims,sim_groups,failed_sims)
         gcrunchr.process_all()

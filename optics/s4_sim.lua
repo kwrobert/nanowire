@@ -87,6 +87,21 @@ function Simulator:parse_nk(path)
     return freqvec:reverse(),nvec:reverse(),kvec:reverse()
 end
 
+function Simulator:search_conf(conf,str)
+    -- Search for a dot in str
+    ind = pl.stringx.lfind(str,'.')
+    if ind then
+        -- Split on the dot to get desired section and par
+        dat = pl.stringx.split(str,'.')
+        sect = dat[1]
+        par = dat[2]
+        return conf[sect][par]
+    else
+        print("You need to specify both the section and the parameter when using interpolation: section.param")
+        pl.utils.quit()
+    end
+end
+
 function Simulator:interpolate(conf)
     -- Perform interpolation of conf objects
     
@@ -101,10 +116,9 @@ function Simulator:interpolate(conf)
             matches = string.gmatch(value,"%%%(([^)]+)%)s") 
             -- For each parameter name extracted from the interpolation string 
             for match in matches do
-                -- Get the value of tha param name. Note this only works if the sought
-                -- param is in the same section as the discovered interp string
-                -- TODO: Fix this so it searches the conf table for the proper KEY recursively
-                repl_val = self.conf[sect][match] 
+                -- Get the value of tha param name. 
+                repl_val = self:search_conf(conf,match)
+                print(repl_val)
                 -- Now replace the interpolation string by the actual value of the 
                 -- sought parameter 
                 rep_par = string.gsub(value,"%%%(([^)]+)%)s",repl_val)
@@ -159,16 +173,19 @@ function Simulator:parse_config(path)
     conf = pl.config.read(path)
     conf = self:interpolate(conf)
     -- Evaluate expressions
-    for par, val in pairs(conf['Parameters']) do
-        if type(val) == 'string' then
-            if pl.stringx.startswith(val,'`') and pl.stringx.endswith(val,'`') then
-                tmp = pl.stringx.strip(val,'`')
-                tmp = pl.stringx.join('',{'result = ',tmp})
-                -- This loads the lua statement contained in tmp and evaluates it, making result
-                -- available in the current scope
-                f = loadstring(tmp)
-                f()
-                conf['Parameters'][par] = result
+    for sect, pars in pairs(conf) do
+        for par, val in pairs(pars) do
+            if type(val) == 'string' then
+                if pl.stringx.startswith(val,'`') and pl.stringx.endswith(val,'`') then
+                    tmp = pl.stringx.strip(val,'`')
+                    print(tmp)
+                    tmp = pl.stringx.join('',{'result = ',tmp})
+                    -- This loads the lua statement contained in tmp and evaluates it, making result
+                    -- available in the current scope
+                    f = load(tmp)
+                    f()
+                    conf[sect][par] = result
+                end
             end
         end
     end

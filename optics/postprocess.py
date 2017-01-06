@@ -670,20 +670,19 @@ class Cruncher(Processor):
                 key = els.pop(0)
                 data[key] = list(map(float,els))
         # NOTE: Take only the real part of the power as per https://en.wikipedia.org/wiki/Poynting_vector#Time-averaged_Poynting_vector
-        p_inc = data['air'][0]
-        p_ref = np.abs(data['air'][1]) 
-        p_trans = data['substrate_bottom'][0] 
-        #p_inc = np.sqrt(data['air'][0]**2+data['air'][2]**2)
-        #p_ref = np.sqrt(data['air'][1]**2+data['air'][3]**2) 
-        #p_trans = np.sqrt(data['substrate_bottom'][0]**2+data['substrate_bottom'][2]**2)
+        #p_inc = data['air'][0]
+        #p_ref = np.abs(data['air'][1]) 
+        #p_trans = data['substrate_bottom'][0] 
+        p_inc = np.sqrt(data['air'][0]**2+data['air'][2]**2)
+        p_ref = np.sqrt(data['air'][1]**2+data['air'][3]**2) 
+        p_trans = np.sqrt(data['substrate_bottom'][0]**2+data['substrate_bottom'][2]**2)
         reflectance = p_ref / p_inc
         transmission = p_trans / p_inc
-        #absorbance = 1 - reflectance - transmission
-        absorbance = 1 - reflectance
-        #tot = reflectance+transmission+absorbance
-        #delta = np.abs(tot-1)
-        #self.log.info('Total = %f'%tot)
-        #assert(delta < .0001)
+        absorbance = 1 - reflectance - transmission
+        tot = reflectance+transmission+absorbance
+        delta = np.abs(tot-1)
+        self.log.info('Total = %f'%tot)
+        assert(delta < .0001)
         self.log.debug('Reflectance %f'%reflectance)       
         self.log.debug('Transmission %f'%transmission)       
         self.log.debug('Absorbance %f'%absorbance)       
@@ -1459,9 +1458,9 @@ def main():
     # Now do all the work
     if not args.no_crunch:
         crunchr = Cruncher(conf,sims,sim_groups,failed_sims)
-        #crunchr.process_all()
-        for sim in crunchr.sims:
-            crunchr.transmissionData(sim)
+        crunchr.process_all()
+        #for sim in crunchr.sims:
+        #    crunchr.transmissionData(sim)
     if not args.no_gcrunch:
         gcrunchr = Global_Cruncher(conf,sims,sim_groups,failed_sims)
         gcrunchr.process_all()

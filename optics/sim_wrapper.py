@@ -10,7 +10,8 @@ import datetime
 from collections import OrderedDict 
 from profilehooks import profile
 import multiprocessing as mp 
-import multiprocessing.dummy as mpd
+import pandas
+import numpy as np
 
 def parse_file(path):
     """Parse the INI file provided at the command line"""
@@ -161,12 +162,6 @@ def make_leaves(nodes):
             for i in range(len(combo)):
                 substr = '{}_{:G}__'.format(keys[i],combo[i])
                 workdir += substr 
-                #if isinstance(combo[i],float) and combo[i] >= 10000:
-                #    substr = '{}_{:.4E}__'.format(keys[i],combo[i])
-                #    workdir += substr 
-                #else:
-                #    substr = '{}_{:.4f}__'.format(keys[i],combo[i])
-                #    workdir += substr 
             workdir=workdir.rstrip('__')
             fullpath = os.path.join(nodepath,workdir)
             try:
@@ -274,6 +269,25 @@ def make_nodes(conf):
     leaves = make_leaves(nodes)
     return leaves
 
+def convert_data(path,conf):
+    """Converts text file spit out by S4 into npz format for faster loading during postprocessing"""
+    # Convert both data files
+    bname = conf.get('General','base_name')
+    efile = os.path.join(path,bname+'.E')
+    hfile = os.path.join(path,bname+'.H')
+    d = pandas.read_csv(efile,delim_whitespace=True,header=None,skip_blank_lines=True)
+    edata = d.as_matrix()
+    econv = efile+'.raw'
+    np.savez(econv,data=edata,headers=[None])
+    d = pandas.read_csv(hfile,delim_whitespace=True,header=None,skip_blank_lines=True)
+    hdata = d.as_matrix()
+    hconv = hfile+'.raw'
+    np.savez(hconv,data=hdata,headers=[None])
+    # Remove the old text files
+    os.remove(efile)
+    os.remove(hfile)
+    return None
+
 def run_sim(jobtup):
     """Actually runs simulation in a given directory using subprocess.call. Expects a tuple
     containing the absolute path to the job directory as the first element and the configuration
@@ -296,9 +310,12 @@ def run_sim(jobtup):
     log.info("Starting simulation for %s ....",relpath)
     completed = subprocess.run(cmd,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     #log.info('Simulation stderr: %s',completed.stderr)
-    log.info("Finished simulation for %s!\nSimulation stderr: %s",
-             relpath,completed.stderr)
+    log.info("Finished simulation for %s!",relpath)
+    log.info("Simulation stderr: %s",completed.stderr)
     log.debug('Simulation stdout: %s',completed.stdout)
+    if jobconf.get('General','save_as') == 'npz':
+        log.info('Converting data to npz format')
+        convert_data(jobpath,jobconf)
 
 def execute_jobs(gconf,jobs):
     """Given a list of length 2 tuples containing job directories and their configuration objects
@@ -313,7 +330,7 @@ def execute_jobs(gconf,jobs):
     else:
         num_procs = mp.cpu_count() - gconf.getint('General','reserved_cores')
         log.info('Executing jobs in parallel using %s cores ...',str(num_procs))
-        with mpd.Pool(processes=num_procs) as pool:
+        with mp.Pool(processes=num_procs) as pool:
             result = pool.map(run_sim,jobs)
 
 def run_optimization(conf):

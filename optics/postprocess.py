@@ -129,20 +129,40 @@ class Simulation(object):
         self.log.info('Collecting raw data for sim %s',self.conf.get('General','sim_dir'))
         sim_path = self.conf.get('General','sim_dir')
         base_name = self.conf.get('General','base_name')
-        e_path = os.path.join(sim_path,base_name+'.E')
-        h_path = os.path.join(sim_path,base_name+'.H')
-        # Load E field data
-        e_data, e_lookup = self.load_txt(e_path)
-        self.log.debug('E shape after getting: %s',str(e_data.shape))        
-        pos_inds = np.zeros((e_data.shape[0],3))
-        pos_inds[:,:] = e_data[:,0:3] 
-        # Load H field data
-        h_data, h_lookup = self.load_txt(h_path)
-        self.e_data = e_data
-        self.h_data = h_data
-        self.pos_inds = e_data[:,0:3] 
-        self.e_data,self.h_data,self.pos_inds = e_data,h_data,pos_inds
-        self.log.info('Collection complete!')
+        ftype = self.conf.get('General','save_as')
+        if ftype == 'text':
+            e_path = os.path.join(sim_path,base_name+'.E')
+            h_path = os.path.join(sim_path,base_name+'.H')
+            # Load E field data
+            e_data, e_lookup = self.load_txt(e_path)
+            self.log.debug('E shape after getting: %s',str(e_data.shape))        
+            pos_inds = np.zeros((e_data.shape[0],3))
+            pos_inds[:,:] = e_data[:,0:3] 
+            # Load H field data
+            h_data, h_lookup = self.load_txt(h_path)
+            self.e_data = e_data
+            self.h_data = h_data
+            self.pos_inds = e_data[:,0:3] 
+            self.e_data,self.h_data,self.pos_inds = e_data,h_data,pos_inds
+            self.log.info('Collection complete!')
+        elif ftype == 'npz':
+            e_path = os.path.join(sim_path,base_name+'.E.raw.npz')
+            h_path = os.path.join(sim_path,base_name+'.H.raw.npz')
+            # Load E field data
+            e_data, e_lookup = self.load_npz(e_path)
+            self.log.debug('E shape after getting: %s',str(e_data.shape))        
+            pos_inds = np.zeros((e_data.shape[0],3))
+            pos_inds[:,:] = e_data[:,0:3] 
+            # Load H field data
+            h_data, h_lookup = self.load_npz(h_path)
+            self.e_data = e_data
+            self.h_data = h_data
+            self.pos_inds = e_data[:,0:3] 
+            self.e_data,self.h_data,self.pos_inds = e_data,h_data,pos_inds
+            self.log.info('Collection complete!')
+        else:
+            raise ValueError('Incorrect file type specified in [General] section of config file')
+
         return e_data,self.e_lookup,h_data,self.h_lookup,pos_inds
 
     def get_data(self):
@@ -197,6 +217,7 @@ class Simulation(object):
         """Writes the data"""
         # Get the current path
         base = self.conf.get('General','sim_dir')
+        self.log.info('Writing data for %s'%base)
         fname = self.conf.get('General','base_name')
         epath = os.path.join(base,fname+'.E')
         hpath = os.path.join(base,fname+'.H')
@@ -286,7 +307,12 @@ class Processor(object):
 
     def collect_sims(self):
         """Collect all the simulations beneath the base of the directory tree"""
-        datfile = self.gconf.get('General','base_name')+'.E'
+        ftype = self.gconf.get('General','save_as')
+        if ftype == 'text': 
+            datfile = self.gconf.get('General','base_name')+'.E'
+        else:
+            datfile = self.gconf.get('General','base_name')+'.E.raw.npz' 
+
         for root,dirs,files in os.walk(self.gconf.get('General','basedir')):
             if 'sim_conf.ini' in files and datfile in files:
                 self.log.info('Gather sim at %s',root)

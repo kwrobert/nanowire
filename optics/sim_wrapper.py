@@ -98,8 +98,7 @@ def make_single_sim(conf):
     # Copy sim script to sim dir
     base_script = sim_conf.get('General','sim_script')
     script = os.path.join(path,os.path.basename(base_script))
-    if not os.path.exists(script):
-        shutil.copy(base_script,script)
+    shutil.copy(base_script,script)
     return (path,sim_conf)
     
 def get_combos(tuplist):
@@ -120,12 +119,13 @@ def get_combos(tuplist):
             
             # Parse the range string
             dataRange = value.split(':')
-            dataMin,dataMax,dataStep = list(map(type_converter,dataRange))
+            dataMin,dataMax,numPoints = list(map(type_converter,dataRange))
 
             # construct the option list (handles ints and floats)
-            vals = [dataMin]
-            while vals[-1] < dataMax:
-                vals.append(vals[-1]+dataStep)
+            #vals = [dataMin]
+            #while vals[-1] < dataMax:
+            #    vals.append(vals[-1]+dataStep)
+            vals = np.linspace(dataMin,dataMax,numPoints)
 
             # assign the option list
             optionValues[key] = vals
@@ -307,15 +307,15 @@ def run_sim(jobtup):
         cmd = 'command lua %s %s'%(script,ini_file)
     log.debug('Subprocess command: %s',cmd)
     relpath = os.path.relpath(jobpath,jobconf.get('General','treebase'))
-    log.info("Starting simulation for %s ....",relpath)
+    log.info("Starting simulation for %s ...",relpath)
     completed = subprocess.run(cmd,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     #log.info('Simulation stderr: %s',completed.stderr)
-    log.info("Finished simulation for %s!",relpath)
     log.info("Simulation stderr: %s",completed.stderr)
     log.debug('Simulation stdout: %s',completed.stdout)
     if jobconf.get('General','save_as') == 'npz':
-        log.info('Converting data to npz format')
+        log.info('Converting data at %s to npz format',relpath)
         convert_data(jobpath,jobconf)
+    log.info("Finished simulation for %s!",relpath)
 
 def execute_jobs(gconf,jobs):
     """Given a list of length 2 tuples containing job directories and their configuration objects

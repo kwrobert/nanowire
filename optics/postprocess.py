@@ -705,6 +705,7 @@ class Cruncher(Processor):
         reflectance = p_ref / p_inc
         transmission = p_trans / p_inc
         absorbance = 1 - reflectance - transmission
+        #absorbance = 1 - reflectance
         tot = reflectance+transmission+absorbance
         delta = np.abs(tot-1)
         self.log.info('Total = %f'%tot)
@@ -712,14 +713,35 @@ class Cruncher(Processor):
         self.log.debug('Reflectance %f'%reflectance)       
         self.log.debug('Transmission %f'%transmission)       
         self.log.debug('Absorbance %f'%absorbance)       
-        assert(reflectance >= 0 and transmission >= 0 and absorbance >= 0)
+        #assert(reflectance >= 0 and transmission >= 0 and absorbance >= 0)
         outpath = os.path.join(base,'ref_trans_abs.dat')
         with open(outpath,'w') as out:
             out.write('# Reflectance,Transmission,Absorbance\n')
             out.write('%f,%f,%f'%(reflectance,transmission,absorbance))
         return reflectance,transmission,absorbance
 
-        
+    def integrated_absorbtion(self,sim):
+        """Computes the absorption of a layer by using the volume integral of the product of the
+        imaginary part of the relative permittivity and the norm squared of the E field""" 
+        base = sim.conf.get('General','sim_dir')
+        path = os.path.join(base,'integrated_absorption.dat')
+        inpath = os.path.join(base,'energy_densities.dat')
+        freq = sim.conf.getfloat('Parameters','frequency')
+        # TODO: Assuming incident amplitude and therefore incident power is just 1 for now
+        fact = -.5*freq*c.epsilon_0
+        with open(inpath,'r') as inf:
+            lines = inf.readlines()
+            # Remove header line
+            lines.pop(0)
+            # Dict where key is layer name and value is list of length 2 containing real and
+            # imaginary parts of energy density integral
+            data = {line.strip().split(',')[0]:line.strip().split(',')[1:] for line in lines}
+        self.log.info('Energy densities: %s'%str(data))
+        with open(path,'w') as outf:
+            outf.write('# Layer, Absorption\n')
+            for layer,vals in data.items():
+                absorb = fact*float(vals[1])
+                outf.write('%s,%s\n'%(layer,absorb))
             
 class Global_Cruncher(Cruncher):
     """Computes global quantities for an entire run, instead of local quantities for an individual
@@ -996,14 +1018,14 @@ class Global_Cruncher(Cruncher):
                 sun_pow = p_wv(wvlgth_nm) 
                 Jsc_vals[i] = absorb*sun_pow*wvlgth_nm
             # Use Simpsons rule to perform the integration
-            # factor of 10 to convert A*m^-2 to mA*cm^-2
             wvlgths = wvlgths[::-1]
             Jsc_vals = Jsc_vals[::-1]
-            plt.figure()
-            plt.plot(wvlgths,Jsc_vals)
-            plt.show()
+            #plt.figure()
+            #plt.plot(wvlgths,Jsc_vals)
+            #plt.show()
             #Jsc = intg.simps(Jsc_vals,x=wvlgths,even='avg')
             Jsc = intg.trapz(Jsc_vals,x=wvlgths)
+            # factor of 10 to convert A*m^-2 to mA*cm^-2
             wv_fact = c.e/(c.c*c.h*10)
             Jsc = Jsc*wv_fact
             outf = os.path.join(base,'jsc.dat')
@@ -1021,6 +1043,13 @@ class Global_Cruncher(Cruncher):
             trans_vals = np.zeros(len(group))
             freqs = np.zeros(len(group))
             wvlgths = np.zeros(len(group))
+            spectra = np.zeros(len(group))
+            # Get solar power from chosen spectrum
+            path = self.gconf.get('General','input_power_wv')
+            wv_vec,p_vec = np.loadtxt(path,skiprows=2,usecols=(0,2),unpack=True,delimiter=',')
+            # Get interpolating function for power
+            p_wv = interpolate.interp1d(wv_vec,p_vec,kind='linear',
+                                       bounds_error=False,fill_value='extrapolate')
             # Assuming the leaves contain frequency values, sum over all of them
             for i in range(len(group)):
                 sim = group[i]
@@ -1032,25 +1061,21 @@ class Global_Cruncher(Cruncher):
                 wvlgth_nm = wvlgth*1e9
                 freqs[i] = freq
                 wvlgths[i] = wvlgth_nm
-                # Get solar power from chosen spectrum
-                path = self.gconf.get('General','input_power_wv')
-                wv_vec,p_vec = np.loadtxt(path,skiprows=2,usecols=(0,2),unpack=True,delimiter=',')
-                # Get p at wvlength by interpolation 
-                p_wv = interpolate.interp1d(wv_vec,p_vec,kind='linear',
-                                           bounds_error=False,fill_value='extrapolate')
                 sun_pow = p_wv(wvlgth_nm) 
+                spectra[i] = sun_pow
                 abs_vals[i] = sun_pow*absorb
                 ref_vals[i] = sun_pow*ref
                 trans_vals[i] = sun_pow*trans
-            # Now integrate all the weighted spectra and divide by the width of the spectra
+            # Now integrate all the weighted spectra and divide by the power of the spectra
             wvlgths = wvlgths[::-1]
             abs_vals = abs_vals[::-1]
             ref_vals = ref_vals[::-1]
             trans_vals = trans_vals[::-1]
-            width = max(wvlgths) - min(wvlgths)
-            wght_ref = intg.trapz(ref_vals,x=wvlgths)/width 
-            wght_abs = intg.trapz(abs_vals,x=wvlgths)/width
-            wght_trans = intg.trapz(trans_vals,x=wvlgths)/width
+            spectra = spectra[::-1]
+            power = intg.trapz(spectra,x=wvlgths)
+            wght_ref = intg.trapz(ref_vals,x=wvlgths)/power 
+            wght_abs = intg.trapz(abs_vals,x=wvlgths)/power
+            wght_trans = intg.trapz(trans_vals,x=wvlgths)/power
             out = os.path.join(base,'weighted_transmission_data.dat')
             with open(out,'w') as outf:
                 outf.write('# Reflection, Transmission, Absorbtion\n')
@@ -1406,36 +1431,43 @@ class Global_Plotter(Plotter):
             fig.savefig(os.path.join(base,'%s_%s_global.avg.pdf'%(quantity,avg_type)))
 
     
-    def transmission_data(self,absorbance=True,reflectance=True,transmission=True):
+    def transmission_data(self,absorbance,reflectance,transmission):
         """Plot transmissions, absorption, and reflectance assuming leaves are frequency"""
+        truthy = ['True','true','t','yes']
         for group in self.sim_groups:
             base = group[0].conf.get('General','basedir')
             self.log.info('Plotting transmission data for group at %s'%base)
             # Assuming the leaves contain frequency values, sum over all of them
-            freqs = []
-            refl_l = []
-            trans_l = []
-            absorb_l = []
-            for sim in group:
+            freqs = np.zeros(len(group))
+            refl_l = np.zeros(len(group))
+            trans_l = np.zeros(len(group))
+            absorb_l = np.zeros(len(group))
+            for i in range(len(group)):
+                sim = group[i]
                 dpath = os.path.join(sim.conf.get('General','sim_dir'),'ref_trans_abs.dat')
                 with open(dpath,'r') as f:
                     ref,trans,absorb = list(map(float,f.readlines()[1].split(',')))
                 freq = sim.conf.getfloat('Parameters','frequency')
-                freqs.append(freq)
-                trans_l.append(trans)
-                refl_l.append(ref)
-                absorb_l.append(absorb)
+                freqs[i] = freq
+                trans_l[i] = trans
+                refl_l[i] = ref
+                absorb_l[i] = absorb
+            freqs = (c.c/freqs[::-1])*1e9
+            refl_l = refl_l[::-1]
             plt.figure()
-            if absorbance:
+            if absorbance in truthy:
+                self.log.info('Plotting absorbance')
                 plt.plot(freqs,absorb_l,label='Absorption')
-            if reflectance:
+            if reflectance in truthy:
                 plt.plot(freqs,refl_l,label='Reflectance')
-            if transmission:
+            if transmission in truthy:
                 plt.plot(freqs,trans_l,label='Transmission')
             plt.legend(loc='best')
             figp = os.path.join(base,'transmission_plots.pdf')
             plt.xlabel('Frequency (Hz)') 
+            plt.ylim((0,.5))
             plt.savefig(figp)
+            plt.close()
 
 def main():
     parser = ap.ArgumentParser(description="""A wrapper around s4_sim.py to automate parameter
@@ -1487,6 +1519,7 @@ def main():
         crunchr.process_all()
         #for sim in crunchr.sims:
         #    crunchr.transmissionData(sim)
+        #    crunchr.integrated_absorbtion(sim)
     if not args.no_gcrunch:
         gcrunchr = Global_Cruncher(conf,sims,sim_groups,failed_sims)
         gcrunchr.process_all()

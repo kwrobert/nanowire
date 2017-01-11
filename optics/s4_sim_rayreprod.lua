@@ -97,8 +97,7 @@ function Simulator:search_conf(conf,str)
         par = dat[2]
         return conf[sect][par]
     else
-        print("You need to specify both the section and the parameter when using interpolation: section.param")
-        pl.utils.quit()
+        pl.utils.quit("You need to specify both the section and the parameter when using interpolation: section.param")
     end
 end
 
@@ -265,8 +264,6 @@ function Simulator:build_device()
     f_phys = self:getfloat('Parameters','frequency')
     for mat,path in pairs(self.conf['Materials']) do
         eps_r,eps_i = self:get_epsilon(f_phys,path)
-        print(mat)
-        print('Eps Real = '..eps_r)
         self.sim:AddMaterial(mat,{eps_r,eps_i})
     end
     self.sim:AddMaterial('vacuum',{1,0})
@@ -278,7 +275,14 @@ function Simulator:build_device()
     core_rad = self:getfloat('Parameters','nw_radius')
     print('Radius = '..core_rad)
     print('Period = '..vec_mag)
-    self.sim:SetLayerPatternCircle('nanowire_alshell','GaAs',{vec_mag/2,vec_mag/2},core_rad)
+    -- Hexagonal nanowire
+    dx = core_rad*math.cos(math.pi/3)
+    dy = core_rad*math.sin(math.pi/3)
+    cent = vec_mag/2
+    --verts = {cent+core_rad,cent,cent+dx,cent+dy,cent-dx,cent+dy,cent-core_rad,cent,cent-dx,cent-dy,cent+dx,cent-dy}
+    -- The vertices are specified relative to the center of the polygon
+    verts = {core_rad,0,dx,dy,-dx,dy,-core_rad,0,-dx,-dy,dx,-dy}
+    self.sim:SetLayerPatternPolygon('nanowire_alshell','GaAs',{0,0},0,verts)
     self.sim:AddLayer('substrate',0,'GaAs')
 end
 
@@ -293,8 +297,8 @@ function Simulator:set_excitation()
     self.sim:SetFrequency(f_conv)
 
     -- Define incident light. Normally incident with frequency dependent amplitude
-    E_mag = self:get_incident_amplitude(f_phys,vec_mag,self.conf["General"]["input_power"])
-    print('E_mag = '..E_mag)
+    --E_mag = self:get_incident_amplitude(f_phys,vec_mag,self.conf["General"]["input_power"])
+    --print('E_mag = '..E_mag)
     -- To define circularly polarized light, basically just stick a j (imaginary number) in front of
     -- one of your components. The handedness is determined by the component you stick the j in front
     -- of. From POV of source, looking away from source toward direction of propagation, right handed
@@ -304,7 +308,21 @@ function Simulator:set_excitation()
     -- In S4, if indicent angles are 0, p-polarization is along x-axis. The minus sign on front of the 
     -- x magnitude is just to get things to look like Anna's simulations.
     E_mag = 1
-    self.sim:SetExcitationPlanewave({0,0},{E_mag,0},{0,0})
+    if self.conf['General']['polarization'] == 'rhcp' then
+        -- Right hand circularly polarized
+        self.sim:SetExcitationPlanewave({0,0},{-E_mag,0},{-E_mag,90})
+    elseif self.conf['General']['polarization'] == 'lhcp' then
+        -- Left hand circularly polarized
+        self.sim:SetExcitationPlanewave({0,0},{-E_mag,90},{-E_mag,0})
+    elseif self.conf['General']['polarization'] == 'lpx' then
+        -- Linearly polarized along x axis (TM polarixation)
+        self.sim:SetExcitationPlanewave({0,0},{0,0},{E_mag,0})
+    elseif self.conf['General']['polarization'] == 'lpy' then
+        -- Linearly polarized along y axis (TE polarization)
+        self.sim:SetExcitationPlanewave({0,0},{E_mag,0},{0,0})
+    else 
+        pl.utils.quit('Invalid polarization specification')
+    end
 end
 
 function Simulator:clean_files(path)
@@ -328,6 +346,10 @@ function Simulator:get_fields()
     height = self:getfloat('Parameters','total_height') 
     dz = height/z_samp
     zvec = pl.List.range(0,height,dz)
+    -- Get gnoplot output of vector field
+    prefix = pl.path.join(conf['General']['sim_dir'],'vecfield')
+    print(prefix)
+    self.sim:SetBasisFieldDumpPrefix(prefix)
     if self:getbool('General','adaptive_convergence') then
         self:adaptive_convergence(x_samp,y_samp,zvec,output_file)
     else
@@ -337,21 +359,20 @@ function Simulator:get_fields()
             self.sim:GetFieldPlane(z,{x_samp,y_samp},'FileAppend',output_file)
         end
     end
-    -- Get gnoplot output of vector field
     -- For some reason this needs to be done after we compute the fields 
-    prefix = pl.path.join(conf['General']['sim_dir'],'vecfield')
-    print(prefix)
-    self.sim:SetBasisFieldDumpPrefix(prefix)
     -- Get layer patterning  
     out = pl.path.join(conf['General']['sim_dir'],'pattern.dat')
-    self.sim:OutputLayerPatternRealization('nanowire_alshell',25,25,out)
-    --for x=0,vec_mag,0.02 do
-    --	for y=0,vec_mag,0.02 do
-    --		er,ei = self.sim:GetEpsilon({x,y,1.6}) -- returns real and imag parts
-    --		io.stderr:write(x .. '\t' .. y .. '\t' .. er .. '\t' .. ei .. '\n')
-    --	end
-    --	io.stderr:write('\n')
-    --end
+    self.sim:OutputLayerPatternRealization('nanowire_alshell',x_samp,y_samp,out)
+    out = pl.path.join(conf['General']['sim_dir'],'eps_realspace.dat')
+    outf = io.open(out,'w')
+    for x=0,vec_mag,0.005 do
+    	for y=0,vec_mag,0.005 do
+    		er,ei = self.sim:GetEpsilon({x,y,1}) -- returns real and imag parts
+    		outf:write(x .. '\t' .. y .. '\t' .. er .. '\t' .. ei .. '\n')
+    	end
+    	outf:write('\n')
+    end
+    outf:close()
     --self.sim:OutputStructurePOVRay(Filename='out.pov')
 end
 
@@ -360,6 +381,10 @@ function Simulator:get_indices()
     y_samp = self:getint('General','y_samples')
     z_samp = self:getint('General','z_samples')
     height = self:getfloat('Parameters','total_height') 
+    -- Get gnoplot output of vector field
+    prefix = pl.path.join(conf['General']['sim_dir'],'vecfield')
+    print(prefix)
+    self.sim:SetBasisFieldDumpPrefix(prefix)
     dz = height/z_samp
     start_plane = math.floor(self:getfloat('Parameters','air_t')/dz)
     first = math.floor(start_plane*(x_samp*y_samp))
@@ -481,14 +506,14 @@ end
 function Simulator:get_energy_integrals()
     -- Gets energy density integrals
     --layers = {'air','ito','nanowire_alshell','nanowire_sishell','substrate'}    
-    layers = {'air','nanowire_alshell','substrate'}    
+    layers = {'air','nanowire_alshell'}    
     print('Computing energy densities ...')
     path = pl.path.join(self.conf['General']['sim_dir'],'energy_densities.dat')
     outf = io.open(path,'w')
     outf:write('# Layer, Real, Imaginary\n')
     for i,layer in ipairs(layers) do
         r,i = self.sim:GetLayerElectricEnergyDensityIntegral(layer)
-        row = string.format('layer,%s,%s',r,i)
+        row = string.format('%s,%s,%s\n',layer,r,i)
         outf:write(row)
     end
     outf:close()

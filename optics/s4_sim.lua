@@ -312,7 +312,21 @@ function Simulator:set_excitation()
     -- counterclockwise. 
     -- In S4, if indicent angles are 0, p-polarization is along x-axis. The minus sign on front of the 
     -- x magnitude is just to get things to look like Anna's simulations.
-    self.sim:SetExcitationPlanewave({0,0},{-E_mag,0},{-E_mag,90})
+    if self.conf['General']['polarization'] == 'rhcp' then
+        -- Right hand circularly polarized
+        self.sim:SetExcitationPlanewave({0,0},{-E_mag,0},{-E_mag,90})
+    elseif self.conf['General']['polarization'] == 'lhcp' then
+        -- Left hand circularly polarized
+        self.sim:SetExcitationPlanewave({0,0},{-E_mag,90},{-E_mag,0})
+    elseif self.conf['General']['polarization'] == 'lpx' then
+        -- Linearly polarized along x axis (TM polarixation)
+        self.sim:SetExcitationPlanewave({0,0},{0,0},{E_mag,0})
+    elseif self.conf['General']['polarization'] == 'lpy' then
+        -- Linearly polarized along y axis (TE polarization)
+        self.sim:SetExcitationPlanewave({0,0},{E_mag,0},{0,0})
+    else 
+        pl.utils.quit('Invalid polarization specification')
+    end
 end
 
 function Simulator:clean_files(path)
@@ -336,6 +350,10 @@ function Simulator:get_fields()
     height = self:getfloat('Parameters','total_height') 
     dz = height/z_samp
     zvec = pl.List.range(0,height,dz)
+    -- Get gnoplot output of vector field
+    prefix = pl.path.join(conf['General']['sim_dir'],'vecfield')
+    print(prefix)
+    self.sim:SetBasisFieldDumpPrefix(prefix)
     if self:getbool('General','adaptive_convergence') then
         self:adaptive_convergence(x_samp,y_samp,zvec,output_file)
     else
@@ -347,14 +365,20 @@ function Simulator:get_fields()
         end
     end
     
-    -- Get gnoplot output of vector field
-    prefix = pl.path.join(conf['General']['sim_dir'],'vecfield')
-    print(prefix)
-    self.sim:SetBasisFieldDumpPrefix(prefix)
     -- Get layer patterning  
-    out = pl.path.join(conf['General']['sim_dir'],'out.ps')
-    self.sim:OutputLayerPatternRealization('nanowire_alshell',50,50,out)
-    self.sim:OutputStructurePOVRay('out.pov')
+    -- For some reason this needs to be done after we compute the fields 
+    out = pl.path.join(conf['General']['sim_dir'],'pattern.dat')
+    self.sim:OutputLayerPatternRealization('nanowire_alshell',x_samp,y_samp,out)
+    out = pl.path.join(conf['General']['sim_dir'],'eps_realspace.dat')
+    outf = io.open(out,'w')
+    for x=0,vec_mag,0.005 do
+    	for y=0,vec_mag,0.005 do
+    		er,ei = self.sim:GetEpsilon({x,y,1}) -- returns real and imag parts
+    		outf:write(x .. '\t' .. y .. '\t' .. er .. '\t' .. ei .. '\n')
+    	end
+    	outf:write('\n')
+    end
+    outf:close()
 end
 
 function Simulator:get_indices() 
@@ -487,7 +511,7 @@ function Simulator:get_energy_integrals()
     outf:write('# Layer, Real, Imaginary\n')
     for i,layer in ipairs(layers) do
         r,i = self.sim:GetLayerElectricEnergyDensityIntegral(layer)
-        row = string.format('layer,%s,%s',r,i)
+        row = string.format('%s,%s,%s\n',layer,r,i)
         outf:write(row)
     end
     outf:close()

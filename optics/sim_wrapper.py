@@ -109,7 +109,7 @@ def get_combos(tuplist):
     log.debug("Option values dict before processing: %s",str(optionValues))
     for key, value in optionValues.items():
         # determine if we have floats or ints
-        if value.find('.') != -1 or value.find('E') != -1:
+        if value.find('.') != -1 or value.find('E') != -1 or value.find('e') != -1:
             type_converter = lambda x: float(x)
         else:
             type_converter = lambda x: int(x)
@@ -271,18 +271,22 @@ def make_nodes(conf):
 
 def convert_data(path,conf):
     """Converts text file spit out by S4 into npz format for faster loading during postprocessing"""
-    # Convert both data files
+    # Have we decided to ignore and remove H field files?
+    ignore = conf.getboolean('General','ignore_h')
+    # Convert e field data files
     bname = conf.get('General','base_name')
     efile = os.path.join(path,bname+'.E')
-    hfile = os.path.join(path,bname+'.H')
     d = pandas.read_csv(efile,delim_whitespace=True,header=None,skip_blank_lines=True)
     edata = d.as_matrix()
     econv = efile+'.raw'
     np.savez(econv,data=edata,headers=[None])
-    d = pandas.read_csv(hfile,delim_whitespace=True,header=None,skip_blank_lines=True)
-    hdata = d.as_matrix()
-    hconv = hfile+'.raw'
-    np.savez(hconv,data=hdata,headers=[None])
+    hfile = os.path.join(path,bname+'.H')
+    if not ignore:
+        # Convert h field files
+        d = pandas.read_csv(hfile,delim_whitespace=True,header=None,skip_blank_lines=True)
+        hdata = d.as_matrix()
+        hconv = hfile+'.raw'
+        np.savez(hconv,data=hdata,headers=[None])
     # Remove the old text files
     os.remove(efile)
     os.remove(hfile)

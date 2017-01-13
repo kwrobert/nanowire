@@ -129,35 +129,36 @@ class Simulation(object):
         self.log.info('Collecting raw data for sim %s',self.conf.get('General','sim_dir'))
         sim_path = self.conf.get('General','sim_dir')
         base_name = self.conf.get('General','base_name')
+        ignore = self.conf.getboolean('General','ignore_h')
         ftype = self.conf.get('General','save_as')
         if ftype == 'text':
-            e_path = os.path.join(sim_path,base_name+'.E')
-            h_path = os.path.join(sim_path,base_name+'.H')
             # Load E field data
+            e_path = os.path.join(sim_path,base_name+'.E')
             e_data, e_lookup = self.load_txt(e_path)
             self.log.debug('E shape after getting: %s',str(e_data.shape))        
             pos_inds = np.zeros((e_data.shape[0],3))
             pos_inds[:,:] = e_data[:,0:3] 
             # Load H field data
-            h_data, h_lookup = self.load_txt(h_path)
-            self.e_data = e_data
-            self.h_data = h_data
-            self.pos_inds = e_data[:,0:3] 
+            if not ignore: 
+                h_path = os.path.join(sim_path,base_name+'.H')
+                h_data, h_lookup = self.load_txt(h_path)
+            else:
+                h_data = None
             self.e_data,self.h_data,self.pos_inds = e_data,h_data,pos_inds
             self.log.info('Collection complete!')
         elif ftype == 'npz':
-            e_path = os.path.join(sim_path,base_name+'.E.raw.npz')
-            h_path = os.path.join(sim_path,base_name+'.H.raw.npz')
             # Load E field data
+            e_path = os.path.join(sim_path,base_name+'.E.raw.npz')
             e_data, e_lookup = self.load_npz(e_path)
             self.log.debug('E shape after getting: %s',str(e_data.shape))        
             pos_inds = np.zeros((e_data.shape[0],3))
             pos_inds[:,:] = e_data[:,0:3] 
             # Load H field data
-            h_data, h_lookup = self.load_npz(h_path)
-            self.e_data = e_data
-            self.h_data = h_data
-            self.pos_inds = e_data[:,0:3] 
+            if not ignore: 
+                h_path = os.path.join(sim_path,base_name+'.H.raw.npz')
+                h_data, h_lookup = self.load_npz(h_path)
+            else:
+                h_data = None
             self.e_data,self.h_data,self.pos_inds = e_data,h_data,pos_inds
             self.log.info('Collection complete!')
         else:
@@ -171,21 +172,28 @@ class Simulation(object):
         sim_path = self.conf.get('General','sim_dir')
         base_name = self.conf.get('General','base_name')
         ftype = self.conf.get('General','save_as')
+        ignore = self.conf.getboolean('General','ignore_h')
         # If data was saved into text files
         if ftype == 'text':
-            e_path = os.path.join(sim_path,base_name+'.E.crnch')
-            h_path = os.path.join(sim_path,base_name+'.H.crnch')
             # Load E field data
+            e_path = os.path.join(sim_path,base_name+'.E.crnch')
             e_data, e_lookup = self.load_txt(e_path)
             # Load H field data
-            h_data, h_lookup = self.load_txt(h_path)
+            if not ignore:
+                h_path = os.path.join(sim_path,base_name+'.H.crnch')
+                h_data, h_lookup = self.load_txt(h_path)
+            else:
+                h_data,h_lookup = None,None
         # If data was saved in in npz format
         elif ftype == 'npz':
             # Get the paths
             e_path = os.path.join(sim_path,base_name+'.E.npz')
-            h_path = os.path.join(sim_path,base_name+'.H.npz')
             e_data, e_lookup = self.load_npz(e_path)
-            h_data, h_lookup = self.load_npz(h_path)
+            if not ignore:
+                h_path = os.path.join(sim_path,base_name+'.H.npz')
+                h_data, h_lookup = self.load_npz(h_path)
+            else:
+                h_data,h_lookup = None,None
         else:
             raise ValueError('Incorrect file type specified in [General] section of config file')
         pos_inds = np.zeros((e_data.shape[0],3))
@@ -217,6 +225,7 @@ class Simulation(object):
         """Writes the data"""
         # Get the current path
         base = self.conf.get('General','sim_dir')
+        ignore = self.conf.getboolean('General','ignore_h')
         self.log.info('Writing data for %s'%base)
         fname = self.conf.get('General','base_name')
         epath = os.path.join(base,fname+'.E')
@@ -229,9 +238,10 @@ class Simulation(object):
         ftype = self.conf.get('General','save_as') 
         if ftype == 'text':
             epath = epath+'.crnch'
-            hpath= hpath+'.crnch'
             np.savetxt(epath,self.e_data,header=','.join(self.e_lookup.keys()))
-            np.savetxt(hpath,self.h_data,header=','.join(self.h_lookup.keys()))
+            if not ignore:
+                hpath= hpath+'.crnch'
+                np.savetxt(hpath,self.h_data,header=','.join(self.h_lookup.keys()))
             # Save any local averages we have computed
             for avg, mat in self.avgs.items():
                 dpath = os.path.join(base,avg+'.avg.crnch')
@@ -239,7 +249,8 @@ class Simulation(object):
         elif ftype == 'npz':
             # Save the headers and the data
             np.savez(epath,headers = np.array([self.e_lookup]), data = self.e_data)
-            np.savez(hpath,headers = np.array([self.h_lookup]), data = self.h_data)
+            if not ignore:
+                np.savez(hpath,headers = np.array([self.h_lookup]), data = self.h_data)
             # Save any local averages we have computed
             dpath = os.path.join(base,'all.avg')
             np.savez(dpath,**self.avgs)
@@ -1518,10 +1529,10 @@ def main():
     # Now do all the work
     if not args.no_crunch:
         crunchr = Cruncher(conf,sims,sim_groups,failed_sims)
-        #crunchr.process_all()
-        for sim in crunchr.sims:
-            crunchr.transmissionData(sim)
-            crunchr.integrated_absorbtion(sim)
+        crunchr.process_all()
+        #for sim in crunchr.sims:
+        #    crunchr.transmissionData(sim)
+        #    crunchr.integrated_absorbtion(sim)
     if not args.no_gcrunch:
         gcrunchr = Global_Cruncher(conf,sims,sim_groups,failed_sims)
         gcrunchr.process_all()

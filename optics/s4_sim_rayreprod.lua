@@ -438,7 +438,8 @@ function Simulator:adaptive_convergence(x_samp,y_samp,zvec,output)
     print('Beginning adaptive convergence procedure ...')
     -- Gets the fields throughout the device
     local percent_diff = 1
-    local d1 = output_file..'1'
+    --local output_file = pl.path.join(self.conf['General']['sim_dir'],self.conf["General"]["base_name"])
+    local d1 = output..'1'
     local start_basis = self:getint('Parameters','numbasis')
     self:set_basis(start_basis)
     print('Starting with '..start_basis..' number of basis terms')

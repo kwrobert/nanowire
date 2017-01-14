@@ -389,6 +389,25 @@ class Processor(object):
         assert(len(self.sims) >= 1)
         return self.sims,self.sim_groups
 
+    def get_plane(self,arr,xsamp,ysamp,zsamp,plane,pval):
+        """Given a 1D array containing values for a 3D scalar field, reshapes the array into 3D and
+        returns a 2D array containing the data on a given plane, for a specified index value (pval) of that
+        plane. So, specifying plane=x and pval=30 would return data on the 30th y,z plane (a plane
+        at the given x index). The number of samples (i.e data points) in each coordinate direction
+        need not be equal"""
+        print(len(arr))
+        print(zsamp*xsamp*ysamp)
+        scalar = arr.reshape(zsamp+1,xsamp,ysamp)
+        if plane == 'x':
+            # z along rows, y along columns
+            return scalar[:,pval,:]
+        elif plane == 'y':
+            # x along columns, z along rows
+            return scalar[:,:,pval]
+        elif plane == 'z':
+            # x along rows, y along columns
+            return scalar[pval,:,:]
+
     def process(self,sim):
         """Retrieves data for a particular simulation, then processes that data"""
         raise NotImplementedError 
@@ -1194,46 +1213,56 @@ class Plotter(Processor):
 
     def plane_2d(self,sim,quantity,plane,pval,draw=False,fixed=None):
         """Plots a heatmap of a fixed 2D plane"""
+        zs = sim.conf.getint('General','z_samples')
+        xs = sim.conf.getint('General','x_samples')
+        ys = sim.conf.getint('General','y_samples')
+        height = sim.conf.getfloat('Parameters','total_height')
         if plane == 'x' or plane == 'y':
             pval = int(pval)
         else:
             # Find the nearest zval to the one we want. This is necessary because comparing floats
             # rarely works
-            height = sim.conf.getfloat('Parameters','total_height')
-            z_samples = sim.conf.getint('General','z_samples')
-            desired_val = (height/z_samples)*int(pval)
+            desired_val = (height/zs)*int(pval)
             ind = np.abs(sim.pos_inds[:,2]-desired_val).argmin()
             pval = sim.pos_inds[ind,2]
         period = sim.conf.getfloat('Parameters','array_period')
-        dx = period/sim.conf.getfloat('General','x_samples')
-        dy = period/sim.conf.getfloat('General','y_samples')
+        dx = period/xs
+        dy = period/ys
+        dz = height/zs
+        x = np.arange(0,period,dx)
+        y = np.arange(0,period,dy)
+        z = np.arange(0,height+dz,dz)
         # Maps planes to an integer for extracting data
         plane_table = {'x': 0,'y': 1,'z':2}
         # Get the scalar values
         scalar = sim.get_scalar_quantity(quantity)
-        # Filter out any undesired data that isn't on the planes
-        mat = np.column_stack((sim.pos_inds[:,0],sim.pos_inds[:,1],sim.pos_inds[:,2],scalar))
-        planes = np.array([row for row in mat if row[plane_table[plane]] == pval])
-        self.log.debug("Planes shape: %s"%str(planes.shape))
-        # Get all unique values for x,y,z and convert them to actual values not indices
-        x,y,z = np.unique(planes[:,0])*dx,np.unique(planes[:,1])*dy,np.unique(planes[:,2])
-        # Super hacky and terrible way to fix the minimum and maximum values of the color bar
-        # for a plot across all sims
+        ## Filter out any undesired data that isn't on the planes
+        #mat = np.column_stack((sim.pos_inds[:,0],sim.pos_inds[:,1],sim.pos_inds[:,2],scalar))
+        #planes = np.array([row for row in mat if row[plane_table[plane]] == pval])
+        #self.log.debug("Planes shape: %s"%str(planes.shape))
+        ## Get all unique values for x,y,z and convert them to actual values not indices
+        #x,y,z = np.unique(planes[:,0])*dx,np.unique(planes[:,1])*dy,np.unique(planes[:,2])
         freq = sim.conf.getfloat('Parameters','frequency')
         wvlgth = (c.c/freq)*1E9
         title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(freq,wvlgth)
         if fixed:
+            # Super hacky and terrible way to fix the minimum and maximum values of the color bar
+            # for a plot across all sims
             fixed = tuple(fixed.split(':'))
         if plane == 'x':
-            cs = planes[:,-1].reshape(z.shape[0],y.shape[0])
+            #cs = planes[:,-1].reshape(z.shape[0],y.shape[0])
+            cs = self.get_plane(scalar,xs,ys,zs,plane,pval)
+            print(cs.shape)
             labels = ('y [um]','z [um]', quantity,title)
             self.heatmap2d(sim,y,z,cs,labels,'plane_2d_x',draw,fixed)
         elif plane == 'y':
-            cs = planes[:,-1].reshape(z.shape[0],x.shape[0])
+            #cs = planes[:,-1].reshape(z.shape[0],x.shape[0])
+            cs = self.get_plane(scalar,xs,ys,zs,plane,pval)
             labels = ('x [um]','z [um]', quantity,title)
             self.heatmap2d(sim,x,z,cs,labels,'plane_2d_y',draw,fixed)
         elif plane == 'z':
-            cs = planes[:,-1].reshape(y.shape[0],x.shape[0])
+            #cs = planes[:,-1].reshape(y.shape[0],x.shape[0])
+            cs = self.get_plane(scalar,xs,ys,zs,plane,pval)
             labels = ('y [um]','x [um]', quantity,title)
             self.heatmap2d(sim,x,y,cs,labels,'plane_2d_z',draw,fixed)
     

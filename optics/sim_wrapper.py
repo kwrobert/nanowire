@@ -116,16 +116,26 @@ def get_combos(tuplist):
         
         # Now we determine if we have a range or if we have actually included the values
         if value.find(':') != -1:
-            
-            # Parse the range string
-            dataRange = value.split(':')
-            dataMin,dataMax,numPoints = list(map(type_converter,dataRange))
+            # First find whether we want number of steps or size of steps
+            if value.find(';') != -1:
+                data,itertype = value.split(';')
+            else:
+                raise ValueError('You need to specify an iteration type in all your variable \
+                parameters')
 
-            # construct the option list (handles ints and floats)
-            #vals = [dataMin]
-            #while vals[-1] < dataMax:
-            #    vals.append(vals[-1]+dataStep)
-            vals = np.linspace(dataMin,dataMax,numPoints)
+            # Parse the range string
+            dataRange = data.split(':')
+            dataMin,dataMax,dataIter = list(map(type_converter,dataRange))
+            if itertype == 'numsteps':
+                vals = np.linspace(dataMin,dataMax,dataIter)
+            elif itertype == 'stepsize':
+                # construct the option list (handles ints and floats)
+                vals = [dataMin]
+                while vals[-1] < dataMax:
+                    vals.append(vals[-1]+dataIter)
+            else:
+                raise ValueError('Incorrent iteration type specified in one of your variable \
+                parameters')
 
             # assign the option list
             optionValues[key] = vals
@@ -220,13 +230,13 @@ def make_nodes(conf):
     opts = conf.items("Sorting Parameters")
     log.debug('Opts before sorting: %s',str(opts))
     # TODO: This should really be in pre_check()
-    if not all([len(x[1].split(';')) == 2 for x in opts]):
+    if not all([len(x[1].split(';')[-1].split(',')) == 2 for x in opts]):
         raise ValueError("You forgot to add a sorting key to one of your sorting parameters")
     # Sort options by key in config file
-    sort_opts = sorted(opts,key = lambda tup: tup[-1].split(';')[-1])
+    sort_opts = sorted(opts,key = lambda tup: tup[-1].split(';')[-1].split(',')[1])
     log.debug('Opts after sorting: %s',str(sort_opts))
     # Done with the sorting keys so we can discard them
-    sort_opts = [(tup[0],tup[1][0:tup[1].find(';')]) for tup in sort_opts]
+    sort_opts = [(tup[0],tup[1][0:tup[1].rfind(',')]) for tup in sort_opts]
     # Get a list of the parameters names (keys) and a list of lists of values where the ith value 
     # of the inner lists corresponds to the ith param name in keys. The inner list consists of 
     # a unique combination of variable parameters

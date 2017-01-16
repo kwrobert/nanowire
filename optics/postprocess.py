@@ -395,8 +395,6 @@ class Processor(object):
         plane. So, specifying plane=x and pval=30 would return data on the 30th y,z plane (a plane
         at the given x index). The number of samples (i.e data points) in each coordinate direction
         need not be equal"""
-        print(len(arr))
-        print(zsamp*xsamp*ysamp)
         scalar = arr.reshape(zsamp+1,xsamp,ysamp)
         if plane == 'x':
             # z along rows, y along columns
@@ -812,19 +810,19 @@ class Global_Cruncher(Cruncher):
         mag_diff_vec = np.sum((x-y)**2,axis=1)
         return mag_diff_vec
 
-    def get_slice(self):
+    def get_slice(self,sim):
         """Returns indices for data that strip out air and substrate regions"""
-        x_samples = self.gconf.getint('General','x_samples')
-        y_samples = self.gconf.getint('General','y_samples')
-        z_samples = self.gconf.getint('General','z_samples')
-        h = sum((self.gconf.getfloat('Fixed Parameters','nw_height'),self.gconf.getfloat('Fixed Parameters','substrate_t'),
-                self.gconf.getfloat('Fixed Parameters','air_t'),self.gconf.getfloat('Fixed Parameters','ito_t')))
+        x_samples = sim.conf.getint('General','x_samples')
+        y_samples = sim.conf.getint('General','y_samples')
+        z_samples = sim.conf.getint('General','z_samples')
+        h = sum((sim.conf.getfloat('Parameters','nw_height'),sim.conf.getfloat('Parameters','substrate_t'),
+                sim.conf.getfloat('Parameters','air_t'),sim.conf.getfloat('Parameters','ito_t')))
         arr = np.linspace(0,h,z_samples)
         dz = arr[1] - arr[0]
-        start_plane = int(round(self.gconf.getfloat('Fixed Parameters','air_t')/dz))
+        start_plane = int(round(sim.conf.getfloat('Parameters','air_t')/dz))
         start = start_plane*(x_samples*y_samples)
-        end_plane = int(round(sum((self.gconf.getfloat('Fixed Parameters','nw_height'),self.gconf.getfloat('Fixed Parameters','air_t'),
-                self.gconf.getfloat('Fixed Parameters','ito_t')))/dz))
+        end_plane = int(round(sum((sim.conf.getfloat('Parameters','nw_height'),sim.conf.getfloat('Parameters','air_t'),
+                sim.conf.getfloat('Parameters','ito_t')))/dz))
         end = end_plane*(x_samples*y_samples)
         return start,end
 
@@ -855,14 +853,14 @@ class Global_Cruncher(Cruncher):
         each point in space"""
         self.log.info('Running the local error computation for quantity %s',field) 
         # If we need to exclude calculate the indices
-        if exclude:
-            start,end = self.get_slice()    
-            excluded = '_excluded'
-        else:
-            start = 0
-            end = None
-            excluded = ''
         for group in self.sim_groups:
+            if exclude:
+                start,end = self.get_slice(group[0])    
+                excluded = '_excluded'
+            else:
+                start = 0
+                end = None
+                excluded = ''
             base = group[0].conf.get('General','basedir')
             errpath = os.path.join(base,'localerror_%s%s.dat'%(field,excluded))
             with open(errpath,'w') as errfile:
@@ -908,14 +906,14 @@ class Global_Cruncher(Cruncher):
 
         self.log.info('Running the global error computation for quantity %s',field) 
         # If we need to exclude calculate the indices
-        if exclude:
-            start,end = self.get_slice()    
-            excluded = '_excluded'
-        else:
-            start = 0
-            end = None
-            excluded = ''
         for group in self.sim_groups:
+            if exclude:
+                start,end = self.get_slice(group[0])    
+                excluded = '_excluded'
+            else:
+                start = 0
+                end = None
+                excluded = ''
             base = group[0].conf.get('General','basedir')
             errpath = os.path.join(base,'globalerror_%s%s.dat'%(field,excluded))
             with open(errpath,'w') as errfile:
@@ -959,14 +957,14 @@ class Global_Cruncher(Cruncher):
 
         self.log.info('Running the global error computation for quantity %s',field) 
         # If we need to exclude calculate the indices
-        if exclude:
-            start,end = self.get_slice()    
-            excluded = '_excluded'
-        else:
-            start = 0
-            end = None
-            excluded = ''
         for group in self.sim_groups:
+            if exclude:
+                start,end = self.get_slice(group[0])    
+                excluded = '_excluded'
+            else:
+                start = 0
+                end = None
+                excluded = ''
             base = group[0].conf.get('General','basedir')
             errpath = os.path.join(base,'adjacenterror_%s%s.dat'%(field,excluded))
             with open(errpath,'w') as errfile:
@@ -1217,14 +1215,15 @@ class Plotter(Processor):
         xs = sim.conf.getint('General','x_samples')
         ys = sim.conf.getint('General','y_samples')
         height = sim.conf.getfloat('Parameters','total_height')
-        if plane == 'x' or plane == 'y':
-            pval = int(pval)
-        else:
-            # Find the nearest zval to the one we want. This is necessary because comparing floats
-            # rarely works
-            desired_val = (height/zs)*int(pval)
-            ind = np.abs(sim.pos_inds[:,2]-desired_val).argmin()
-            pval = sim.pos_inds[ind,2]
+        #if plane == 'x' or plane == 'y':
+        #    pval = int(pval)
+        #else:
+        #    # Find the nearest zval to the one we want. This is necessary because comparing floats
+        #    # rarely works
+        #    desired_val = (height/zs)*int(pval)
+        #    pval = np.abs(sim.pos_inds[:,2]-desired_val).argmin()
+        #    #pval = int(sim.pos_inds[ind,2])
+        pval = int(pval)
         period = sim.conf.getfloat('Parameters','array_period')
         dx = period/xs
         dy = period/ys
@@ -1235,6 +1234,7 @@ class Plotter(Processor):
         # Maps planes to an integer for extracting data
         plane_table = {'x': 0,'y': 1,'z':2}
         # Get the scalar values
+        self.log.info('Retrieving scalar %s'%quantity)
         scalar = sim.get_scalar_quantity(quantity)
         ## Filter out any undesired data that isn't on the planes
         #mat = np.column_stack((sim.pos_inds[:,0],sim.pos_inds[:,1],sim.pos_inds[:,2],scalar))
@@ -1249,20 +1249,20 @@ class Plotter(Processor):
             # Super hacky and terrible way to fix the minimum and maximum values of the color bar
             # for a plot across all sims
             fixed = tuple(fixed.split(':'))
+        # Get the plane we wish to plot
+        self.log.info('Retrieving plane ...')
+        cs = self.get_plane(scalar,xs,ys,zs,plane,pval)
+        self.log.info('Plotting plane')
         if plane == 'x':
             #cs = planes[:,-1].reshape(z.shape[0],y.shape[0])
-            cs = self.get_plane(scalar,xs,ys,zs,plane,pval)
-            print(cs.shape)
             labels = ('y [um]','z [um]', quantity,title)
             self.heatmap2d(sim,y,z,cs,labels,'plane_2d_x',draw,fixed)
         elif plane == 'y':
             #cs = planes[:,-1].reshape(z.shape[0],x.shape[0])
-            cs = self.get_plane(scalar,xs,ys,zs,plane,pval)
             labels = ('x [um]','z [um]', quantity,title)
             self.heatmap2d(sim,x,z,cs,labels,'plane_2d_y',draw,fixed)
         elif plane == 'z':
             #cs = planes[:,-1].reshape(y.shape[0],x.shape[0])
-            cs = self.get_plane(scalar,xs,ys,zs,plane,pval)
             labels = ('y [um]','x [um]', quantity,title)
             self.heatmap2d(sim,x,y,cs,labels,'plane_2d_z',draw,fixed)
     

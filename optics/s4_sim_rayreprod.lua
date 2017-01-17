@@ -178,7 +178,6 @@ function Simulator:parse_config(path)
             if type(val) == 'string' then
                 if pl.stringx.startswith(val,'`') and pl.stringx.endswith(val,'`') then
                     tmp = pl.stringx.strip(val,'`')
-                    print(tmp)
                     tmp = pl.stringx.join('',{'result = ',tmp})
                     -- This loads the lua statement contained in tmp and evaluates it, making result
                     -- available in the current scope
@@ -340,6 +339,7 @@ function Simulator:clean_files(path)
         end
     end
 end
+
 function Simulator:get_fields()
     -- Gets the fields throughout the device
     local output_file = pl.path.join(self.conf['General']['sim_dir'],self.conf["General"]["base_name"])
@@ -386,10 +386,6 @@ function Simulator:get_indices()
     local y_samp = self:getint('General','y_samples')
     local z_samp = self:getint('General','z_samples')
     local height = self:getfloat('Parameters','total_height') 
-    -- Get gnoplot output of vector field
-    local prefix = pl.path.join(conf['General']['sim_dir'],'vecfield')
-    print(prefix)
-    self.sim:SetBasisFieldDumpPrefix(prefix)
     local dz = height/z_samp
     local start_plane = math.floor(self:getfloat('Parameters','air_t')/dz)
     local first = math.floor(start_plane*(x_samp*y_samp))

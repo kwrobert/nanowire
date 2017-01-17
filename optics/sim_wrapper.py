@@ -12,6 +12,9 @@ from profilehooks import profile
 import multiprocessing as mp 
 import pandas
 import numpy as np
+import scipy.optimize as optz
+import postprocess as pp
+import time
 
 def parse_file(path):
     """Parse the INI file provided at the command line"""
@@ -155,6 +158,9 @@ def get_combos(tuplist):
     return keys,combos 
 
 def make_leaves(nodes):
+    """Accepts a list of tuples, where the first element of the tuple is the full path to the node
+    under which the leaves will be created, and the second element is un-finalized config object for
+    that node"""
     log = logging.getLogger('sim_wrapper') 
     log.info("Building all leaves for each node...")
     # Get a list of the parameters names (keys) and a list of lists of values where the ith value 
@@ -347,9 +353,83 @@ def execute_jobs(gconf,jobs):
         with mp.Pool(processes=num_procs) as pool:
             result = pool.map(run_sim,jobs)
 
+def spectral_wrapper(opt_pars,baseconf,opt_keys):
+    """A wrapper function to handle spectral sweeps and postprocessing for the scipy minimizer. It
+    accepts the initial guess as a vector, the base config file, and the keys that map to the
+    initial guesses. It runs a spectral sweep (in parallel if specified), postprocesses the results,
+    and returns the spectrally weighted reflection"""
+    # TODO: Pass in the quantity we want to optimize as a parameter, then compute and return that
+    # instead of just assuming reflection
+
+    # Make sure we don't have any preexisting frequency dirs. We do this first so on the last
+    # iteration all our data is left intact
+    globstr = os.path.join(baseconf.get('General','basedir'),'frequency*')
+    dirs = glob.glob(globstr)
+    for adir in dirs:
+        shutil.rmtree(adir)
+    # Set the parameters we are optimizing over to the current guess
+    start = time.time()
+    for i in range(len(opt_keys)):
+        baseconf.set('Fixed Parameters',opt_keys[i],str(opt_pars[i]))
+        baseconf.remove_option('Variable Parameters',opt_keys[i])
+    # With the parameters set, we can now make the leaf directories, which should only contain
+    # frequency values
+    basepath = baseconf.get('General','basedir')
+    node = (basepath,baseconf)
+    leaves = make_leaves([node])
+    # With the leaf directories made, we can now kick off our frequency sweep
+    execute_jobs(baseconf,leaves)
+    # With our frequency sweep done, we now need to postprocess the results. 
+    # Configure logger
+    logger = configure_logger('info','postprocess',
+                              os.path.join(baseconf.get('General','basedir'),'logs'),
+                              'postprocess.log')
+    # Compute transmission data for each individual sim
+    cruncher = pp.Cruncher(baseconf)
+    cruncher.collect_sims()
+    #print(len(cruncher.sims))
+    for sim in cruncher.sims:
+        cruncher.transmissionData(sim)
+    # Now get the spectrally weighted ref,trans,absorb
+    gcruncher = pp.Global_Cruncher(baseconf,cruncher.sims,cruncher.sim_groups,cruncher.failed_sims)
+    #print(len(gcruncher.sim_groups[0]))
+    #print(len(gcruncher.sim_groups))
+    ref,trans,absorb = gcruncher.weighted_transmissionData()
+    #print(opt_keys)
+    #print(opt_pars)
+    #print('Reflection value is: %f'%ref)
+    end = time.time()
+    delta = end-start
+    #print('Total time = %f'%delta)
+    #print('Num calls after = %i'%gcruncher.weighted_transmissionData.called)
+    # This is a minimizer, we want to minimize weighted reflection
+    return ref
+
 def run_optimization(conf):
     log = logging.getLogger('sim_wrapper')
     log.info("Running optimization")
+    # Find the name of the parameters we are optimizing over, get the initial guesses for them, and
+    # carry over only a sweep through frequency
+    keys = []
+    guess = np.array([])
+    for name,param in conf.items('Variable Parameters'):
+        if not param:
+            guess_val = float(input("What is your guess for %s?: "%name))
+            keys.append(name)
+            guess = np.append(guess,guess_val)
+        elif param and not name == 'frequency':
+            log.error('You should only be sweeping through frequency')
+            quit()
+    # Make sure we don't have any sorted parameters
+    if conf.items('Sorting Parameters'):
+        log.error('You should not have any sorting parameters during an optimization')
+        quit()
+    else:
+        conf.remove_section('Sorting Parameters')
+    opt_val = optz.minimize(spectral_wrapper,guess,args=(conf,keys),method='Nelder-Mead',options={'maxiter':200})
+    print('Optimal values')
+    print(keys)
+    print(opt_val.x)
 
 def run(conf,log):
     basedir = conf.get('General','basedir')

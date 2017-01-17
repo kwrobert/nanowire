@@ -26,6 +26,14 @@ import multiprocessing as mp
 import multiprocessing.dummy as mpd
 #import pickle
 
+def counted(fn):
+    def wrapper(self):
+        wrapper.called+= 1
+        return fn(self)
+    wrapper.called= 0
+    wrapper.__name__= fn.__name__
+    return wrapper
+
 def configure_logger(level,logger_name,log_dir,logfile):
     # Get numeric level safely
     numeric_level = getattr(logging, level.upper(), None)
@@ -318,6 +326,10 @@ class Processor(object):
 
     def collect_sims(self):
         """Collect all the simulations beneath the base of the directory tree"""
+        # Clear out the lists
+        self.sims = []
+        self.sim_groups = []
+        self.failed_sims = []
         ftype = self.gconf.get('General','save_as')
         if ftype == 'text': 
             datfile = self.gconf.get('General','base_name')+'.E'
@@ -736,7 +748,7 @@ class Cruncher(Processor):
         #absorbance = 1 - reflectance
         tot = reflectance+transmission+absorbance
         delta = np.abs(tot-1)
-        self.log.info('Total = %f'%tot)
+        #self.log.info('Total = %f'%tot)
         assert(delta < .0001)
         self.log.debug('Reflectance %f'%reflectance)       
         self.log.debug('Transmission %f'%transmission)       
@@ -1061,6 +1073,7 @@ class Global_Cruncher(Cruncher):
                 out.write('%f\n'%Jsc)
             print('Jsc = %f'%Jsc)
 
+    @counted
     def weighted_transmissionData(self):
         """Computes spectrally weighted absorption,transmission, and reflection""" 
         for group in self.sim_groups:
@@ -1108,7 +1121,7 @@ class Global_Cruncher(Cruncher):
             with open(out,'w') as outf:
                 outf.write('# Reflection, Transmission, Absorbtion\n')
                 outf.write('%f,%f,%f'%(wght_ref,wght_trans,wght_abs))
-        return None 
+        return wght_ref,wght_trans,wght_abs 
 
 class Plotter(Processor):
     """Plots all the things listed in the config file"""

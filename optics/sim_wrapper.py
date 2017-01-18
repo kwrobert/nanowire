@@ -12,6 +12,9 @@ from profilehooks import profile
 import multiprocessing as mp 
 import pandas
 import numpy as np
+import scipy.optimize as optz
+import postprocess as pp
+import time
 
 def parse_file(path):
     """Parse the INI file provided at the command line"""
@@ -155,6 +158,9 @@ def get_combos(tuplist):
     return keys,combos 
 
 def make_leaves(nodes):
+    """Accepts a list of tuples, where the first element of the tuple is the full path to the node
+    under which the leaves will be created, and the second element is un-finalized config object for
+    that node"""
     log = logging.getLogger('sim_wrapper') 
     log.info("Building all leaves for each node...")
     # Get a list of the parameters names (keys) and a list of lists of values where the ith value 
@@ -311,14 +317,15 @@ def run_sim(jobtup):
     jobpath,jobconf = jobtup
     timed = jobconf.getboolean('General','save_time')
     tout = os.path.join(jobpath,'timing.dat')
+    simlog = os.path.join(jobpath,'sim.log')
     script = jobconf.get('General','sim_script')
     ini_file = os.path.join(jobpath,'sim_conf.ini')
     if timed:
         log.debug('Executing script with timing wrapper ...')
-        cmd = 'command time -vv -o %s lua %s %s'%(tout,script,ini_file)
+        cmd = 'command time -vv -o %s lua %s %s 2>&1 | tee %s'%(tout,script,ini_file,simlog)
         #cmd = '/usr/bin/perf stat -o timing.dat -r 5 /usr/bin/lua %s %s'%(script,ini_file)
     else:
-        cmd = 'command lua %s %s'%(script,ini_file)
+        cmd = 'command lua %s %s 2>&1 | tee %s'%(script,ini_file,simlog)
     log.debug('Subprocess command: %s',cmd)
     relpath = os.path.relpath(jobpath,jobconf.get('General','treebase'))
     log.info("Starting simulation for %s ...",relpath)
@@ -326,6 +333,7 @@ def run_sim(jobtup):
     #log.info('Simulation stderr: %s',completed.stderr)
     log.info("Simulation stderr: %s",completed.stderr)
     log.debug('Simulation stdout: %s',completed.stdout)
+    # Convert text data files to npz binary files
     if jobconf.get('General','save_as') == 'npz':
         log.info('Converting data at %s to npz format',relpath)
         convert_data(jobpath,jobconf)
@@ -347,9 +355,141 @@ def execute_jobs(gconf,jobs):
         with mp.Pool(processes=num_procs) as pool:
             result = pool.map(run_sim,jobs)
 
+def spectral_wrapper(opt_pars,baseconf,opt_keys):
+    """A wrapper function to handle spectral sweeps and postprocessing for the scipy minimizer. It
+    accepts the initial guess as a vector, the base config file, and the keys that map to the
+    initial guesses. It runs a spectral sweep (in parallel if specified), postprocesses the results,
+    and returns the spectrally weighted reflection"""
+    # TODO: Pass in the quantity we want to optimize as a parameter, then compute and return that
+    # instead of just assuming reflection
+    log=logging.getLogger('sim_wrapper')
+    # Make sure we don't have any preexisting frequency dirs. We do this first so on the last
+    # iteration all our data is left intact
+    log.info('Param keys: %s'%str(opt_keys))
+    log.info('Current values %s'%str(opt_pars))
+    basedir = baseconf.get('General','basedir')
+    globstr = os.path.join(basedir,'frequency*')
+    dirs = glob.glob(globstr)
+    for adir in dirs:
+        shutil.rmtree(adir)
+    # Set the parameters we are optimizing over to the current guess
+    start = time.time()
+    for i in range(len(opt_keys)):
+        baseconf.set('Fixed Parameters',opt_keys[i],str(opt_pars[i]))
+        baseconf.remove_option('Variable Parameters',opt_keys[i])
+    # With the parameters set, we can now make the leaf directories, which should only contain
+    # frequency values
+    basepath = baseconf.get('General','basedir')
+    node = (basepath,baseconf)
+    leaves = make_leaves([node])
+    # Let's reuse the convergence information from the previous iteration if it exists
+    # NOTE: This kind of assumes your initial guess was somewhat decent with regards to the in plane
+    # geometric variables and the optimizer is staying relatively close to that initial guess. If 
+    # the optimizer is moving far away from its previous guess at each step, then the fact that a 
+    # specific frequency may have been converged previously does not mean it will still be converged 
+    # with this new set of variables. 
+    info_file = os.path.join(basedir,'conv_info.txt')
+    if os.path.isfile(info_file):
+        with open(info_file,'r') as info:
+            for line in info:
+                conf_path,numbasis,conv_status = line.strip().split(',')
+                sim_conf = parse_file(conf_path)
+                rel = os.path.relpath(conf_path,basedir)
+                log.info('Simulation at %s is %s at %s basis terms'%(rel,conv_status,numbasis))
+                # Turn off adaptive convergence for all the sims that have converged and set their number of
+                # basis terms to the proper value so we continue to use that value
+                if conv_status == 'converged':
+                    sim_conf.set('General','adaptive_convergence','False')
+                    sim_conf.set('Parameters','numbasis',numbasis)
+                    with open(conf_path,'w') as configfile:
+                        sim_conf.write(configfile)
+                    # We have to recreate the converged_at.txt file because it gets deleted every
+                    # iteration and we need it to create the info file later on
+                    fpath = os.path.join(os.path.dirname(conf_path),'converged_at.txt')
+                    with open(fpath,'w') as conv_at:
+                        conv_at.write('%s\n'%numbasis)
+                # For sims that haven't converged, lets at least set the number of basis terms to the last
+                # tested value so we're closer to our goal of convergence
+                elif conv_status == 'unconverged':
+                    sim_conf.set('Parameters','numbasis',numbasis)
+                    with open(conf_path,'w') as configfile:
+                        sim_conf.write(configfile)
+    # With the leaf directories made and the number of basis terms adjusted, we can now kick off our frequency sweep
+    execute_jobs(baseconf,leaves)
+    # With our frequency sweep done, we now need to postprocess the results. 
+    # Configure logger
+    logger = configure_logger('error','postprocess',
+                              os.path.join(baseconf.get('General','basedir'),'logs'),
+                              'postprocess.log')
+    # Compute transmission data for each individual sim
+    cruncher = pp.Cruncher(baseconf)
+    cruncher.collect_sims()
+    #print(len(cruncher.sims))
+    for sim in cruncher.sims:
+        cruncher.transmissionData(sim)
+    # Now get the spectrally weighted ref,trans,absorb
+    gcruncher = pp.Global_Cruncher(baseconf,cruncher.sims,cruncher.sim_groups,cruncher.failed_sims)
+    #print(len(gcruncher.sim_groups[0]))
+    #print(len(gcruncher.sim_groups))
+    ref,trans,absorb = gcruncher.weighted_transmissionData()
+    #print(opt_keys)
+    #print(opt_pars)
+    #print('Reflection value is: %f'%ref)
+    end = time.time()
+    delta = end-start
+    # Lets store information we discovered from our adaptive convergence procedure so we can resue
+    # it in the next iteration.
+    if baseconf.getboolean('General','adaptive_convergence'):
+        log.info('Storing adaptive convergence results ...')
+        with open(info_file,'w') as info:
+            conv_files = glob.glob(os.path.join(basedir,'**/converged_at.txt'))
+            for convf in conv_files:
+                simpath = os.path.join(os.path.dirname(convf),'sim_conf.ini')
+                with open(convf,'r') as cfile:
+                    numbasis = cfile.readline().strip()
+                info.write('%s,%s,%s\n'%(simpath,numbasis,'converged'))
+            nconv_files = glob.glob(os.path.join(basedir,'**/not_converged_at.txt'))
+            for nconvf in nconv_files:
+                simpath = os.path.join(os.path.dirname(nconvf),'sim_conf.ini')
+                with open(nconvf,'r') as cfile:
+                    numbasis = cfile.readline().strip()
+                info.write('%s,%s,%s\n'%(simpath,numbasis,'unconverged'))
+
+    #print('Total time = %f'%delta)
+    #print('Num calls after = %i'%gcruncher.weighted_transmissionData.called)
+    # This is a minimizer, we want to maximize absorbtion and thus minimize the sum of 
+    # weighted reflection and transmission
+    return ref+trans
+
 def run_optimization(conf):
     log = logging.getLogger('sim_wrapper')
     log.info("Running optimization")
+    # Find the name of the parameters we are optimizing over, get the initial guesses for them, and
+    # carry over only a sweep through frequency
+    keys = []
+    guess = np.array([])
+    for name,param in conf.items('Variable Parameters'):
+        if not param:
+            guess_val = float(input("What is your guess for %s?: "%name))
+            keys.append(name)
+            guess = np.append(guess,guess_val)
+        elif param and not name == 'frequency':
+            log.error('You should only be sweeping through frequency')
+            quit()
+    # Make sure we don't have any sorted parameters
+    if conf.items('Sorting Parameters'):
+        log.error('You should not have any sorting parameters during an optimization')
+        quit()
+    else:
+        conf.remove_section('Sorting Parameters')
+    opt_val = optz.minimize(spectral_wrapper,
+                            guess,
+                            args=(conf,keys),
+                            method='Nelder-Mead',
+                            options={'maxiter':200,'disp':True})
+    print('Optimal values')
+    print(keys)
+    print(opt_val.x)
 
 def run(conf,log):
     basedir = conf.get('General','basedir')

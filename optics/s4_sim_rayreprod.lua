@@ -388,7 +388,8 @@ function Simulator:get_indices()
     local height = self:getfloat('Parameters','total_height') 
     local dz = height/z_samp
     local start_plane = math.floor(self:getfloat('Parameters','air_t')/dz)
-    local first = math.floor(start_plane*(x_samp*y_samp))
+    -- Remember lua tables are indexed from 1
+    local first = math.floor(start_plane*(x_samp*y_samp)+1)
     local end_plane = math.floor((self:getfloat('Parameters','nw_height')+self:getfloat('Parameters','air_t')+
             self:getfloat('Parameters','ito_t'))/dz)
     local last = math.floor(end_plane*(x_samp*y_samp))
@@ -404,6 +405,8 @@ function Simulator:calc_diff(d1,d2,exclude)
         start_row = 1
         end_row = -1
     end
+    print('Start row = '..start_row)
+    print('End row = '..end_row)
     --print(pl.pretty.write(d1))
     local f1 = pl.array2d.slice(d1,start_row,4,end_row,-1)
     local f2 = pl.array2d.slice(d2,start_row,4,end_row,-1)    
@@ -430,11 +433,32 @@ function Simulator:calc_diff(d1,d2,exclude)
     return diff
 end
 
+function Simulator:calc_diff_fast(d1,d2,exclude)
+    local d1 = d1..'.E'
+    local d2 = d2..'.E'
+    local exc = exclude or true
+    if exc then
+        start_row,end_row = self:get_indices()
+    else
+        start_row = 1
+        end_row = -1
+    end
+    script = self.conf['General']['calc_diff_script']
+    cmd = 'python3 '..script
+    cmd = cmd..' '..d1..' '..d2..' '..'--start '..start_row..' --end '..end_row     
+    print(cmd)
+    file = io.popen(cmd,'r')
+    out = file:read()
+    print('Percent Difference = '..out)
+    val = tonumber(out)
+    return val
+end
+
 function Simulator:adaptive_convergence(x_samp,y_samp,zvec,output)
     print('Beginning adaptive convergence procedure ...')
     -- Gets the fields throughout the device
     local percent_diff = 1
-    --local output_file = pl.path.join(self.conf['General']['sim_dir'],self.conf["General"]["base_name"])
+    local output = pl.path.join(self.conf['General']['sim_dir'],self.conf["General"]["base_name"])
     local d1 = output..'1'
     local start_basis = self:getint('Parameters','numbasis')
     self:set_basis(start_basis)
@@ -442,25 +466,24 @@ function Simulator:adaptive_convergence(x_samp,y_samp,zvec,output)
     for i, z in ipairs(zvec) do
         self.sim:GetFieldPlane(z,{x_samp,y_samp},'FileAppend',d1)
     end
-    local data1 = pl.data.read(d1..'.E',{no_convert=true})
+    --local data1 = pl.data.read(d1..'.E',{no_convert=true})
     local iter = 1
-    -- Calculate indices to select only nanowire layers
     local new_basis = start_basis 
     local max_diff = self:getfloat('General','max_diff') or .1
     local max_iter = self:getfloat('General','max_iter') or 12
     while percent_diff > max_diff and iter < max_iter do
         print('ITERATION '..iter)
-        new_basis = new_basis + 10
-        local d2 = output_file..'2'
+        new_basis = new_basis + 20
+        local d2 = output..'2'
         self.sim:SetNumG(new_basis)
         self:set_excitation()
         print('Computing solution with '..new_basis..' number of basis terms')
         for i,z in ipairs(zvec) do 
             self.sim:GetFieldPlane(z,{x_samp,y_samp},'FileAppend',d2)
         end
-        local data2 = pl.data.read(d2..'.E',{no_convert=true})
-        percent_diff = self:calc_diff(data1,data2)
-        data1 = data2 
+        --local data2 = pl.data.read(d2..'.E',{no_convert=true})
+        percent_diff = self:calc_diff_fast(d1,d2)
+        --data1 = data2 
         -- Clean up the files
         self:clean_files(d1)
         pl.file.move(d2..'.E',d1..'.E')
@@ -470,13 +493,15 @@ function Simulator:adaptive_convergence(x_samp,y_samp,zvec,output)
     -- Move files to expected name and record number of basis terms
     if percent_diff > .1 then
         print('Exceeded maximum number of iterations!')
-        local conv_file = pl.path.join(self.conf['General']['sim_dir'],'not_converged_at.txt')
+        conv_file = pl.path.join(self.conf['General']['sim_dir'],'not_converged_at.txt')
     else
         print('Converged at '..new_basis..' basis terms')
-        local conv_file = pl.path.join(self.conf['General']['sim_dir'],'converged_at.txt')
+        conv_file = pl.path.join(self.conf['General']['sim_dir'],'converged_at.txt')
     end
-    pl.file.move(d1..'.E',output_file..'.E')
-    pl.file.move(d1..'.H',output_file..'.H')
+    print(new_basis)
+    print(conv_file)
+    pl.file.move(d1..'.E',output..'.E')
+    pl.file.move(d1..'.H',output..'.H')
     pl.file.write(conv_file,tostring(new_basis)..'\n')
 end
 

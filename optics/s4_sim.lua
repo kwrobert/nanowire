@@ -278,7 +278,7 @@ function Simulator:build_device()
     -- Add patterning to section with AlInP shell
     core_rad = self:getfloat('Parameters','nw_radius')
     shell_rad = core_rad + self:getfloat('Parameters','shell_t')
-    --self.sim:SetLayerPatternCircle('nanowire_alshell','AlInP',{vec_mag/2,vec_mag/2},shell_rad)
+    self.sim:SetLayerPatternCircle('nanowire_alshell','AlInP',{vec_mag/2,vec_mag/2},shell_rad)
     self.sim:SetLayerPatternCircle('nanowire_alshell','GaAs',{vec_mag/2,vec_mag/2},core_rad)
     --self.sim:SetLayerPatternCircle('nanowire_alshell','AlInP',{0,0},shell_rad)
     --self.sim:SetLayerPatternCircle('nanowire_alshell','GaAs',{0,0},core_rad)
@@ -349,7 +349,9 @@ function Simulator:get_fields()
     local x_samp = self:getint('General','x_samples')
     local y_samp = self:getint('General','y_samples')
     local z_samp = self:getint('General','z_samples')
-    local height = self:getfloat('Parameters','total_height') 
+    --local height = self:getfloat('Parameters','total_height')
+    -- Just get the fields from the ITO thru the nanowire and into the 1st micron of substrate
+    local height = self:getfloat('Parameters','nw_height')+self:getfloat('Parameters','ito_t')+1
     local dz = height/z_samp
     local vec_mag = self:getfloat('Parameters','array_period')
     local zvec = pl.List.range(0,height,dz)

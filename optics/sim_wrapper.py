@@ -373,7 +373,6 @@ def spectral_wrapper(opt_pars,baseconf,opt_keys):
     for adir in dirs:
         shutil.rmtree(adir)
     # Set the parameters we are optimizing over to the current guess
-    start = time.time()
     for i in range(len(opt_keys)):
         baseconf.set('Fixed Parameters',opt_keys[i],str(opt_pars[i]))
         baseconf.remove_option('Variable Parameters',opt_keys[i])
@@ -427,16 +426,14 @@ def spectral_wrapper(opt_pars,baseconf,opt_keys):
     #print(len(cruncher.sims))
     for sim in cruncher.sims:
         cruncher.transmissionData(sim)
-    # Now get the spectrally weighted ref,trans,absorb
+    # Now get the fraction of photons absorbed
     gcruncher = pp.Global_Cruncher(baseconf,cruncher.sims,cruncher.sim_groups,cruncher.failed_sims)
     #print(len(gcruncher.sim_groups[0]))
     #print(len(gcruncher.sim_groups))
-    ref,trans,absorb = gcruncher.weighted_transmissionData()
+    photon_fraction = gcruncher.Jsc()[0] 
     #print(opt_keys)
     #print(opt_pars)
     #print('Reflection value is: %f'%ref)
-    end = time.time()
-    delta = end-start
     # Lets store information we discovered from our adaptive convergence procedure so we can resue
     # it in the next iteration.
     if baseconf.getboolean('General','adaptive_convergence'):
@@ -457,9 +454,9 @@ def spectral_wrapper(opt_pars,baseconf,opt_keys):
 
     #print('Total time = %f'%delta)
     #print('Num calls after = %i'%gcruncher.weighted_transmissionData.called)
-    # This is a minimizer, we want to maximize absorbtion and thus minimize the sum of 
-    # weighted reflection and transmission
-    return ref+trans
+    # This is a minimizer, we want to maximize the fraction of photons absorbed and thus minimize
+    # 1 minus that fraction
+    return 1-photon_fraction
 
 def run_optimization(conf):
     log = logging.getLogger('sim_wrapper')
@@ -482,14 +479,19 @@ def run_optimization(conf):
         quit()
     else:
         conf.remove_section('Sorting Parameters')
+    # Default tolerance in parameters is .0001, which is to the 10ths of nanometers. Pretty sure we
+    # can't design nanowires with subnanometer precision so this tolerance should be sufficient
+    # Same tolerance for the function value (fraction of absorbed photons)
     opt_val = optz.minimize(spectral_wrapper,
                             guess,
                             args=(conf,keys),
                             method='Nelder-Mead',
                             options={'maxiter':200,'disp':True})
-    print('Optimal values')
-    print(keys)
-    print(opt_val.x)
+    log.info(opt_val.message)
+    log.info('Optimal values')
+    log.info(keys)
+    log.info(opt_val.x)
+    return opt_val.x
 
 def run(conf,log):
     basedir = conf.get('General','basedir')

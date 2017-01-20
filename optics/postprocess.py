@@ -1032,12 +1032,14 @@ class Global_Cruncher(Cruncher):
 
     def Jsc(self):
         """Computes photocurrent density"""
+        Jsc_list = []
         for group in self.sim_groups:
             base = group[0].conf.get('General','basedir')
             self.log.info('Computing photocurrent density for group at %s'%base)
             Jsc_vals = np.zeros(len(group))
             freqs = np.zeros(len(group))
             wvlgths = np.zeros(len(group))
+            spectra = np.zeros(len(group))
             # Assuming the leaves contain frequency values, sum over all of them
             for i in range(len(group)):
                 sim = group[i]
@@ -1056,24 +1058,30 @@ class Global_Cruncher(Cruncher):
                 p_wv = interpolate.interp1d(wv_vec,p_vec,kind='linear',
                                            bounds_error=False,fill_value='extrapolate')
                 sun_pow = p_wv(wvlgth_nm) 
+                spectra[i] = sun_pow*wvlgth_nm
                 Jsc_vals[i] = absorb*sun_pow*wvlgth_nm
             # Use Simpsons rule to perform the integration
             wvlgths = wvlgths[::-1]
             Jsc_vals = Jsc_vals[::-1]
+            spectra = spectra[::-1]
             #plt.figure()
             #plt.plot(wvlgths,Jsc_vals)
             #plt.show()
             #Jsc = intg.simps(Jsc_vals,x=wvlgths,even='avg')
-            Jsc = intg.trapz(Jsc_vals,x=wvlgths)
-            # factor of 10 to convert A*m^-2 to mA*cm^-2
-            wv_fact = c.e/(c.c*c.h*10)
-            Jsc = Jsc*wv_fact
+            Jsc = intg.trapz(Jsc_vals,x=wvlgths*1e9)
+            power = intg.trapz(spectra,x=wvlgths*1e9)
+            # factor of 1/10 to convert A*m^-2 to mA*cm^-2
+            #wv_fact = c.e/(c.c*c.h*10)
+            #wv_fact = .1
+            #Jsc = (Jsc*wv_fact)/power
+            Jsc = Jsc/power
             outf = os.path.join(base,'jsc.dat')
             with open(outf,'w') as out:
                 out.write('%f\n'%Jsc)
             print('Jsc = %f'%Jsc)
+            Jsc_list.append(Jsc)
+        return Jsc_list
 
-    @counted
     def weighted_transmissionData(self):
         """Computes spectrally weighted absorption,transmission, and reflection""" 
         for group in self.sim_groups:
@@ -1571,10 +1579,9 @@ def main():
     # Now do all the work
     if not args.no_crunch:
         crunchr = Cruncher(conf,sims,sim_groups,failed_sims)
-        crunchr.process_all()
-        #for sim in crunchr.sims:
-        #    crunchr.transmissionData(sim)
-        #    crunchr.integrated_absorbtion(sim)
+        #crunchr.process_all()
+        for sim in crunchr.sims:
+            crunchr.transmissionData(sim)
     if not args.no_gcrunch:
         gcrunchr = Global_Cruncher(conf,sims,sim_groups,failed_sims)
         gcrunchr.process_all()

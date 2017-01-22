@@ -144,6 +144,7 @@ def get_combos(tuplist):
             optionValues[key] = vals
         else:
             # store the typed out values
+            value = value.split(';')[0]
             dataList = value.split(',')
             dataList = list(map(type_converter,dataList))
             optionValues[key] = dataList

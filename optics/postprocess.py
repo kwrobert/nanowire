@@ -1579,9 +1579,9 @@ def main():
     # Now do all the work
     if not args.no_crunch:
         crunchr = Cruncher(conf,sims,sim_groups,failed_sims)
-        #crunchr.process_all()
-        for sim in crunchr.sims:
-            crunchr.transmissionData(sim)
+        crunchr.process_all()
+        #for sim in crunchr.sims:
+        #    crunchr.transmissionData(sim)
     if not args.no_gcrunch:
         gcrunchr = Global_Cruncher(conf,sims,sim_groups,failed_sims)
         gcrunchr.process_all()

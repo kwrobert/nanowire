@@ -362,6 +362,9 @@ def spectral_wrapper(opt_pars,baseconf,opt_keys):
     and returns the spectrally weighted reflection"""
     # TODO: Pass in the quantity we want to optimize as a parameter, then compute and return that
     # instead of just assuming reflection
+    # Optimizing shell thickness could result is negative thickness so we need to take absolute
+    # value here
+    opt_pars[0] = abs(opt_pars[0])
     log=logging.getLogger('sim_wrapper')
     # Make sure we don't have any preexisting frequency dirs. We do this first so on the last
     # iteration all our data is left intact

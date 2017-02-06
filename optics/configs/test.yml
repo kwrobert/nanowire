@@ -1,0 +1,230 @@
+General:
+    
+    # Base directory under which to run your simulation(s)
+    basedir: '/home/kyle_roertson/schoolwork/gradschool/nanowire/DATA/rcwa_sims/abstract_optimization'
+    # Same as above but remains untouched during buildout of directory tree
+    treebase: '/home/kyle_robertson/schoolwork/gradschool/nanowire/DATA/rcwa_sims/abstract_optimization'
+    # Base length unit defined relative to a meter (so nm would be 1E-9)
+    base_unit: '1E-6'
+    # Path to sun input power file
+    input_power: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/Input_sun_power.txt'
+    input_power_wv: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/ASTMG173.csv'
+    # Output file base name for fields 
+    base_name: 'field_data'
+    # Number of output sample in the x, y, and z directions
+    # every 2 nm
+    x_samples: '`%(Parameters.array_period)s*500`'
+    y_samples: '`%(Parameters.array_period)s*500`'
+    # every 10 nm
+    z_samples: '`%(Parameters.alinp_height)s*100`'
+    r_samples : 50
+    theta_samples : 360
+    # Would you like to post process automatically after your run? (Leave empty for no,
+    # or populate with anything if yes)
+    postprocess: False
+    # Run postprocessing in parallel?
+    post_parallel: False
+    # Run sims in parallel?
+    parallel: True
+    # Adaptive convergence. This will run multiple sims (up to max_iter of them) for each set 
+    # of params, increasing the number of basis terms until convergenced within the specified difference
+    adaptive_convergence: True
+    max_iter: 4
+    max_diff: .02
+    # The number of cores you would like to keep free. In other words, the number of cores
+    # you would NOT like to use for running sims. 
+    reserved_cores : 2
+    # Would you like to save the plots for each sim?
+    save_plots: True
+    # Would you like to show the plots during postprocessing in real time?
+    show_plots: False
+    # The location of the script file to be run by the wrapper
+    sim_script: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/optics/s4_sim.lua'
+    # File type to save as. Choose from (text, npz)
+    save_as: 'text'
+    # Save timing data?
+    save_time: True
+    # The polarization of incident light (all normally incident)
+    # Right Hand Circularly Polarized : rhcp
+    # Left Hand Circularly Polarized : lhcp
+    # Linearly Polarized Along X : lpx
+    # Linearly Polarized Along Y : lpy
+    polarization: 'rhcp'
+    # Ignore and delete H field fields to save disk space
+    ignore_h: True
+    # The python script for calculating field differences during the adaptive convergence procedure in lua.
+    # Its painfully slow to parse the text files and do the matrix manipulations in lua
+    calc_diff_script: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/optics/diff_calc.py'
+
+Simulation:
+# These options configure the various FMM formulations used within the simulation. See
+# the S4 docs and paper for details 
+
+## These are the defaults
+#Verbosity = 0
+#LatticeTruncation = Circular
+#DiscretizedEpsilon = False
+#DiscretizationResolution = 8
+#PolarizationDecomposition = False
+#PolarizationBasis = Default
+#LanczosSmoothing = False
+#SubpixelSmoothing = False
+#ConserveMemory = False
+    Verbosity: 1
+    LatticeTruncation: 'Circular'
+    DiscretizedEpsilon: False
+    DiscretizationResolution: 8
+    PolarizationDecomposition: True
+    PolarizationBasis: 'Default'
+    LanczosSmoothing: False
+    SubpixelSmoothing: False
+    ConserveMemory: False
+
+Materials:
+    # Each entry should contain the desired name for the material, and the path to its nk file 
+    ITO: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/008_ITO_nk_Hz.txt'
+    AlInP: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/009_AlInP_nk_Hz.txt'
+    GaAs: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/006_GaAs_nk_Walker_modified_Hz.txt '
+    SiO2: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/004_SiO2_nk_Hz.txt'
+    Cyclotene: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/007_Cyclotrene_nk_Hz.txt'
+
+Parameters:
+    # Fixed parameters are simply parameters with a single value
+    Fixed:
+        nw_height: 3
+        alinp_height: 3
+        sio2_height: 0
+        substrate_t: 100
+        shell_t: 0
+        ito_t: .3
+        air_t: 0
+        emitter_t: .01
+        intrinsic_t: .05
+        numbasis: 120
+    # Variable parameters are parameters that need to be swept through. 
+    # itertype can be either 'numsteps' or 'stepsize'. 'numsteps' would then cause the
+    # 'step' key to be interpreted as the number of steps between the starting and ending
+    # value. 'stepsize' would cause the 'step' key to be interpreted as the size of the
+    # step to be taken between values in the sweep. Both itertypes are inclusive of the
+    # endpoint 
+    Variable:
+        frequency:
+            itertype: numsteps
+            start: 333102731111111.1
+            end: 856549880000000.0
+            step: 80 
+    # Sorting parameters are used to construct a directory tree organized by parameter
+    # value. They are identical to Variable parameters with the addition of the 'key'
+    # argument. This specifies at which level the parameter should be placed in the
+    # directory tree. They keys are relative, so smaller numbers go closer to the top and
+    # larger numbers closer to the bottom, but do not correspond to an absolute level in
+    # the tree. 
+    Sorting:
+        array_period:
+            key: 1
+            itertype: stepsize
+            start: .3
+            end: .4
+            step: .05 
+        nw_radius:
+            key: 2
+            itertype: numsteps
+            start: .06
+            end: .08
+            step: 3 
+    # Evaluated parameters are parameters that depend on the value of some other parameter
+    # in the set. Here you can specify any  expression. Wherever you wish
+    # to insert the value of a given parameter, simply put that parameters name (as
+    # written somewhere above) and surround it in back ticks. 
+    Evaluated:
+        shell_t: .11-`nw_radius`
+
+Cruncher:
+    # What quantities would you like to calculate for each simulation?
+    # The quantities specific to each simulation that you would like to calculate. Specify
+    # compute: False 
+    # to disable the calculation, and True to enable it. Arguments can be passed to each
+    # option as a list. If you would like to run the function multiple times with multiple
+    # sets of arguments, specify a list of lists like so:
+    # single run: ['arg1',3,'arg2']
+    # multiple runs: [['arg1,3,'arg2'],['arg3',4,'arg4']]
+    normE:
+        compute: False
+        args:
+    normEsquared:
+        compute: False
+        args:
+    normH:
+        compute: False
+        args:
+    normHsquared:
+        compute: False
+        args:
+    genRate:
+        compute: False
+        args:
+    angularAvg:
+        compute: False
+        args: ['genRate']
+    transmissionData:
+        compute: False
+        args:
+    integrated_absorbtion:
+        compute: False
+        args:
+
+Global_Cruncher:
+# Compute global quantities
+# Parameters:
+# 1) The field to compute the error of
+# 2) Exclude or do not exclude the air and substrate regions when 
+#    computing the error
+# Example: global_error=E,True
+    local_error:
+        compute: False
+        args: E
+    global_error:
+        compute: False
+        args: ['E',True]
+    global_avg:
+        compute: False
+        args: ['genRate','angularAvg']
+    Jsc:
+        compute: False
+        args:
+    weighted_transmissionData:
+        compute: False
+        args:
+
+Plotter:
+# If you do, what kind of plots would you like to generate?
+# Must choose from a list of supported options!!!
+    full_3d:
+        compute: False
+        args: ['normE']
+    planes_3d: 
+        compute: False
+        args: ['normE',25,25]
+    plane_2d:
+    # 1) Value to plot
+    # 2) x,y, or z plane?
+    # 3) Which plane value?
+    # 4) Draw nanowire components? (default: False)
+    # 5) Fix colorbar limits? (default: False)
+        compute: True
+        args: [['normE',x,50,True ],['normE','z',160,True],['normEsquared','z',160,True ],['normEsquared','x',50,True]]
+    fixed_line:
+        compute: True
+        args: ['normE','z',25,25]
+
+Global_Plotter:
+    convergence:
+        compute: False
+        args: [['E','global','log'],['E','local','log']]
+    global_avg: 
+        compute: False
+        args: ['genRate','angularAvg']
+    transmission_data:
+        # Absorbtion, Reflectance, Transmission (pass false to disable one) 
+        compute: True
+        args: [False,True,False]

@@ -1233,8 +1233,10 @@ class Plotter(Processor):
     def plane_2d(self,sim,quantity,plane,pval,draw=False,fixed=None):
         """Plots a heatmap of a fixed 2D plane"""
         zs = sim.conf.getint('General','z_samples')
-        xs = sim.conf.getint('General','x_samples')
-        ys = sim.conf.getint('General','y_samples')
+        xs = sim.conf.get('General','x_samples')
+        xs = int(float(xs))
+        ys = sim.conf.get('General','y_samples')
+        ys = int(float(ys))
         height = sim.conf.getfloat('Parameters','total_height')
         #if plane == 'x' or plane == 'y':
         #    pval = int(pval)
@@ -1579,9 +1581,9 @@ def main():
     # Now do all the work
     if not args.no_crunch:
         crunchr = Cruncher(conf,sims,sim_groups,failed_sims)
-        #crunchr.process_all()
-        for sim in crunchr.sims:
-            crunchr.transmissionData(sim)
+        crunchr.process_all()
+        #for sim in crunchr.sims:
+        #    crunchr.transmissionData(sim)
     if not args.no_gcrunch:
         gcrunchr = Global_Cruncher(conf,sims,sim_groups,failed_sims)
         gcrunchr.process_all()

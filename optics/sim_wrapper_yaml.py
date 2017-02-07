@@ -17,18 +17,20 @@ import time
 import yaml
 import pprint
 from copy import deepcopy 
+from collections import MutableMapping
 
-class Config(object):
+class Config(MutableMapping):
+    """An object to represent the simulation config that behaves like a dict.
+    It can be initialized with a path, or an actual python data structure as
+    with the usual dict but has some extra convenience methods"""
 
     def __init__(self,path=None,data=None):
         if path:
             self.data = self._parse_file(path)
-        elif data:
-            self.data = data
         else:
-            raise ValueError('You must supply either a path to a YAML file or a python'
-            ' dictionary')
-        self._store_params()
+            self.data = dict()
+            self.update(dict(data))
+        self._update_params()
 
     def _parse_file(self,path):
         """Parse the YAML file provided at the command line"""
@@ -38,7 +40,7 @@ class Config(object):
         conf = yaml.load(text)
         return conf
 
-    def _store_params(self):
+    def _update_params(self):
         self.fixed = []
         self.variable = []
         self.sorting = []
@@ -62,35 +64,84 @@ class Config(object):
         for layer,layer_data in self.data['Layers'].items():
             for par,data in layer_data['params'].items(): 
                 if data['type'] == 'fixed':
-                    self.fixed.append(('Layer',layer,'params',par))
+                    self.fixed.append(('Layers',layer,'params',par))
                 elif data['type'] == 'variable':
-                    self.variable.append(('Layer',layer,'params',par))
+                    self.variable.append(('Layers',layer,'params',par))
                 elif data['type'] == 'sorting':
-                    self.sorting.append(('Layer',layer,'params',par))
+                    self.sorting.append(('Layers',layer,'params',par))
                 elif data['type'] == 'evaluated':
-                    self.evaluated.append(('Layer',layer,'params',par))
+                    self.evaluated.append(('Layers',layer,'params',par))
                 elif data['type'] == 'optimized':
-                    self.optimized.append(('Layer',layer,'params',par))
+                    self.optimized.append(('Layers',layer,'params',par))
                 else:
-                    loc = '.'.join('Layer',layer,'params',par)
+                    loc = '.'.join('Layers',layer,'params',par)
                     raise ValueError('Specified an invalid config type at {}'.format(loc))
+        # Make sure the sorting parameters are in the proper order according to
+        # the value of their keys
+        getkey = lambda seq: self[seq]['key']
+        self.sorting = sorted(self.sorting,key=getkey)
+
+
+    def __getitem__(self, key):
+        """This setup allows us to get a value using a sequence with the usual
+        [] operator"""
+        if isinstance(key,tuple):
+            return self.getfromseq(key)
+        elif isinstance(key,list):
+            return self.getfromseq(key)
+        else:
+            return self.data[key]
+
+    def __setitem__(self, key, value):
+        """This setup allows us to set a value using a sequence with the usual
+        [] operator. It also updates the parameter lists to reflect any
+        potential changes"""
+        if isinstance(key,tuple):
+            self.setfromseq(key,value)
+        elif isinstance(key,list):
+            self.setfromseq(key,value)
+        else:
+            self.data[key] = value
+        self._update_params()
+
+    def __delitem__(self, key):
+        if isinstance(key,tuple):
+            self.delfromseq(key)
+        elif isinstance(key,list):
+            self.delfromseq(key)
+        else:
+            del self.data[key]
+        self._update_params()
+
+    def __iter__(self):
+        return iter(self.data)
+
+    def __len__(self):
+        return len(self.data)
     
-    def get(self,keyset):
+    def __str__(self):
+        """We'll just borrow the string representation from dict"""
+        return dict.__str__(self.data)
+
+    def getfromseq(self,keyset):
         """A convenience method to get the section of the config file located at the end
         of the sequence of keys"""
         section = self.data
-        print(keyset)
         for key in keyset:
             section = section[key]
         return section
 
-    def set(self,keyset,value):
+    def setfromseq(self,keyset,value):
         """A convenience method to set the a value in the config given a sequence of keys"""
-        #loc = self.get(keyset[:-1])
-        #print(loc)
-        self.get(keyset[:-1])[keyset[-1]] = value
-        #section = self.data
-        #for key in keyset[:-1]:
+        sect = self.getfromseq(keyset[:-1])
+        sect[keyset[-1]] = value
+        self._update_params()
+
+    def delfromseq(self,keyset):
+        """Deletes the section of the config located at the end of a sequence
+        of keys"""
+        del self.getfromseq(keyset[:-1])[keyset[-1]]
+        self._update_params()
 
     def copy(self):
         """Returns a copy of the current config object"""
@@ -137,7 +188,7 @@ def parse_file(path):
     conf = yaml.load(text)
     return conf
 
-def get_combos(conf):
+def get_combos(conf,keysets):
     """Given a config object, return two lists. The first list contains the
     names of all the variable parameters in the config object. The second is a
     list of lists, where the inner list contains all the unique combinations of
@@ -149,14 +200,13 @@ def get_combos(conf):
     log.info("Constructing dictionary of options and their values ...")
     # Get the list of values from all our variable keysets
     optionValues = OrderedDict()
-    for keyset in conf.variable:
+    for keyset in keysets:
         par = keyset[-1]
-        pdict = conf.get(keyset)
-        print(pdict)
+        pdict = conf[keyset]
         if pdict['itertype'] == 'numsteps':
             values = np.linspace(pdict['start'],pdict['end'],pdict['step'])
         elif pdict['itertype'] == 'stepsize':
-            value = np.arange(pdict['start'],pdict['end']+pdict['step'],pdict['step'])
+            values = np.arange(pdict['start'],pdict['end']+pdict['step'],pdict['step'])
         else:
             raise ValueError('Invalid itertype specified at {}'.format(str(keyset)))
         optionValues[par] = values
@@ -182,7 +232,7 @@ def make_leaves(nodes):
     # ith value of the inner lists corresponds to the ith param name in keys. The inner
     # list consists of a unique combination of variable parameters. Note all nodes sweep
     # through the same parameters so we only need to compute this once. 
-    keys,combos = get_combos(nodes[0][1])
+    keys,combos = get_combos(nodes[0][1],nodes[0][1].variable)
     # Build all the leaves at every node in the directory tree 
     leaves = []
     for nodepath,conf in nodes:
@@ -206,15 +256,15 @@ def make_leaves(nodes):
             # Write new config file to sim dir. We make a copy then remove the postprocessing
             # section
             sim_conf = conf.copy()
-            del sim_conf.data['Postprocessing']
-            sim_conf.data['General']['sim_dir'] = fullpath
+            del sim_conf['Postprocessing']
+            sim_conf['General']['sim_dir'] = fullpath
             # Now we just overwrite all the variable parameters with their new
             # fixed values. Note that itertools.product is so wonderful and
             # nice that it preserves the order of the values in every combo
             # such that the combo values always line up with the proper
             # parameter name
             for i in range(len(combo)):
-                sim_conf.set(conf.variable[i],{'type':'fixed','value':float(combo[i])})
+                sim_conf[conf.variable[i]] = {'type':'fixed','value':float(combo[i])}
             # Now that all the parameters have been defined, we can add the evaluated parameters that
             # depend on the values of some other parameters
             #for par, val in conf.items('Evaluated Parameters'):
@@ -225,13 +275,61 @@ def make_leaves(nodes):
             # Now write the config file to the appropriate subdir
             out = os.path.join(fullpath,'sim_conf.yml') 
             sim_conf.write(out)
-            base_script = sim_conf.data['General']['sim_script']
+            base_script = sim_conf['General']['sim_script']
             script = os.path.join(nodepath,os.path.basename(base_script))
             if not os.path.exists(script):
                 shutil.copy(base_script,script)
             leaves.append((fullpath,sim_conf))
     log.debug('Here are the leaves: %s',str(leaves))
     log.info('Finished building leaves!')
+    return leaves
+
+def make_nodes(conf):
+    """Given a global config file that specifies all the different sorted and
+    variable sweeps, create all the nodes and all the leaves in the directory
+    tree. First, the nodes are built. Then, the list of nodes is passed to
+    make_leaves to create all the leaves"""
+
+    # Get access to logger
+    log = logging.getLogger('sim_wrapper')
+    log.info("Constructing all nodes in sorted directory tree ...")
+    # Get a list of the parameters names (keys) and a list of lists of values where the ith value 
+    # of the inner lists corresponds to the ith param name in keys. The inner list consists of 
+    # a unique combination of variable parameters
+    keys,combos = get_combos(conf,conf.sorting)
+    # Make all the nodes in the directory tree
+    nodes = []
+    # Loop through all the combos. Each combo corresponds to a unique path down
+    # the directory tree
+    for combo in combos:
+        # Copy global config object
+        sub_conf = conf.copy()
+        # Build each node in the path and add params to new config object
+        path = conf['General']['base_dir']
+        for i in range(len(combo)):
+            # Now we just overwrite all the sorting parameters with their new
+            # fixed values. Note that itertools.product is so wonderful and
+            # nice that it preserves the order of the values in every combo
+            # such that the combo values always line up with the proper
+            # parameter name
+            sub_conf[conf.sorting[i]] = {'type':'fixed','value':float(combo[i])}
+            subdir = '{}_{:G}'.format(keys[i],combo[i])
+            path = os.path.join(path,subdir)
+            try:
+                os.makedirs(path)
+            except OSError:
+                pass
+            log.info("Created node %s",path)
+            sub_conf['General']['base_dir'] = path
+            # At each node in the tree we write out a complete config file that
+            # could be used to rerun all jobs in a certain section of the tree,
+            # or postprocess only that section of the tree
+            conf_file = os.path.join(path,'sorted_sweep_conf_%s.yml'%keys[i])
+            sub_conf.write(conf_file)
+        nodes.append((path,sub_conf))
+    log.debug('Here are the nodes: %s',str(nodes))
+    log.info('Finished building nodes!')
+    leaves = make_leaves(nodes)
     return leaves
 
 def make_single_sim(conf):
@@ -242,7 +340,7 @@ def make_single_sim(conf):
     log = logging.getLogger('sim_wrapper')
     log.info("Running single sim")
     # Make the simulation dir
-    basedir = conf.data['General']['base_dir']
+    basedir = conf['General']['base_dir']
     # The dir is already made when the logger is configured but this is a safety measure i guess?
     try:
         path = os.path.join(basedir,'data')
@@ -255,13 +353,13 @@ def make_single_sim(conf):
     # Write new config file to sim dir. We make a copy then remove the postprocessing
     # section
     sim_conf = conf.copy()
-    del sim_conf.data['Postprocessing']
-    sim_conf.data['General']['sim_dir'] = path
+    del sim_conf['Postprocessing']
+    sim_conf['General']['sim_dir'] = path
     # Now write the config file to the data subdir
     out = os.path.join(path,'sim_conf.yml') 
     sim_conf.write(out)
     # Copy sim script to sim dir
-    base_script = sim_conf.data['General']['sim_script']
+    base_script = sim_conf['General']['sim_script']
     script = os.path.join(path,os.path.basename(base_script))
     shutil.copy(base_script,script)
     return (path,sim_conf)
@@ -269,9 +367,9 @@ def make_single_sim(conf):
 def convert_data(path,conf):
     """Converts text file spit out by S4 into npz format for faster loading during postprocessing"""
     # Have we decided to ignore and remove H field files?
-    ignore = conf.data['General']['ignore_h']
+    ignore = conf['General']['ignore_h']
     # Convert e field data files
-    bname = conf.data['General']['base_name']
+    bname = conf['General']['base_name']
     efile = os.path.join(path,bname+'.E')
     d = pandas.read_csv(efile,delim_whitespace=True,header=None,skip_blank_lines=True)
     edata = d.as_matrix()
@@ -296,11 +394,11 @@ def run_sim(jobtup):
 
     log = logging.getLogger('sim_wrapper') 
     jobpath,jobconf = jobtup
-    timed = jobconf.data['General']['save_time']
+    timed = jobconf['General']['save_time']
     tout = os.path.join(jobpath,'timing.dat')
     simlog = os.path.join(jobpath,'sim.log')
-    script = jobconf.data['General']['sim_script']
-    ini_file = os.path.join(jobpath,'sim_conf.ini')
+    script = jobconf['General']['sim_script']
+    ini_file = os.path.join(jobpath,'sim_conf.yml')
     if timed:
         log.debug('Executing script with timing wrapper ...')
         cmd = 'command time -vv -o %s lua %s %s 2>&1 | tee %s'%(tout,script,ini_file,simlog)
@@ -308,33 +406,32 @@ def run_sim(jobtup):
     else:
         cmd = 'command lua %s %s 2>&1 | tee %s'%(script,ini_file,simlog)
     log.debug('Subprocess command: %s',cmd)
-    relpath = os.path.relpath(jobpath,jobconf.data['General']['treebase'])
+    relpath = os.path.relpath(jobpath,jobconf['General']['treebase'])
     log.info("Starting simulation for %s ...",relpath)
     completed = subprocess.run(cmd,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     #log.info('Simulation stderr: %s',completed.stderr)
     log.info("Simulation stderr: %s",completed.stderr)
     log.debug('Simulation stdout: %s',completed.stdout)
     # Convert text data files to npz binary file
-    if jobconf.data['General']['save_as'] == 'npz':
+    if jobconf['General']['save_as'] == 'npz':
         log.info('Converting data at %s to npz format',relpath)
         convert_data(jobpath,jobconf)
     log.info("Finished simulation for %s!",relpath)
     return None
 
 def execute_jobs(gconf,jobs):
-
     """Given a list of length 2 tuples containing job directories and their
     configuration objects (in that order), executes the jobs. If specified, a
     multiprocessing pool is used to run the jobs in parallel. If not, jobs are
     executed serially"""
     
     log=logging.getLogger('sim_wrapper')
-    if not gconf.data['General']['parallel']:
+    if not gconf['General']['parallel']:
         log.info('Executing jobs serially')
         for job in jobs:
             run_sim(job)
     else:
-        num_procs = mp.cpu_count() - gconf.data['General']['reserved_cores']
+        num_procs = mp.cpu_count() - gconf['General']['reserved_cores']
         log.info('Executing jobs in parallel using %s cores ...',str(num_procs))
         with mp.Pool(processes=num_procs) as pool:
             result = pool.map(run_sim,jobs)
@@ -343,7 +440,7 @@ def run(conf,log):
     """The main run methods that decides what kind of simulation to run based on the
     provided config object"""
 
-    basedir = conf.data['General']['base_dir']
+    basedir = conf['General']['base_dir']
     logdir = os.path.join(basedir,'logs')
     # Configure logger
     logger = configure_logger(log,'sim_wrapper',logdir,'sim_wrapper.log')
@@ -371,6 +468,34 @@ def run(conf,log):
         logger.error('Unsupported configuration for a simulation run. Not a single sim, sweep, or \
         optimization')
 
+def pre_check(conf_path,conf):
+    """Checks conf file for invalid values"""
+    if not os.path.isfile(conf['General']['sim_script']):
+        print('You need to change the sim_script entry in the [General] section of your config \
+        file')
+        quit()
+    
+    # Warn user if they are about to dump a bunch of simulation data and directories into a
+    # directory that already exists
+    base = conf["General"]["basedir"]
+    if os.path.isdir(base):
+        print('WARNING!!! You are about to start a simulation in a directory that already exists')
+        print('WARNING!!! This will dump a whole bunch of crap into that directory and possibly')
+        print('WARNING!!! overwrite old simulation data.')
+        ans = input('Would you like to continue? CTRL-C to exit, any other key to continue: ')
+    # Copy provided config file to basedir
+    try:
+        os.makedirs(base)
+    except OSError:
+        pass
+    fname = os.path.basename(conf_path)
+    new_path = os.path.join(base,fname)
+    try:
+        shutil.copy(conf_path,new_path)
+    except shutil.SameFileError:
+        pass
+    # TODO: Add checks between specified x,y,z samples and plane vals in plotting section
+
 def main():
 
     parser = ap.ArgumentParser(description="""A wrapper around s4_sim.py to automate parameter
@@ -386,7 +511,7 @@ def main():
     else:
         print("\n The file you specified does not exist! \n")
         quit()
-
+   
     #pre_check(os.path.abspath(args.config_file),conf)
     run(conf,args.log_level)
 

@@ -65,6 +65,7 @@ def configure_logger(level,logger_name,log_dir,logfile):
     return logger
 
 def make_single_sim(conf):
+
     log = logging.getLogger('sim_wrapper')
     log.info("Running single sim")
     # Make the simulation dir
@@ -105,6 +106,7 @@ def make_single_sim(conf):
     return (path,sim_conf)
     
 def get_combos(tuplist):
+    """Given a list of tuples containing """
     log = logging.getLogger('sim_wrapper') 
     log.info("Constructing dictionary of options and their values ...")
     # Get our variable parameters by splitting string in conf file and explanding into list

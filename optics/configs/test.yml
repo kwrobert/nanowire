@@ -1,7 +1,7 @@
 General:
     
     # Base directory under which to run your simulation(s)
-    basedir: '/home/kyle_roertson/schoolwork/gradschool/nanowire/DATA/rcwa_sims/abstract_optimization'
+    basedir: '/home/kyle_robertson/schoolwork/gradschool/nanowire/DATA/rcwa_sims/abstract_optimization'
     # Same as above but remains untouched during buildout of directory tree
     treebase: '/home/kyle_robertson/schoolwork/gradschool/nanowire/DATA/rcwa_sims/abstract_optimization'
     # Base length unit defined relative to a meter (so nm would be 1E-9)
@@ -105,6 +105,7 @@ Parameters:
     # itertype can be either 'numsteps' or 'stepsize'. 'numsteps' would then cause the
     # 'step' key to be interpreted as the number of steps between the starting and ending
     # value. 'stepsize' would cause the 'step' key to be interpreted as the size of the
+                    `%(Simulation.params.array_period)s-.1`dd
     # step to be taken between values in the sweep. Both itertypes are inclusive of the
     # endpoint 
     Variable:

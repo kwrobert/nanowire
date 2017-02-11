@@ -5,7 +5,7 @@ local S4 = require('RCWA')
 pl.utils.on_error('error')
 
 ---------------------------------------------------
--- Classes 
+-- Functions 
 ----------------------------------------------------
 
 function isArray(t)
@@ -35,9 +35,12 @@ pl.class.Config()
 
 function Config:_init(path)
     self._conf = self:load_config(path)
-    --pl.tablex.update(self,conf_table)
     self.dep_graph = {}
     self:parse_config()
+    -- Write out this new YAML representation of the config with all references
+    -- resolved and expressions evaluated
+    out_path = pl.path.join(self:get({'General','sim_dir'}),'sim_conf.yml')
+    self:write(out_path)
 end
 
 function Config:get(keys) 
@@ -93,13 +96,8 @@ function Config:set(key,value)
             pl.utils.raise("Must provide either a string or array-like table to Config:get")
         end
         for i=1,#key-1 do
-            --print('SET FUNCTION KEY = ',key[i])
             local k = key[i]
-            --print(type(k))
-            --print(k)
-            --if type(k) == 'string' and pl.stringx.isdigit(k) then
             if tonumber(k) ~= nil then
-                --print('CONVERTING MIDDLE KEY TO NUMBER')
                 k = tonumber(k)
             end
             ret = ret[k]
@@ -107,21 +105,12 @@ function Config:set(key,value)
         -- This part is necessary to handle tables as leaves in the
         -- config
         local fkey = key[#key]
-        --print('FKEY = ',fkey)
-        --print(type(fkey))
-        --if type(fkey) == 'string' and pl.stringx.isdigit(fkey) then
         if tonumber(fkey) ~= nil then
-            --print('CONVERTING FINAL KEY TO NUMBER')
-            --key[#key] = tonumber(key[#key])
             fkey = tonumber(fkey)
         end
-        --print('FKEY = ',fkey)
-        --print(type(fkey))
         ret[fkey] = value
     else
-        --if type(key) == 'string' and pl.stringx.isdigit(key) then
         if tonumber(key) ~= nil then
-            --print('CONVERTING SINGLE KEY TO NUMBER')
             key = tonumber(key)
             self._conf[key] = value
         else
@@ -150,27 +139,6 @@ function Config:parse_config()
     
     self:interpolate()
     self:evaluate()
-    -- Evaluate expressions
-    --for sect, pars in pairs(conf) do
-    --    for par, val in pairs(pars) do
-    --        if type(val) == 'string' then
-    --            if pl.stringx.startswith(val,'`') and pl.stringx.endswith(val,'`') then
-    --                tmp = pl.stringx.strip(val,'`')
-    --                tmp = pl.stringx.join('',{'local result = ',tmp})
-    --                -- This loads the lua statement contained in tmp and evaluates it, making result
-    --                -- available in the current scope
-    --                f = load(tmp)
-    --                f()
-    --                conf[sect][par] = result
-    --            end
-    --        end
-    --    end
-    --end
-    --local arr = {conf['Parameters']['nw_height'],conf['Parameters']['substrate_t'],
-    --       conf['Parameters']['ito_t'],conf['Parameters']['air_t']}
-    --local height,n = pl.seq.sum(arr,tonumber)
-    --conf['Parameters']['total_height'] = height
-    --self:write_config(path)
     return conf 
 end
 function Config:evaluate(in_table,old_key)
@@ -189,13 +157,10 @@ function Config:evaluate(in_table,old_key)
             if pl.stringx.startswith(value,'`') and pl.stringx.endswith(value,'`') then
                 tmp = pl.stringx.strip(value,'`')
                 tmp = pl.stringx.join('',{'result = ',tmp})
-                print(tmp)
                 -- This loads the lua statement contained in tmp and evaluates it, making result
                 -- available in the current scope
                 f = load(tmp)
-                print(f)
                 f()
-                print('RESULT TYPE = ',type(result))
                 key_seq = pl.stringx.split(old_key,'.')
                 table.insert(key_seq,key)
                 self:set(key_seq,result)
@@ -235,9 +200,6 @@ function Config:_find_references(in_table,old_key)
             local matches = self:match_replace(value)
             local new_key = old_key..'.'..key
             for match in matches do
-                --print('FOUND MATCHES')
-                --print('KEY = ',new_key)
-                --print('VALUE = ',value)
                 -- If we've already found this reference before, increment its
                 -- reference count and update the list of keys referring to it
                 local dep_keys = pl.tablex.keys(self.dep_graph)
@@ -245,7 +207,6 @@ function Config:_find_references(in_table,old_key)
                     data = self.dep_graph[match]
                     data['ref_count'] = data['ref_count'] + 1
                     table.insert(data['ref_by'],new_key)
-                    --self.dep_graph[match] = data
                 else
                     self.dep_graph[match] = {ref_count=1,ref_by={new_key}}
                 end
@@ -268,8 +229,6 @@ function Config:build_dependencies()
         -- value and we need to resolve that value first. Note we also do this
         -- for ref itself so we can catch circular references 
         for other_ref,its_data in pairs(self.dep_graph) do
-            --print('REF = ',ref)
-            --print('OTHER REF = ',other_ref)
             if pl.tablex.find(its_data['ref_by'],ref) then
                 if other_ref == ref then
                     pl.utils.raise('There is a circular reference in your config file at '..ref)
@@ -288,22 +247,17 @@ end
 
 function Config:_check_resolved(refs)
     -- Checks if a list of references have all been resolved
-    --print('CHECK RES REFS = ')
-    --pl.pretty.write(refs)
-    --print('######')
     local bools = {}
     for i,ref in ipairs(refs) do
-        --print(ref)
-        --pl.pretty.write(self.dep_graph[ref])
         local res = self.dep_graph[ref]['resolved']
-        --print('RES TYPE = ',type(res))
+        -- If there is no 'resolved' key then res will be nil and we need to
+        -- store false in the bools array
         if type(res) == 'boolean' then
             bools[i] = res
         else
             bools[i] = false
         end
     end
-    --pl.pretty.write(bools)
     local all_res = true
     for i,bool in ipairs(bools) do
         if not bool then 
@@ -318,24 +272,17 @@ function Config:_resolve(ref)
     local ref_data = self.dep_graph[ref]
     -- Retrieve the value of this reference
     local key_seq = pl.stringx.split(ref,'.')
-    --print('REF SEQ = ',key_seq)
     local repl_val = self:get(key_seq)
     -- Loop through all the locations that contain this reference
     for _,loc in ipairs(ref_data['ref_by']) do
         -- Get the string we need to run the replacement on
         local rep_seq = pl.stringx.split(loc,'.')
-        --print('REP LOC = ',rep_seq)
         local entry_to_repl = self:get(rep_seq)
         -- Run the actual replacement and set the value at this
         -- location to the new string
-        --print('ENTRY TO REPL = ',str_to_repl)
-        --print('REPL VAL = ', repl_val)
-        --local rep_par = string.gsub(str_to_repl,"%%%(([^)]+)%)s",repl_val)
         local substr = '%('..ref..')s'
         local esc = pl.utils.escape(substr)
-        --print(esc)
         local rep_par = string.gsub(entry_to_repl,esc,repl_val)
-        --print('REPLACED VALUE = ',rep_par)
         self:set(rep_seq,rep_par)
     end
 end
@@ -344,7 +291,6 @@ function Config:interpolate()
     -- Before we can actually interpolate, we need to build out a dependency
     -- graph for all the references within the config file
     self:build_dependencies()
-    --pl.pretty.write(self.dep_graph)
     local config_resolved = false
     while not config_resolved do
         print('CONFIG NOT RESOLVED, MAKING PASS')
@@ -354,15 +300,15 @@ function Config:interpolate()
             -- something else, we can safely resolve it because we know it has a
             -- value
             if not ref_data['ref_to'] then
-                --print('NO REFERENCES, RESOLVING')
+                print('NO REFERENCES, RESOLVING')
                 self:_resolve(ref) 
                 self.dep_graph[ref]['resolved'] = true
             else
-                --print('CHECKING REFERENCES')
+                print('CHECKING REFERENCES')
                 -- If all the locations this reference points to are resolved, then we
                 -- can go ahead and resolve this one 
                 local all_res = self:_check_resolved(ref_data['ref_to'])
-                --print('ALL RES = ',all_res)
+                print('ALL RES = ',all_res)
                 if all_res then
                     self:_resolve(ref)
                     self.dep_graph[ref]['resolved'] = true
@@ -370,37 +316,8 @@ function Config:interpolate()
             end
         end
         config_resolved = self:_check_resolved(pl.tablex.keys(self.dep_graph))
-        --pl.pretty.write(self.dep_graph)
-        --io.write('Continue?')
-        --io.flush()
-        --answer=io.read()
     end
 end
-
---function Config:search_conf(str)
---    -- Search for a dot in str
---    print('#######################')
---    --pl.pretty.write(self.conf)
---    local ind = pl.stringx.lfind(str,'.')
---    if ind then
---        -- Split on the dot to get desired section and par. Note this method
---        -- returns a Penlight list
---        local dat = pl.stringx.split(str,'.')
---        --pl.pretty.write(dat)
---        local value = pl.tablex.deepcopy(self.conf)
---        for _,key in pairs(dat) do
---            print('SEARCH KEY = ', key)
---            --pl.tablex.update(value,value[key])
---            value = value[key]
---            print('SEARCH VALUE:')
---            print(value)
---            --pl.pretty.write(value)
---        end
---        return dat,value
---    else
---        pl.utils.quit("You need to specify both the section and the parameter when using interpolation: section.param")
---    end
---end
 
 function Config:write(path)
     outfile = io.open(path,'w')

@@ -4,7 +4,26 @@ local yml = require('yaml')
 local S4 = require('RCWA')
 pl.utils.on_error('error')
 
+---------------------------------------------------
+-- Classes 
 ----------------------------------------------------
+
+function isArray(t)
+	if type(t)~="table" then return false,"Argument is not a table! It is: "..type(t) end
+	--check if all the table keys are numerical and count their number
+	local count=0
+	for k,v in pairs(t) do
+		if type(k)~="number" then return false else count=count+1 end
+	end
+	--all keys are numerical. now let's see if they are sequential and start with 1
+	for i=1,count do
+		--Hint: the VALUE might be "nil", in that case "not t[i]" isn't enough, that's why we check the type
+		if not t[i] and type(t[i])~="nil" then return false end
+	end
+	return true
+end
+
+---------------------------------------------------
 -- Classes 
 ----------------------------------------------------
 
@@ -18,7 +37,7 @@ function Config:_init(path)
     self._conf = self:load_config(path)
     --pl.tablex.update(self,conf_table)
     self.dep_graph = {}
-    --self:parse_config()
+    self:parse_config()
 end
 
 function Config:get(keys) 
@@ -26,28 +45,28 @@ function Config:get(keys)
     -- array_like table of keys
     local ret = self._conf
     if type(keys) == 'table' then
+        if not isArray(keys) then
+            pl.utils.raise("Must provide either a string or array-like table to Config:get")
+        end
         for i,key in ipairs(keys) do
-            if not type(i) == 'number' then
-                raise("Must provide either a string or array-like table to Config:get")
-            else
-                -- If we store a list anywhere in the config, we need to be
-                -- able to get at the elements of that list using numbers
-                if pl.stringx.isdigit(key) then 
-                    key = tonumber(key)
-                    pl.pretty.dump(ret)
-                end
-                ret = ret[key] 
-                local outstr = pl.pretty.write(keys,'')
-                if ret == nil then 
-                    pl.utils.raise('Attempted to access invalid location at: '..outstr)
-                end
+            -- If we store a list anywhere in the config, we need to be
+            -- able to get at the elements of that list using numbers
+            --if type(key) == 'string' and pl.stringx.isdigit(key) then 
+            if tonumber(key) ~= nil then
+                key = tonumber(key)
+            end
+            ret = ret[key] 
+            local outstr = pl.pretty.write(keys,'')
+            if ret == nil then 
+                pl.utils.raise('Attempted to access invalid location at: '..outstr)
             end
         end
     else
          ret = self._conf[keys]
     end
     -- Check to make sure we got a valid key sequence. This works because you
-    -- cant actually store nil as a value to a key in lua
+    -- cant actually store nil as a value to a key in lua, so if ret is nil we
+    -- tried to access a non-existant location
     local outstr = pl.pretty.write(keys,'')
     if ret == nil then 
         pl.utils.raise('Attempted to access invalid location at: '..outstr)
@@ -58,33 +77,56 @@ end
 function Config:set(key,value)
     -- A function to set an item in the config given a single key or an
     -- array_like table of keys and a value
+    if value == nil then
+        pl.utils.raise('Cannot store nil in a table in Lua. Use remove function for this')
+    end
+    -- Presumably if we pass in a value that is a string of all numbers, we
+    -- want to actually store it as a number
+    if tonumber(value) ~= nil then
+        value = tonumber(value)
+    end
     local ret = self._conf
-    print('SET FUNC KEY SEQ')
+    --print('SET FUNC KEY SEQ')
     pl.pretty.dump(key)
     if type(key) == 'table' then
+        if not isArray(key) then
+            pl.utils.raise("Must provide either a string or array-like table to Config:get")
+        end
         for i=1,#key-1 do
-            print('SET FUNCTION KEY = ',key[i])
-            if not key[i] or not ret[key[i]] then
-                pl.utils.raise("Must provide either a string or array-like table of keys to Config:set")
-            else
-                local k = key[i]
-                if pl.stringx.isdigit(k) then 
-                    print('CONVERTING KEY TO NUMBER')
-                    k = tonumber(k)
-                    pl.pretty.dump(ret)
-                end
-                ret = ret[k]
+            --print('SET FUNCTION KEY = ',key[i])
+            local k = key[i]
+            --print(type(k))
+            --print(k)
+            --if type(k) == 'string' and pl.stringx.isdigit(k) then
+            if tonumber(k) ~= nil then
+                --print('CONVERTING MIDDLE KEY TO NUMBER')
+                k = tonumber(k)
             end
+            ret = ret[k]
         end
         -- This part is necessary to handle tables as leaves in the
         -- config
-        if pl.stringx.isdigit(key[#key]) then 
-            print('CONVERTING KEY TO NUMBER')
-            key[#key] = tonumber(key[#key])
+        local fkey = key[#key]
+        --print('FKEY = ',fkey)
+        --print(type(fkey))
+        --if type(fkey) == 'string' and pl.stringx.isdigit(fkey) then
+        if tonumber(fkey) ~= nil then
+            --print('CONVERTING FINAL KEY TO NUMBER')
+            --key[#key] = tonumber(key[#key])
+            fkey = tonumber(fkey)
         end
-        ret[key[#key]] = value
+        --print('FKEY = ',fkey)
+        --print(type(fkey))
+        ret[fkey] = value
     else
-        self._conf[key] = value
+        --if type(key) == 'string' and pl.stringx.isdigit(key) then
+        if tonumber(key) ~= nil then
+            --print('CONVERTING SINGLE KEY TO NUMBER')
+            key = tonumber(key)
+            self._conf[key] = value
+        else
+            self._conf[key] = value
+        end
     end
 end
 
@@ -104,10 +146,10 @@ function Config:load_config(path)
     return conf
 end
 
-function Config:parse_config(path)
+function Config:parse_config()
     
-    --conf = self:load_config(path)
     self:interpolate()
+    self:evaluate()
     -- Evaluate expressions
     --for sect, pars in pairs(conf) do
     --    for par, val in pairs(pars) do
@@ -128,8 +170,38 @@ function Config:parse_config(path)
     --       conf['Parameters']['ito_t'],conf['Parameters']['air_t']}
     --local height,n = pl.seq.sum(arr,tonumber)
     --conf['Parameters']['total_height'] = height
-    self:write_config(path)
+    --self:write_config(path)
     return conf 
+end
+function Config:evaluate(in_table,old_key)
+    -- Evaluates any expressions surrounded in back ticks `like_so+blah`
+    local t = in_table or self._conf
+    for key, value in pairs(t) do
+        if type(value) == 'table' then
+            local new_key
+            if old_key then 
+                new_key = old_key..'.'..key
+            else 
+                new_key = key
+            end
+            self:evaluate(value,new_key)
+        elseif type(value) == 'string' then 
+            if pl.stringx.startswith(value,'`') and pl.stringx.endswith(value,'`') then
+                tmp = pl.stringx.strip(value,'`')
+                tmp = pl.stringx.join('',{'result = ',tmp})
+                print(tmp)
+                -- This loads the lua statement contained in tmp and evaluates it, making result
+                -- available in the current scope
+                f = load(tmp)
+                print(f)
+                f()
+                print('RESULT TYPE = ',type(result))
+                key_seq = pl.stringx.split(old_key,'.')
+                table.insert(key_seq,key)
+                self:set(key_seq,result)
+            end
+        end
+    end
 end
 
 function Config:match_replace(string)
@@ -275,12 +347,12 @@ function Config:interpolate()
     --pl.pretty.write(self.dep_graph)
     local config_resolved = false
     while not config_resolved do
-        --print('CONFIG NOT RESOLVED, MAKING PASS')
+        print('CONFIG NOT RESOLVED, MAKING PASS')
         -- Now we can actually perform any resolution
         for ref,ref_data in pairs(self.dep_graph) do
             -- If the actual location of this references doesn't itself refer to
-            -- something else, we can safely resolve it because we know it has an
-            -- actual value
+            -- something else, we can safely resolve it because we know it has a
+            -- value
             if not ref_data['ref_to'] then
                 --print('NO REFERENCES, RESOLVING')
                 self:_resolve(ref) 
@@ -303,84 +375,38 @@ function Config:interpolate()
         --io.flush()
         --answer=io.read()
     end
-    
 end
 
---function Config:interpolate()
---    -- Perform interpolation of conf objects by recursing through the table
---   
---    -- We need to make a copy of the config table 
---    conf = pl.tablex.copy(self)
---    -- For each section of parameters in the configuration table
---    print('DUMPING COPY')
---    pl.pretty.dump(conf)
---    for key,value in pairs(conf) do
---        -- If we got a table back, recurse
---        if type(value) == 'table' then
---            pl.pretty.dump(value)
---            self:interpolate(value)
---        elseif type(value) == 'string' then
---            print('VALUE = ',value)
---            local matches = self:match_replace(value) 
---            -- For each parameter name extracted from the interpolation string 
---            for match in matches do
---                print('MATCH = ',match)
---                -- Get the value of tha param name. 
---                local loc,repl_val = self:search_conf(match)
---                print('REPL VAL = ',repl_val)
---                -- Now replace the interpolation string by the actual value of the 
---                -- sought parameter 
---                print(loc[#loc])
---                print(value)
---                local rep_par = string.gsub(value,"%%%(([^)]+)%)s",repl_val)
---                print('REP PAR = ',rep_par)
---                -- Now store the interpolated value of the original parameter
---                local section = self.conf[loc[1]]
---                for i,key in pairs(loc:slice(2,-2)) do
---                    print(key)
---                    section = section[key]
---                    pl.pretty.dump(section)
---                end
---                section[loc[#loc]] = rep_par
---            end
---        else 
---            
+--function Config:search_conf(str)
+--    -- Search for a dot in str
+--    print('#######################')
+--    --pl.pretty.write(self.conf)
+--    local ind = pl.stringx.lfind(str,'.')
+--    if ind then
+--        -- Split on the dot to get desired section and par. Note this method
+--        -- returns a Penlight list
+--        local dat = pl.stringx.split(str,'.')
+--        --pl.pretty.write(dat)
+--        local value = pl.tablex.deepcopy(self.conf)
+--        for _,key in pairs(dat) do
+--            print('SEARCH KEY = ', key)
+--            --pl.tablex.update(value,value[key])
+--            value = value[key]
+--            print('SEARCH VALUE:')
+--            print(value)
+--            --pl.pretty.write(value)
 --        end
+--        return dat,value
+--    else
+--        pl.utils.quit("You need to specify both the section and the parameter when using interpolation: section.param")
 --    end
---    return conf
 --end
-
-function Config:search_conf(str)
-    -- Search for a dot in str
-    print('#######################')
-    --pl.pretty.write(self.conf)
-    local ind = pl.stringx.lfind(str,'.')
-    if ind then
-        -- Split on the dot to get desired section and par. Note this method
-        -- returns a Penlight list
-        local dat = pl.stringx.split(str,'.')
-        --pl.pretty.write(dat)
-        local value = pl.tablex.deepcopy(self.conf)
-        for _,key in pairs(dat) do
-            print('SEARCH KEY = ', key)
-            --pl.tablex.update(value,value[key])
-            value = value[key]
-            print('SEARCH VALUE:')
-            print(value)
-            --pl.pretty.write(value)
-        end
-        return dat,value
-    else
-        pl.utils.quit("You need to specify both the section and the parameter when using interpolation: section.param")
-    end
-end
 
 function Config:write(path)
     outfile = io.open(path,'w')
     local dump = yml.dump(self._conf)
     outfile:write(dump)
     outfile:close()
-    pl.utils.quit('Quitting after writing config')
 end
 
 pl.class.Simulator()
@@ -861,6 +887,7 @@ the optical properties of a single nanowire in a square lattice
         error('The config file specified does not exist or is not a file')
     end
     conf = Config(args['config_file'])
+    conf:write('out_conf.yml')
 
     -- Get and Set tests
     --
@@ -873,8 +900,7 @@ the optical properties of a single nanowire in a square lattice
     --conf:remove({'Simulation','params','array_period'})
     --pl.pretty.dump(conf)
     
-    conf:interpolate()
-    conf:write('out_conf.yml')
+    -- conf:interpolate()
     
     
     --print(conf['Simulation'])

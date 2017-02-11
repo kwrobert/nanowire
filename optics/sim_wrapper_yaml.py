@@ -203,6 +203,7 @@ def get_combos(conf,keysets):
     for keyset in keysets:
         par = keyset[-1]
         pdict = conf[keyset]
+        print(pdict)
         if pdict['itertype'] == 'numsteps':
             values = np.linspace(pdict['start'],pdict['end'],pdict['step'])
         elif pdict['itertype'] == 'stepsize':

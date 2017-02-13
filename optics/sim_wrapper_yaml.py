@@ -10,7 +10,7 @@ import multiprocessing as mp
 import pandas
 import numpy as np
 import scipy.optimize as optz
-import postprocess as pp
+import postprocess_yaml as pp
 import time
 import pprint
 # Get our custom config object and the logger function
@@ -265,6 +265,154 @@ def execute_jobs(gconf,jobs):
         with mp.Pool(processes=num_procs) as pool:
             result = pool.map(run_sim,jobs)
 
+def spectral_wrapper(opt_pars,baseconf):
+    """A wrapper function to handle spectral sweeps and postprocessing for the scipy minimizer. It
+    accepts the initial guess as a vector, the base config file, and the keys that map to the
+    initial guesses. It runs a spectral sweep (in parallel if specified), postprocesses the results,
+    and returns the spectrally weighted reflection"""
+    # TODO: Pass in the quantity we want to optimize as a parameter, then compute and return that
+    # instead of just assuming reflection
+
+    ## Optimizing shell thickness could result is negative thickness so we need to take absolute
+    ## value here
+    #opt_pars[0] = abs(opt_pars[0])
+    log=logging.getLogger('sim_wrapper')
+    # Make sure we don't have any preexisting frequency dirs. We do this first so on the last
+    # iteration all our data is left intact
+    log.info('Param keys: %s'%str(baseconf.optimized))
+    log.info('Current values %s'%str(opt_pars))
+    basedir = baseconf['General']['base_dir']
+    globstr = os.path.join(basedir,'frequency*')
+    dirs = glob.glob(globstr)
+    for adir in dirs:
+        shutil.rmtree(adir)
+    # Set the value key of all the params we are optimizing over to the current
+    # guess
+    for i in range(len(baseconf.optimized)):
+        keyseq = baseconf.optimized[i]
+        valseq = (*keyseq,'value')
+        baseconf[valseq] = float(opt_pars[i])
+    # With the parameters set, we can now make the leaf directories, which should only contain
+    # frequency values
+    node = (basedir,baseconf)
+    leaves = make_leaves([node])
+    # Let's reuse the convergence information from the previous iteration if it exists
+    # NOTE: This kind of assumes your initial guess was somewhat decent with regards to the in plane
+    # geometric variables and the optimizer is staying relatively close to that initial guess. If 
+    # the optimizer is moving far away from its previous guess at each step, then the fact that a 
+    # specific frequency may have been converged previously does not mean it will still be converged 
+    # with this new set of variables. 
+    info_file = os.path.join(basedir,'conv_info.txt')
+    if os.path.isfile(info_file):
+        with open(info_file,'r') as info:
+            for line in info:
+                conf_path,numbasis,conv_status = line.strip().split(',')
+                sim_conf = Config(conf_path)
+                rel = os.path.relpath(conf_path,basedir)
+                log.info('Simulation at %s is %s at %s basis terms'%(rel,conv_status,numbasis))
+                # Turn off adaptive convergence for all the sims that have converged and set their number of
+                # basis terms to the proper value so we continue to use that value
+                if conv_status == 'converged':
+                    sim_conf[('General','adaptive_convergence')] = 'False'
+                    sim_conf[('Simulation','params','numbasis','value')] = numbasis
+                    with open(conf_path,'w') as configfile:
+                        sim_conf.write(configfile)
+                    # We have to recreate the converged_at.txt file because it gets deleted every
+                    # iteration and we need it to create the info file later on
+                    fpath = os.path.join(os.path.dirname(conf_path),'converged_at.txt')
+                    with open(fpath,'w') as conv_at:
+                        conv_at.write('%s\n'%numbasis)
+                # For sims that haven't converged, lets at least set the number of basis terms to the last
+                # tested value so we're closer to our goal of convergence
+                elif conv_status == 'unconverged':
+                    sim_conf.set(('Simulation','params','numbasis','value'),numbasis)
+                    with open(conf_path,'w') as configfile:
+                        sim_conf.write(configfile)
+    # With the leaf directories made and the number of basis terms adjusted, we can now kick off our frequency sweep
+    execute_jobs(baseconf,leaves)
+
+
+    #####
+    # TODO: This needs to be generalized. The user could pass in the name of
+    # a postprocessing function in the config file. The function will be called
+    # and used as the quantity for optimization
+    #####
+
+    # With our frequency sweep done, we now need to postprocess the results. 
+    # Configure logger
+    logger = configure_logger('error','postprocess',
+                              os.path.join(baseconf['General']['base_dir'],'logs'),
+                              'postprocess.log')
+    # Compute transmission data for each individual sim
+    cruncher = pp.Cruncher(baseconf)
+    cruncher.collect_sims()
+    for sim in cruncher.sims:
+        cruncher.transmissionData(sim)
+    # Now get the fraction of photons absorbed
+    gcruncher = pp.Global_Cruncher(baseconf,cruncher.sims,cruncher.sim_groups,cruncher.failed_sims)
+    photon_fraction = gcruncher.Jsc()[0] 
+    # Lets store information we discovered from our adaptive convergence procedure so we can resue
+    # it in the next iteration.
+    if baseconf['General']['adaptive_convergence']:
+        log.info('Storing adaptive convergence results ...')
+        with open(info_file,'w') as info:
+            conv_files = glob.glob(os.path.join(basedir,'**/converged_at.txt'))
+            for convf in conv_files:
+                simpath = os.path.join(os.path.dirname(convf),'sim_conf.ini')
+                with open(convf,'r') as cfile:
+                    numbasis = cfile.readline().strip()
+                info.write('%s,%s,%s\n'%(simpath,numbasis,'converged'))
+            nconv_files = glob.glob(os.path.join(basedir,'**/not_converged_at.txt'))
+            for nconvf in nconv_files:
+                simpath = os.path.join(os.path.dirname(nconvf),'sim_conf.ini')
+                with open(nconvf,'r') as cfile:
+                    numbasis = cfile.readline().strip()
+                info.write('%s,%s,%s\n'%(simpath,numbasis,'unconverged'))
+
+    #print('Total time = %f'%delta)
+    #print('Num calls after = %i'%gcruncher.weighted_transmissionData.called)
+    # This is a minimizer, we want to maximize the fraction of photons absorbed and thus minimize
+    # 1 minus that fraction
+    return 1-photon_fraction
+
+def run_optimization(conf):
+    log = logging.getLogger('sim_wrapper')
+    log.info("Running optimization")
+    print(conf.optimized)
+    # Make sure the only variable parameter we have is a sweep through
+    # frequency
+    for keyseq in conf.variable:
+        if keyseq[-1] != 'frequency':
+            log.error('You should only be sweep through frequency during an '
+            'optimization')
+            quit()
+    # Collect all the guesses
+    guess = np.zeros(len(conf.optimized))
+    for i in range(len(conf.optimized)):
+        keyseq = conf.optimized[i]
+        par_data = conf.get(keyseq)
+        guess[i] = par_data['guess']
+    # Max iterations and tolerance
+    tol = conf['General']['opt_tol']
+    max_iter = conf['General']['opt_max_iter']
+    # Run the simplex optimizer
+    opt_val = optz.minimize(spectral_wrapper,
+                            guess,
+                            args=(conf,),
+                            method='Nelder-Mead',
+                            options={'maxiter':max_iter,'xatol':tol,'disp':True})
+    log.info(opt_val.message)
+    log.info('Optimal values')
+    log.info(conf.optimized)
+    log.info(opt_val.x)
+    # Write out the results to a file
+    out_file = os.path.join(conf['General']['base_dir'],'optimization_results.txt')
+    with open(out_file,'w') as out:
+        out.write('# Param name, value\n')
+        for key, value in zip(conf.optimized,opt_val.x):
+            out.write('%s: %f\n'%(str(key),value))
+    return opt_val.x
+
 def run(conf,log):
     """The main run methods that decides what kind of simulation to run based on the
     provided config object"""
@@ -290,12 +438,14 @@ def run(conf,log):
             jobs = make_leaves([(basedir,conf)])
         execute_jobs(conf,jobs)
     # Looks like we need to run an optimization
-    elif conf.optimized:
+    elif conf.optimized and not conf.sorting:
         logger.debug('Entering optimization function from main')
         run_optimization(conf)
     else:
-        logger.error('Unsupported configuration for a simulation run. Not a single sim, sweep, or \
-        optimization')
+        logger.error('Unsupported configuration for a simulation run. Not a '
+        'single sim, sweep, or optimization. Make sure your sweeps are ' 
+        'configured correctly, and if you are running an optimization '
+        'make sure you do not have any sorting parameters specified')
 
 def pre_check(conf_path,conf):
     """Checks conf file for invalid values"""

@@ -22,7 +22,7 @@ class Config(MutableMapping):
          
         with open(path,'r') as cfile:
             text = cfile.read()
-        conf = yaml.load(text)
+        conf = yaml.load(text,Loader=yaml.Loader)
         return conf
 
     def _update_params(self):

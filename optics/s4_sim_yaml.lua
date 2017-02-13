@@ -2,6 +2,8 @@ local pl = require('pl.import_into')()
 local yml = require('yaml')
 --require('pl')
 local S4 = require('RCWA')
+-- Actually raises error, stop execution, and provides traceback when using
+-- pl.utils.raise
 pl.utils.on_error('error')
 
 ---------------------------------------------------
@@ -54,7 +56,6 @@ function Config:get(keys)
         for i,key in ipairs(keys) do
             -- If we store a list anywhere in the config, we need to be
             -- able to get at the elements of that list using numbers
-            --if type(key) == 'string' and pl.stringx.isdigit(key) then 
             if tonumber(key) ~= nil then
                 key = tonumber(key)
             end
@@ -89,8 +90,6 @@ function Config:set(key,value)
         value = tonumber(value)
     end
     local ret = self._conf
-    --print('SET FUNC KEY SEQ')
-    --pl.pretty.dump(key)
     if type(key) == 'table' then
         if not isArray(key) then
             pl.utils.raise("Must provide either a string or array-like table to Config:get")
@@ -136,7 +135,8 @@ function Config:load_config(path)
 end
 
 function Config:parse_config()
-    
+    -- A wrapper for parsing the config around the two functions that actually
+    -- do all the work
     self:interpolate()
     self:evaluate()
     return conf 
@@ -162,6 +162,7 @@ function Config:evaluate(in_table,old_key)
                 -- available in the current scope
                 print(tmp)
                 f = load(tmp)
+                print(f)
                 f()
                 key_seq = pl.stringx.split(old_key,'.')
                 table.insert(key_seq,key)
@@ -175,7 +176,8 @@ function Config:match_replace(string)
     -- Matches the replace string so I don't have to keep copying and pasting
     -- this weird line everywhere 
     -- Matches $(some_params)s where any character EXCEPT a closing parenthesis
-    -- ) can be inside the %( )s. Extracts whats inside interp string
+    -- ) can be inside the %( )s. Extracts whatever is inside the parenthesis
+    -- and can match more than one group
     -- Note % is the escpae character, and parenthesis need to be
     -- escaped
     local matches = string.gmatch(string,"%%%(([^)]+)%)s") 
@@ -351,12 +353,6 @@ function Simulator:configure()
         --if type(val) == 'number' or pl.stringx.isdigit(val) then
         if tonumber(val) ~= nil then
             self.conf:set({'Solver',key}, math.floor(val))
-        -- Pretty sure this is all unnecessary cuz yaml handles native data
-        -- types
---        elseif val == 'True' then
---            self.conf['Solver'][key] = true 
---        elseif val == 'False' then
---            self.conf['Solver'][key] = false
         end
     end
     -- Actually set the values

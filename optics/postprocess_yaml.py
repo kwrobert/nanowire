@@ -629,8 +629,6 @@ class Cruncher(Processor):
         ordered_layers = sim.conf.sorted_dict(sim.conf['Layers'])
         for layer,ldata in ordered_layers.items():
             # Get boundaries between layers and their starting and ending indices
-            print('GENRATE LAYER: ',layer)
-            print('ORDER: ',ldata['order'])
             layer_t = ldata['params']['thickness']['value']
             if count == 0:
                 start = 0
@@ -845,16 +843,14 @@ class Global_Cruncher(Cruncher):
                 if argsets and type(argsets[0]) == list:
                     for argset in argsets:
                         if argset:
-                            self.calculate(quant,sim,argset)
+                            self.calculate(quant,argset)
                         else:
-                            self.calculate(quant,sim,[])
-                        self.log.debug('SHAPE AFTER CALCULATING: %s'%str(sim.e_data.shape))
+                            self.calculate(quant,[])
                 else:
                     if argsets:
-                        self.calculate(quant,sim,argsets)
+                        self.calculate(quant,argsets)
                     else:
-                        self.calculate(quant,sim,[])
-                    self.log.debug('SHAPE AFTER CALCULATING: %s'%str(sim.e_data.shape))
+                        self.calculate(quant,[])
 
     def diff_sq(self,x,y):
         """Returns the magnitude of the difference vector squared between two vector fields at each
@@ -881,6 +877,7 @@ class Global_Cruncher(Cruncher):
         # sorted_layers is an OrderedDict, and thus has the popitem method
         sorted_layers = sim.conf.sorted_dict(sim.conf['Layers'])
         first_layer = sorted_layers.popitem(last=False)
+        print(first_layer)
         last_layer = sorted_layers.popitem()
         # We can get the starting and ending planes from their heights
         start_plane = int(round(first_layer['params']['thickness']['value']/dz))
@@ -924,7 +921,7 @@ class Global_Cruncher(Cruncher):
                 start = 0
                 end = None
                 excluded = ''
-            base = group[0].conf.get('General','base_dir')
+            base = group[0].conf['General']['base_dir']
             errpath = os.path.join(base,'localerror_%s%s.dat'%(field,excluded))
             with open(errpath,'w') as errfile:
                 self.log.info('Computing local error for sweep %s',base)
@@ -958,7 +955,7 @@ class Global_Cruncher(Cruncher):
                     # Compute the average of the normalized magnitude of all the difference vectors 
                     avg_diffvec_mag = np.sum(norm_mag_diff)/norm_mag_diff.size
                     self.log.info(str(avg_diffvec_mag))
-                    errfile.write('%i,%f\n'%(sim2.conf.getint('Parameters','numbasis'),avg_diffvec_mag))
+                    errfile.write('%i,%f\n'%(sim2.conf['Simulation']['params']['numbasis']['value'],avg_diffvec_mag))
                     sim2.clear_data()
                 ref_sim.clear_data()
 
@@ -977,7 +974,7 @@ class Global_Cruncher(Cruncher):
                 start = 0
                 end = None
                 excluded = ''
-            base = group[0].conf.get('General','base_dir')
+            base = group[0].conf['General']['base_dir']
             errpath = os.path.join(base,'globalerror_%s%s.dat'%(field,excluded))
             with open(errpath,'w') as errfile:
                 self.log.info('Computing global error for sweep %s',base)
@@ -1008,7 +1005,7 @@ class Global_Cruncher(Cruncher):
                     # squared to mag efield squared
                     error = np.sqrt(np.sum(mag_diff_vec)/np.sum(normvec))
                     self.log.info(str(error))
-                    errfile.write('%i,%f\n'%(sim2.conf.getint('Parameters','numbasis'),error))
+                    errfile.write('%i,%f\n'%(sim2.conf['Simulation']['params']['numbasis']['value'],error))
                     sim2.clear_data()
                 ref_sim.clear_data()
 
@@ -1028,7 +1025,7 @@ class Global_Cruncher(Cruncher):
                 start = 0
                 end = None
                 excluded = ''
-            base = group[0].conf.get('General','base_dir')
+            base = group[0].conf['General']['base_dir']
             errpath = os.path.join(base,'adjacenterror_%s%s.dat'%(field,excluded))
             with open(errpath,'w') as errfile:
                 self.log.info('Computing adjacent error for sweep %s',base)
@@ -1059,7 +1056,7 @@ class Global_Cruncher(Cruncher):
                     # squared to mag efield squared
                     error = np.sqrt(np.sum(mag_diff_vec)/np.sum(normvec))
                     self.log.info(str(error))
-                    errfile.write('%i,%f\n'%(sim2.conf.getint('Parameters','numbasis'),error))
+                    errfile.write('%i,%f\n'%(sim2.conf['Simulation']['params']['numbasis']['value'],error))
                     sim2.clear_data()
                     ref_sim.clear_data()
 
@@ -1085,7 +1082,7 @@ class Global_Cruncher(Cruncher):
         """Computes photocurrent density"""
         Jsc_list = []
         for group in self.sim_groups:
-            base = group[0].conf.get('General','base_dir')
+            base = group[0].conf['General']['base_dir']
             self.log.info('Computing photocurrent density for group at %s'%base)
             Jsc_vals = np.zeros(len(group))
             freqs = np.zeros(len(group))
@@ -1122,7 +1119,7 @@ class Global_Cruncher(Cruncher):
             Jsc = intg.trapz(Jsc_vals,x=wvlgths*1e9)
             power = intg.trapz(spectra,x=wvlgths*1e9)
             # factor of 1/10 to convert A*m^-2 to mA*cm^-2
-            #wv_fact = c.e/(c.c*c.h*10)
+            wv_fact = c.e/(c.c*c.h*10)
             #wv_fact = .1
             #Jsc = (Jsc*wv_fact)/power
             Jsc = Jsc/power
@@ -1136,7 +1133,7 @@ class Global_Cruncher(Cruncher):
     def weighted_transmissionData(self):
         """Computes spectrally weighted absorption,transmission, and reflection""" 
         for group in self.sim_groups:
-            base = group[0].conf.get('General','base_dir')
+            base = group[0].conf['General']['base_dir']
             self.log.info('Computing spectrally weighted transmission data for group at %s'%base)
             abs_vals = np.zeros(len(group))
             ref_vals = np.zeros(len(group))
@@ -1145,7 +1142,7 @@ class Global_Cruncher(Cruncher):
             wvlgths = np.zeros(len(group))
             spectra = np.zeros(len(group))
             # Get solar power from chosen spectrum
-            path = group[0].conf['General']['input_power_wv']
+            path = group[0].conf['Simulation']['input_power_wv']
             wv_vec,p_vec = np.loadtxt(path,skiprows=2,usecols=(0,2),unpack=True,delimiter=',')
             # Get interpolating function for power
             p_wv = interpolate.interp1d(wv_vec,p_vec,kind='linear',

@@ -5,8 +5,8 @@ import argparse as ap
 import os
 import glob
 import datetime
-from collections import OrderedDict 
-import multiprocessing as mp 
+from collections import OrderedDict
+import multiprocessing as mp
 import pandas
 import numpy as np
 import scipy.optimize as optz
@@ -16,6 +16,7 @@ import pprint
 # Get our custom config object and the logger function
 from utils.config import *
 
+
 def get_combos(conf,keysets):
     """Given a config object, return two lists. The first list contains the
     names of all the variable parameters in the config object. The second is a
@@ -23,8 +24,7 @@ def get_combos(conf,keysets):
     this config object's non-fixed parameters. The elements of the inner list
     of value correspond to the elements of the key list"""
 
-
-    log = logging.getLogger('sim_wrapper') 
+    log = logging.getLogger('sim_wrapper')
     log.info("Constructing dictionary of options and their values ...")
     # Get the list of values from all our variable keysets
     optionValues = OrderedDict()
@@ -44,34 +44,33 @@ def get_combos(conf,keysets):
     keys = list(optionValues.keys())
     # Consuming a list of lists/tuples where each inner list/tuple contains all the values
     # for a particular parameter, returns a list of tuples containing all the unique
-    # combos for that set of parameters 
-    combos=list(itertools.product(*valuelist))
+    # combos for that set of parameters
+    combos = list(itertools.product(*valuelist))
     log.debug('The list of parameter combos: %s',str(combos))
-    return keys,combos 
+    return keys,combos
 
 def make_leaves(nodes):
     """Accepts a list of tuples, where the first element of the tuple is the full path to
     the node under which the leaves will be created, and the second element is
     un-finalized config object for that node"""
 
-
-    log = logging.getLogger('sim_wrapper') 
+    log = logging.getLogger('sim_wrapper')
     log.info("Building all leaves for each node...")
     # Get a list of the parameters names (keys) and a list of lists of values where the
     # ith value of the inner lists corresponds to the ith param name in keys. The inner
     # list consists of a unique combination of variable parameters. Note all nodes sweep
-    # through the same parameters so we only need to compute this once. 
+    # through the same parameters so we only need to compute this once.
     keys,combos = get_combos(nodes[0][1],nodes[0][1].variable)
-    # Build all the leaves at every node in the directory tree 
+    # Build all the leaves at every node in the directory tree
     leaves = []
     for nodepath,conf in nodes:
         # Loop through each unique combination of parameters
         for combo in combos:
             # Make a unique working directory based on parameter combo
-            workdir=''
+            workdir = ''
             for i in range(len(combo)):
                 substr = '{}_{:G}__'.format(keys[i],combo[i])
-                workdir += substr 
+                workdir += substr
             workdir=workdir.rstrip('__')
             fullpath = os.path.join(nodepath,workdir)
             try:
@@ -102,7 +101,7 @@ def make_leaves(nodes):
             #    wrapped = '`'+str(val)+'`'
             #    sim_conf.set('Parameters',par,wrapped)
             # Now write the config file to the appropriate subdir
-            out = os.path.join(fullpath,'sim_conf.yml') 
+            out = os.path.join(fullpath,'sim_conf.yml')
             sim_conf.write(out)
             base_script = sim_conf['General']['sim_script']
             script = os.path.join(nodepath,os.path.basename(base_script))
@@ -122,8 +121,8 @@ def make_nodes(conf):
     # Get access to logger
     log = logging.getLogger('sim_wrapper')
     log.info("Constructing all nodes in sorted directory tree ...")
-    # Get a list of the parameters names (keys) and a list of lists of values where the ith value 
-    # of the inner lists corresponds to the ith param name in keys. The inner list consists of 
+    # Get a list of the parameters names (keys) and a list of lists of values where the ith value
+    # of the inner lists corresponds to the ith param name in keys. The inner list consists of
     # a unique combination of variable parameters
     keys,combos = get_combos(conf,conf.sorting)
     # Make all the nodes in the directory tree
@@ -185,7 +184,7 @@ def make_single_sim(conf):
     del sim_conf['Postprocessing']
     sim_conf['General']['sim_dir'] = path
     # Now write the config file to the data subdir
-    out = os.path.join(path,'sim_conf.yml') 
+    out = os.path.join(path,'sim_conf.yml')
     sim_conf.write(out)
     # Copy sim script to sim dir
     base_script = sim_conf['General']['sim_script']
@@ -221,7 +220,7 @@ def run_sim(jobtup):
     containing the absolute path to the job directory as the first element and
     the configuration object for the job as the second element"""
 
-    log = logging.getLogger('sim_wrapper') 
+    log = logging.getLogger('sim_wrapper')
     jobpath,jobconf = jobtup
     timed = jobconf['General']['save_time']
     tout = os.path.join(jobpath,'timing.dat')
@@ -253,7 +252,7 @@ def execute_jobs(gconf,jobs):
     configuration objects (in that order), executes the jobs. If specified, a
     multiprocessing pool is used to run the jobs in parallel. If not, jobs are
     executed serially"""
-    
+
     log=logging.getLogger('sim_wrapper')
     if not gconf['General']['parallel']:
         log.info('Executing jobs serially')
@@ -298,10 +297,10 @@ def spectral_wrapper(opt_pars,baseconf):
     leaves = make_leaves([node])
     # Let's reuse the convergence information from the previous iteration if it exists
     # NOTE: This kind of assumes your initial guess was somewhat decent with regards to the in plane
-    # geometric variables and the optimizer is staying relatively close to that initial guess. If 
-    # the optimizer is moving far away from its previous guess at each step, then the fact that a 
-    # specific frequency may have been converged previously does not mean it will still be converged 
-    # with this new set of variables. 
+    # geometric variables and the optimizer is staying relatively close to that initial guess. If
+    # the optimizer is moving far away from its previous guess at each step, then the fact that a
+    # specific frequency may have been converged previously does not mean it will still be converged
+    # with this new set of variables.
     info_file = os.path.join(basedir,'conv_info.txt')
     if os.path.isfile(info_file):
         with open(info_file,'r') as info:
@@ -338,7 +337,7 @@ def spectral_wrapper(opt_pars,baseconf):
     # and used as the quantity for optimization
     #####
 
-    # With our frequency sweep done, we now need to postprocess the results. 
+    # With our frequency sweep done, we now need to postprocess the results.
     # Configure logger
     logger = configure_logger('error','postprocess',
                               os.path.join(baseconf['General']['base_dir'],'logs'),
@@ -350,7 +349,7 @@ def spectral_wrapper(opt_pars,baseconf):
         cruncher.transmissionData(sim)
     # Now get the fraction of photons absorbed
     gcruncher = pp.Global_Cruncher(baseconf,cruncher.sims,cruncher.sim_groups,cruncher.failed_sims)
-    photon_fraction = gcruncher.Jsc()[0] 
+    photon_fraction = gcruncher.Jsc()[0]
     # Lets store information we discovered from our adaptive convergence procedure so we can resue
     # it in the next iteration.
     if baseconf['General']['adaptive_convergence']:
@@ -443,7 +442,7 @@ def run(conf,log):
         run_optimization(conf)
     else:
         logger.error('Unsupported configuration for a simulation run. Not a '
-        'single sim, sweep, or optimization. Make sure your sweeps are ' 
+        'single sim, sweep, or optimization. Make sure your sweeps are '
         'configured correctly, and if you are running an optimization '
         'make sure you do not have any sorting parameters specified')
 
@@ -453,7 +452,7 @@ def pre_check(conf_path,conf):
         print('You need to change the sim_script entry in the [General] section of your config \
         file')
         quit()
-    
+
     # Warn user if they are about to dump a bunch of simulation data and directories into a
     # directory that already exists
     base = conf["General"]["basedir"]
@@ -490,7 +489,7 @@ def main():
     else:
         print("\n The file you specified does not exist! \n")
         quit()
-   
+
     #pre_check(os.path.abspath(args.config_file),conf)
     run(conf,args.log_level)
 

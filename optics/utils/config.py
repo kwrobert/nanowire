@@ -158,7 +158,6 @@ class Config(MutableMapping):
         sort_func = lambda tup: tup[1]['order']
         sorted_layers = OrderedDict(sorted(adict.items(),
                                     key=sort_func,reverse=reverse)) 
-        print(sorted_layers)
         return sorted_layers
 
 

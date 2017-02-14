@@ -15,7 +15,7 @@ try:
 except KeyError:
     matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-# from mpl_toolkits.mplot3d import Axes3D
+from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.cm as cmx
 # import matplotlib.lines as mlines
 # import matplotlib.patches as mpatches
@@ -363,11 +363,13 @@ class Processor(object):
         return self.sims,self.sim_groups
 
     def get_plane(self,arr,xsamp,ysamp,zsamp,plane,pval):
-        """Given a 1D array containing values for a 3D scalar field, reshapes the array into 3D and
-        returns a 2D array containing the data on a given plane, for a specified index value (pval) of that
-        plane. So, specifying plane=x and pval=30 would return data on the 30th y,z plane (a plane
-        at the given x index). The number of samples (i.e data points) in each coordinate direction
-        need not be equal"""
+        """Given a 1D array containing values for a 3D scalar field, reshapes
+        the array into 3D and returns a 2D array containing the data on a given
+        plane, for a specified index value (pval) of that plane. So, specifying
+        plane=x and pval=30 would return data on the 30th y,z plane (a plane at
+        the given x index). The number of samples (i.e data points) in each
+        coordinate direction need not be equal"""
+
         scalar = arr.reshape(zsamp+1,xsamp,ysamp)
         if plane == 'x':
             # z along rows, y along columns
@@ -378,6 +380,25 @@ class Processor(object):
         elif plane == 'z':
             # x along rows, y along columns
             return scalar[pval,:,:]
+
+    def get_line(self,arr,xsamp,ysamp,zsamp,line_dir,c1,c2):
+        """Given a 1D array containing values for a 3D scalar field, reshapes
+        the array into 3D and returns a new 1D array containing the data on a
+        line in a given direction, for a specified index value for the other
+        two spatial coordinates. So, specifying line_dir=z and c1=5,c2=5 would
+        return all the data along the z-direction at the 5th x,y index. Note
+        coordinates c1,c2 must always be specified in (x,y,z) order"""
+
+        scalar = arr.reshape(zsamp+1,xsamp,ysamp)
+        if line_dir == 'x':
+            # z along rows, y along columns
+            return scalar[c2,:,c1]
+        elif line_dir == 'y':
+            # x along columns, z along rows
+            return scalar[c2,c1,:]
+        elif line_dir == 'z':
+            # x along rows, y along columns
+            return scalar[:,c1,c2]
 
     def process(self,sim):
         """Retrieves data for a particular simulation, then processes that data"""
@@ -1276,11 +1297,11 @@ class Plotter(Processor):
         #            yv = [bottom,top]
         #            line = mlines.Line2D(xv,yv,linestyle='solid',linewidth=2.0,color='black')
         #            ax.add_line(line)
-        if self.conf['General']['save_plots']:
+        if sim.conf['General']['save_plots']:
             name = labels[2]+'_'+ptype+'.pdf'
             path = os.path.join(sim.conf['General']['sim_dir'],name)
             fig.savefig(path)
-        if self.conf['General']['show_plots']:
+        if sim.conf['General']['show_plots']:
             plt.show()
         plt.close(fig)
 
@@ -1368,17 +1389,17 @@ class Plotter(Processor):
         ax.set_ylabel(labels[1])
         ax.set_zlabel(labels[2])
         fig.suptitle(os.path.basename(sim.conf['General']['sim_dir']))
-        if self.conf['General']['save_plots']:
+        if sim.conf['General']['save_plots']:
             name = labels[-1]+'_'+ptype+'.pdf'
             path = os.path.join(sim.conf['General']['sim_dir'],name)
             fig.savefig(path)
-        if self.conf['General']['show_plots']:
+        if sim.conf['General']['show_plots']:
             plt.show()
         plt.close(fig)
 
     def full_3d(self,sim,quantity):
         """Generates a full 3D plot of a specified scalar quantity"""
-        period = sim.conf.getfloat('Parameters','array_period')
+        period = sim.conf['Simulation']['params']['array_period']['value']
         dx = period/sim.conf['Simulation']['x_samples']
         dy = period/sim.conf['Simulation']['y_samples']
         # The data just tells you what integer grid point you are on. Not what actual x,y coordinate you
@@ -1417,11 +1438,11 @@ class Plotter(Processor):
         plt.xlabel(labels[0])
         plt.ylabel(labels[1])
         plt.title(labels[2])
-        if self.conf['General']['save_plots']:
+        if sim.conf['General']['save_plots']:
             name = labels[1]+'_'+ptype+'.pdf'
             path = os.path.join(sim.conf['General']['sim_dir'],name)
             fig.savefig(path)
-        if self.conf['General']['show_plots']:
+        if sim.conf['General']['show_plots']:
             plt.show()
         plt.close(fig)
 
@@ -1431,21 +1452,35 @@ class Plotter(Processor):
         coord1 = int(coord1)
         coord2 = int(coord2)
         period = sim.conf['Simulation']['params']['array_period']['value']
-        dx = period/sim.conf['Simulation']['x_samples']
-        dy = period/sim.conf['Simulation']['y_samples']
+        xsamp = sim.conf['Simulation']['x_samples']
+        ysamp = sim.conf['Simulation']['y_samples']
+        zsamp = sim.conf['Simulation']['z_samples']
+        dx = period/xsamp
+        dy = period/ysamp
+        dz = period/zsamp
         # Get the scalar values
         scalar = sim.get_scalar_quantity(quantity)
         # Filter out any undesired data that isn't on the planes
-        mat = np.column_stack((sim.pos_inds[:,0],sim.pos_inds[:,1],sim.pos_inds[:,2],scalar))
-        planes = np.array([row for row in mat if row[0] == coord1 and row[1] == coord2])
-        planes[:,0] = planes[:,0]*dx
-        planes[:,1] = planes[:,1]*dy
+        data = self.get_line(scalar,xsamp,ysamp,zsamp,direction,coord1,coord2)
+        if direction == 'x':
+            # z along rows, y along columns
+            pos_data = np.unique(sim.pos_inds[:,0]) * dx
+        elif direction == 'y':
+            # x along columns, z along rows
+            pos_data = np.unique(sim.pos_inds[:,1]) * dy
+        elif direction == 'z':
+            # x along rows, y along columns
+            pos_data = np.unique(sim.pos_inds[:,2]) * dz
+        #mat = np.column_stack((sim.pos_inds[:,0],sim.pos_inds[:,1],sim.pos_inds[:,2],scalar))
+        #planes = np.array([row for row in mat if row[0] == coord1 and row[1] == coord2])
+        #planes[:,0] = planes[:,0]*dx
+        #planes[:,1] = planes[:,1]*dy
         freq = sim.conf['Simulation']['params']['frequency']['value']
         wvlgth = (c.c/freq)*1E9
         title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(freq,wvlgth)
         labels = ('Z [um]',quantity,title)
         ptype = "%s_line_plot_%i_%i"%(direction,coord1,coord2)
-        self.line_plot(sim,planes[:,2],planes[:,3],ptype,labels)
+        self.line_plot(sim,pos_data,data,ptype,labels)
 
 class Global_Plotter(Plotter):
     """Plots global quantities for an entire run that are not specific to a single simulation"""
@@ -1483,7 +1518,7 @@ class Global_Plotter(Plotter):
         """Plots the convergence of a field across all available simulations"""
         self.log.info('Plotting convergence')
         for group in self.sim_groups:
-            base = group[0].conf.get('General','base_dir')
+            base = group[0].conf['General']['base_dir']
             if err_type == 'local':
                 fglob = os.path.join(base,'localerror_%s*.dat'%quantity)
             elif err_type == 'global':
@@ -1555,9 +1590,8 @@ class Global_Plotter(Plotter):
 
     def transmission_data(self,absorbance,reflectance,transmission):
         """Plot transmissions, absorption, and reflectance assuming leaves are frequency"""
-        truthy = ['True','true','t','yes']
         for group in self.sim_groups:
-            base = group[0].conf['Simulation']['base_dir']
+            base = group[0].conf['General']['base_dir']
             self.log.info('Plotting transmission data for group at %s'%base)
             # Assuming the leaves contain frequency values, sum over all of them
             freqs = np.zeros(len(group))
@@ -1579,12 +1613,12 @@ class Global_Plotter(Plotter):
             absorb_l = absorb_l[::-1]
             trans_l = trans_l[::-1]
             plt.figure()
-            if absorbance in truthy:
+            if absorbance:
                 self.log.info('Plotting absorbance')
                 plt.plot(freqs,absorb_l,label='Absorption')
-            if reflectance in truthy:
+            if reflectance:
                 plt.plot(freqs,refl_l,label='Reflectance')
-            if transmission in truthy:
+            if transmission:
                 plt.plot(freqs,trans_l,label='Transmission')
             plt.legend(loc='best')
             figp = os.path.join(base,'transmission_plots.pdf')

@@ -160,9 +160,7 @@ function Config:evaluate(in_table,old_key)
                 tmp = pl.stringx.join('',{'result = ',tmp})
                 -- This loads the lua statement contained in tmp and evaluates it, making result
                 -- available in the current scope
-                print(tmp)
                 f = load(tmp)
-                print(f)
                 f()
                 key_seq = pl.stringx.split(old_key,'.')
                 table.insert(key_seq,key)
@@ -490,18 +488,26 @@ function Simulator:build_device()
         eps_r, eps_i = self:get_epsilon(f_phys,mat_path)
         self.sim:AddMaterial(mat,{eps_r,eps_i})
     end
+    self.sim:AddMaterial('vacuum',{1,0})
     -- We need to properly sort our layers because order DOES matter. Light
     -- will be incident upon the first layer specified
     local layers = self.conf:get('Layers')
     function layer_comp(l1,l2) 
+        --pl.pretty.dump(l1)
+        --pl.pretty.dump(l2)
+        --print(l1['order'])
+        --print(l2['order'])
         if l1['order'] < l2['order'] then
             return true
         elseif l1['order'] > l2['order'] then
             return false
-        else
+        elseif l1['order'] > l2['order'] and not l1 == l2 then
             pl.utils.raise('Two of your layers have the same order')
         end
     end
+    print('LAYERS DICT')
+    pl.pretty.dump(layers)
+    print('########')
     for layer,ldata in pl.tablex.sortv(layers,layer_comp) do
         print('Building layer:',layer)
         print(layer)
@@ -558,8 +564,11 @@ function Simulator:set_excitation()
     self.sim:SetFrequency(f_conv)
 
     -- Define incident light. Normally incident with frequency dependent amplitude
-    --local E_mag = self:get_incident_amplitude(f_phys,vec_mag,self.conf["General"]["input_power"])
-    local E_mag = 1
+    local E_mag = self:get_incident_amplitude(f_phys,vec_mag,self.conf:get({"Simulation","input_power"}))
+    -- Get angle of incident light
+    local polar = self.conf:get({'Simulation','params','polar_angle','value'})
+    local azimuthal = self.conf:get({'Simulation','params','azimuthal_angle','value'})
+    --local E_mag = 1
     -- To define circularly polarized light, basically just stick a j (imaginary number) in front of
     -- one of your components. The handedness is determined by the component you stick the j in front
     -- of. From POV of source, looking away from source toward direction of propagation, right handed
@@ -570,16 +579,16 @@ function Simulator:set_excitation()
     -- x magnitude is just to get things to look like Anna's simulations.
     if self.conf:get({'Simulation','polarization'}) == 'rhcp' then
         -- Right hand circularly polarized
-        self.sim:SetExcitationPlanewave({0,0},{-E_mag,0},{-E_mag,90})
+        self.sim:SetExcitationPlanewave({polar,azimuthal},{-E_mag,0},{-E_mag,90})
     elseif self.conf:get({'Simulation','polarization'}) == 'lhcp' then
         -- Left hand circularly polarized
-        self.sim:SetExcitationPlanewave({0,0},{-E_mag,90},{-E_mag,0})
+        self.sim:SetExcitationPlanewave({polar,azimuthal},{-E_mag,90},{-E_mag,0})
     elseif self.conf:get({'Simulation','polarization'}) == 'lpx' then
         -- Linearly polarized along x axis (TM polarixation)
-        self.sim:SetExcitationPlanewave({0,0},{0,0},{E_mag,0})
+        self.sim:SetExcitationPlanewave({polar,azimuthal},{0,0},{E_mag,0})
     elseif self.conf:get({'Simulation','polarization'}) == 'lpy' then
         -- Linearly polarized along y axis (TE polarization)
-        self.sim:SetExcitationPlanewave({0,0},{E_mag,0},{0,0})
+        self.sim:SetExcitationPlanewave({polar,azimuthal},{E_mag,0},{0,0})
     else 
         pl.utils.quit('Invalid polarization specification')
     end

@@ -10,7 +10,7 @@ import multiprocessing as mp
 import pandas
 import numpy as np
 import scipy.optimize as optz
-import postprocess_yaml as pp
+import postprocess as pp
 import time
 import pprint
 # Get our custom config object and the logger function
@@ -31,7 +31,6 @@ def get_combos(conf,keysets):
     for keyset in keysets:
         par = keyset[-1]
         pdict = conf[keyset]
-        print(pdict)
         if pdict['itertype'] == 'numsteps':
             values = np.linspace(pdict['start'],pdict['end'],pdict['step'])
         elif pdict['itertype'] == 'stepsize':

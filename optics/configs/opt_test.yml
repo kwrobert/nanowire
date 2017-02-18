@@ -1,0 +1,269 @@
+General:
+    
+    # Base directory under which to run your simulation(s)
+    base_dir: '/home/kyle_robertson/schoolwork/gradschool/nanowire/tests/opt_test'
+    # Same as above but remains untouched during buildout of directory tree
+    treebase: '/home/kyle_robertson/schoolwork/gradschool/nanowire/tests/opt_test'
+    # Output file base name for fields 
+    base_name: 'field_data'
+    # Would you like to post process automatically after your run? (Leave empty for no,
+    # or populate with anything if yes)
+    postprocess: False
+    # Run postprocessing in parallel?
+    post_parallel: False
+    # Run sims in parallel?
+    parallel: True
+    # Adaptive convergence. This will run multiple sims (up to max_iter of them) for each set 
+    # of params, increasing the number of basis terms until convergenced within the specified difference
+    adaptive_convergence: False
+    max_iter: 3 
+    max_diff: .02
+    # Maximum number of iterations and tolerance for any optimizations
+    opt_max_iter: 3
+    opt_tol: 1e-4
+    # The number of cores you would like to keep free. In other words, the number of cores
+    # you would NOT like to use for running sims. 
+    reserved_cores : 2
+    # Would you like to save the plots for each sim?
+    save_plots: True
+    # Would you like to show the plots during postprocessing in real time?
+    show_plots: False
+    # The location of the script file to be run by the wrapper
+    sim_script: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/optics/s4_sim_yaml.lua'
+    # File type to save as. Choose from (text, npz)
+    save_as: 'text'
+    # Save timing data?
+    save_time: True
+    # Ignore and delete H field fields to save disk space
+    ignore_h: True
+    # Output patterning in each layer
+    output_pattern: True
+    # The python script for calculating field differences during the adaptive convergence procedure in lua.
+    # Its painfully slow to parse the text files and do the matrix manipulations in lua
+    calc_diff_script: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/optics/diff_calc.py'
+
+Solver:
+# These options configure the various FMM formulations used within the simulation. See
+# the S4 docs and paper for details 
+
+## These are the defaults
+#Verbosity = 0
+#LatticeTruncation = Circular
+#DiscretizedEpsilon = False
+#DiscretizationResolution = 8
+#PolarizationDecomposition = False
+#PolarizationBasis = Default
+#LanczosSmoothing = False
+#SubpixelSmoothing = False
+#ConserveMemory = False
+    Verbosity: 1
+    LatticeTruncation: 'Circular'
+    DiscretizedEpsilon: False
+    DiscretizationResolution: 8
+    PolarizationDecomposition: True
+    PolarizationBasis: 'Default'
+    LanczosSmoothing: False
+    SubpixelSmoothing: False
+    ConserveMemory: False
+
+Simulation:
+    # This section handles global simulation parameters that are not specific to any given
+    # layer. For example, the lattice vectors or the angle of incident light
+    # The polarization of incident light (all normally incident)
+    # Right Hand Circularly Polarized : rhcp
+    # Left Hand Circularly Polarized : lhcp
+    # Linearly Polarized Along X : lpx
+    # Linearly Polarized Along Y : lpy
+    # NOTE: Now that we can specify incident angles we might need to modify this
+    polarization: 'rhcp'
+    # Number of output sample in the x, y, and z directions
+    # every 2 nm
+    x_samples: 10
+    y_samples: 10
+    # every 10 nm
+    z_samples: 20
+    r_samples : 50
+    theta_samples : 360
+    # Base length unit defined relative to a meter (so nm would be 1E-9)
+    base_unit: 1.0E-6
+    # Path to sun input power file
+    input_power: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/Input_sun_power.txt'
+    input_power_wv: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/ASTMG173.csv'
+    # Global simulation parameters that are "sweepable"
+    params:
+        # The angle of the incident light
+        polar_angle:
+            type: 'fixed'
+            value: 90
+        azimuthal_angle: 
+            type: 'fixed'
+            value: 0
+        # Periodicity of the square array. NOTE: Currently this only supports a square
+        # lattice. Support for non-square unit cells may be added in the future
+        #array_period:
+        #    type: 'sorting'
+        #    itertype: 'numsteps'
+        #    start: .25
+        #    end: .3
+        #    step: 5
+        #    key: 2 
+        array_period:
+            type: 'optimized'
+            guess: .35 
+            
+        frequency:
+            type: 'variable'
+            start: 3.e+14
+            end: 9.e+14
+            step: 5
+            itertype: 'numsteps'
+        numbasis:
+            type: 'fixed'
+            value: 10
+
+Materials:
+    ITO: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/008_ITO_nk_Hz.txt'
+    Cyclotene: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/007_Cyclotrene_nk_Hz.txt'
+    GaAs: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/006_GaAs_nk_Walker_modified_Hz.txt'
+    AlInP: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/009_AlInP_nk_Hz.txt'
+
+Layers:
+    ITO:
+        order: 1
+        base_material: 'ITO' 
+        params:
+            thickness:
+                type: 'fixed'
+                value: .3
+    NW_AlShell: 
+        order: 2 
+        base_material: 'Cyclotene'
+        params:
+            thickness: 
+                type: 'fixed'
+                value: 3
+            core_radius:
+                type: 'fixed'
+                value: .075
+                #type: 'sorting'
+                #itertype: 'stepsize'
+                #start: .06
+                #end: .075
+                #step: .005
+                #key: 1 
+            shell_radius:
+                type: 'fixed'
+                value: '`%(Layers.NW_AlShell.params.core_radius.value)s+.02`'
+        geometry:
+            core:
+                order: 2
+                type: 'circle'
+                radius: '%(Layers.NW_AlShell.params.core_radius.value)s'
+                center: ['`%(Simulation.params.array_period.value)s/2`','`%(Simulation.params.array_period.value)s/2`']
+                material: 'GaAs' 
+            shell: 
+                order: 1
+                type: 'circle'
+                radius: '%(Layers.NW_AlShell.params.shell_radius.value)s'
+                center: ['`%(Simulation.params.array_period.value)s/2`','`%(Simulation.params.array_period.value)s/2`']
+                material: 'AlInP' 
+    Substrate:
+        order: 3
+        base_material: GaAs
+        params:
+            thickness:
+                type: 'fixed'
+                value: 3
+
+Postprocessing:
+    Cruncher:
+        # What quantities would you like to calculate for each simulation?
+        # The quantities specific to each simulation that you would like to calculate. Specify
+        # compute: False 
+        # to disable the calculation, and True to enable it. Arguments can be passed to each
+        # option as a list. If you would like to run the function multiple times with multiple
+        # sets of arguments, specify a list of lists like so:
+        # single run: ['arg1',3,'arg2']
+        # multiple runs: [['arg1,3,'arg2'],['arg3',4,'arg4']]
+        normE:
+            compute: True
+            args:
+        normEsquared:
+            compute: True
+            args:
+        normH:
+            compute: False
+            args:
+        normHsquared:
+            compute: False
+            args:
+        genRate:
+            compute: True
+            args:
+        angularAvg:
+            compute: False
+            args: ['genRate']
+        transmissionData:
+            compute: True
+            args:
+        integrated_absorbtion:
+            compute: False
+            args:
+    
+    Global_Cruncher:
+    # Compute global quantities
+    # Parameters:
+    # 1) The field to compute the error of
+    # 2) Exclude or do not exclude the air and substrate regions when 
+    #    computing the error
+        local_error:
+            compute: False
+            args: E
+        global_error:
+            compute: False
+            args: ['E',False]
+        adjacent_error:
+            compute: False
+            args: ['E',False]
+        global_avg:
+            compute: False
+            args: ['genRate','angularAvg']
+        Jsc:
+            compute: False
+            args:
+        weighted_transmissionData:
+            compute: False
+            args:
+    
+    Plotter:
+    # If you do, what kind of plots would you like to generate?
+    # Must choose from a list of supported options!!!
+        full_3d:
+            compute: False
+            args: ['normE']
+        planes_3d: 
+            compute: False
+            args: ['normE',25,25]
+        plane_2d:
+        # 1) Value to plot
+        # 2) x,y, or z plane?
+        # 3) Which plane value?
+        # 4) Draw nanowire components? (default: False)
+        # 5) Fix colorbar limits? (default: False)
+            compute: False
+            args: [['normE',x,50,True ],['normE','z',160,True],['normEsquared','z',160,True ],['normEsquared','x',50,True]]
+        fixed_line:
+            compute: False
+            args: ['normE','z',25,25]
+    
+    Global_Plotter:
+        convergence:
+            compute: False
+            args: [['E','global','log'],['E','local','log']]
+        global_avg: 
+            compute: False
+            args: ['genRate','angularAvg']
+        transmission_data:
+            # Absorbtion, Reflectance, Transmission (pass false to disable one) 
+            compute: False
+            args: [False,True,False]

@@ -17,8 +17,8 @@ except KeyError:
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.cm as cmx
-# import matplotlib.lines as mlines
-# import matplotlib.patches as mpatches
+import matplotlib.lines as mlines
+import matplotlib.patches as mpatches
 # Literally just for the initial data load
 import pandas
 import multiprocessing as mp
@@ -441,6 +441,8 @@ class Cruncher(Processor):
                                   str(quant),str(argsets))
                     if argsets and type(argsets[0]) == list:
                         for argset in argsets:
+                            self.log.info('Computing individual argset'
+                                          ' %s',str(argset))
                             if argset:
                                 self.calculate(quant,sim,argset)
                             else:
@@ -623,6 +625,7 @@ class Cruncher(Processor):
         freq = sim.conf['Simulation']['params']['frequency']['value']
         nk = {mat:(self.get_nk(matpath,freq)) for mat,matpath in
               sim.conf['Materials'].items()}
+        nk['vacuum'] = (1,0)
         self.log.debug(nk)
         # Get spatial discretization
         z_samples = sim.conf['Simulation']['z_samples']
@@ -860,6 +863,8 @@ class Global_Cruncher(Cruncher):
                               str(quant),str(argsets))
                 if argsets and type(argsets[0]) == list:
                     for argset in argsets:
+                        self.log.info('Computing individual argset'
+                                      ' %s',str(argset))
                         if argset:
                             self.calculate(quant,argset)
                         else:
@@ -1077,23 +1082,49 @@ class Global_Cruncher(Cruncher):
                     sim2.clear_data()
                     ref_sim.clear_data()
 
-    def global_avg(self,quantity,avg_type):
-        """Combine local average of a specific quantity for all leaves in each group"""
+    def scalar_reduce(self,quantity,avg=False):
+        """Combine a scalar quantity across all simulations in each group. If
+        avg=False then a direct sum is computed, otherwise an average is
+        computed"""
         for group in self.sim_groups:
             base = group[0].conf['General']['base_dir']
-            self.log.info('Computing global averages for group at %s'%base)
-            key = '%s_%s'%(quantity,avg_type)
-            group[0].get_avgs()
-            first = group[0].avgs[key]
+            self.log.info('Performing scalar reduction for group at %s'%base)
+            group[0].get_data()
+            group_comb = group[0].get_scalar_quantity(quantity) 
             group[0].clear_data()
-            group_avg = np.zeros((len(group),first.shape[0],first.shape[1]))
-            group_avg[0,:,:] = first
+            # This approach is more memory efficient then building a 2D array
+            # of all the data from each group and summing along an axis
             for i in range(1,len(group)):
-                group[i].get_avgs()
-                group_avg[i,:,:] = group[i].avgs[key]
-            group_avg = np.average(group_avg,axis=0)
-            path = os.path.join(base,'%s_%s_global.avg.crnch'%(quantity,avg_type))
-            np.savetxt(path,group_avg)
+                group[i].get_data()
+                group_comb += group[i].get_scalar_quantity(quantity)
+                group[i].clear_data()
+            if avg:
+                group_comb = group_comb/len(group)
+                fname = 'scalar_reduce_avg_%s'%quantity
+            else:
+                fname = 'scalar_reduce_%s'%quantity
+
+            path = os.path.join(base,fname)
+            if group[0].conf['General']['save_as'] == 'npz':
+                np.save(path,group_comb)
+            elif group[0].conf['General']['save_as'] == 'text': 
+                path+='.crnch'
+                np.savetxt(path,group_comb)
+            else:
+                raise ValueError('Invalid file type in config')
+            
+            
+            #group[0].get_avgs()
+            #first = group[0].avgs[key]
+            #group[0].clear_data()
+            #group_avg = np.zeros((len(group),first.shape[0],first.shape[1]))
+            #group_avg[0,:,:] = first
+            #for i in range(1,len(group)):
+            #    group[i].get_avgs()
+            #    group_avg[i,:,:] = group[i].avgs[key]
+            #group_avg = np.average(group_avg,axis=0)
+            #path = os.path.join(base,'%s_%s_global.avg.crnch'%(quantity,avg_type))
+            #np.savetxt(path,group_avg)
 
     def Jsc(self):
         """Computes photocurrent density"""
@@ -1213,6 +1244,8 @@ class Plotter(Processor):
                 self.log.info('Plotting %s with args %s',str(plot),str(argsets))
                 if argsets and type(argsets[0]) == list:
                     for argset in argsets:
+                        self.log.info('Plotting individual argset'
+                                      ' %s',str(argset))
                         if argset:
                             self.gen_plot(plot,sim,argset)
                         else:
@@ -1237,7 +1270,98 @@ class Plotter(Processor):
                            plot,exc_info=True,stack_info=True)
             raise
 
-    def heatmap2d(self,sim,x,y,cs,labels,ptype,draw=False,fixed=None,colorsMap='jet'):
+    def draw_geometry_2d(self,sim,plane,ax_hand):
+        """This function draws the layer boundaries and in-plane geometry on 2D
+        heatmaps"""
+        # TODO: If we want to make things general, this function could actually
+        # get really complicated for several reasons. 
+        # 1. Each layer can have a unique in plane geometry. If we are plotting
+        # an xy plane (plane = z, poor notation which should be fixed), we need
+        # to identify which layer we are in so we can extract the geometry
+        # 2. We need to be able to handle any in-plane geometry thrown at us
+        # 3. If plotting an xz, yz plane (plane = x, plane = y), we need to
+        # know which plane we are at so we can scale the cross-sectional width
+        # of any geometric features appropriately. This will definitely
+        # involved some seriously nontrivial geometry depending on what shape
+        # we are dealing with, how its rotated, etc. 
+        self.log.warning('Drawing capabilities are severely limited until I'
+                         ' figure out how to handle a general geometry')
+        period = sim.conf['Simulation']['params']['array_period']['value']
+        cent = sim.conf['Layers']['NW_AlShell']['geometry']['core']['center']
+        core_rad = sim.conf['Layers']['NW_AlShell']['geometry']['core']['radius']
+        shell_rad = sim.conf['Layers']['NW_AlShell']['geometry']['shell']['radius']
+        dx = period/sim.conf['Simulation']['x_samples']
+        dy = period/sim.conf['Simulation']['y_samples']
+        dz = sim.conf.get_height()/sim.conf['Simulation']['z_samples']
+        if plane[-1] == 'z':
+            self.log.info('draw nanowire circle')
+            core = mpatches.Circle(cent,radius=core_rad,fill=False)
+            shell = mpatches.Circle(cent,radius=shell_rad,fill=False)
+            ax_hand.add_artist(core)
+            ax_hand.add_artist(shell)
+        elif plane[-1] == 'y' or plane[-1] == 'x':
+            boundaries = []
+            count = 0
+            ordered_layers = sim.conf.sorted_dict(sim.conf['Layers'])
+            for layer,ldata in ordered_layers.items():
+                # Get boundaries between layers and their starting and ending indices
+                layer_t = ldata['params']['thickness']['value']
+                if count == 0:
+                    start = 0
+                    end = int(layer_t/dz)+1
+                    boundaries.append((layer_t,start,end,layer))
+                else:
+                    prev_tup = boundaries[count-1]
+                    dist = prev_tup[0]+layer_t
+                    start = prev_tup[2]
+                    end = int(dist/dz) + 1
+                    boundaries.append((dist,start,end))
+                if layer_t > 0: 
+                    x = [0,period]
+                    y = [start*dz,start*dz]
+                    label_y = y[0] + 0.05
+                    label_x = x[-1] - .01
+                    label_text = boundaries[count-1][-1]
+                    plt.text(label_x,label_y,layer,ha='right',family='sans-serif',size=12)
+                    line = mlines.Line2D(x,y,linestyle='solid',linewidth=2.0,color='black')
+                    ax_hand.add_line(line)
+                    count += 1
+                if layer == 'NW_AlShell':
+                    for rad in (core_rad,shell_rad):
+                        for x in (cent[0]-rad,cent[0]+rad):
+                            # Need two locations w/ same x values
+                            xv = [x,x]
+                            yv = [start*dz,end*dz]
+                            line = mlines.Line2D(xv,yv,linestyle='solid',linewidth=2.0,color='black')
+                            ax_hand.add_line(line)
+            return ax_hand
+            #self.log.info('draw layers')
+            ## Draw a line at the interface between each layer
+            #ito_line = sim.conf.getfloat('Parameters','air_t')
+            #nw_line = sim.conf.getfloat('Parameters','ito_t')+ito_line
+            #sub_line = sim.conf.getfloat('Parameters','nw_height')+nw_line
+            #air_line = sim.conf.getfloat('Parameters','substrate_t')+sub_line
+            #for line_h in [(ito_line,'ITO'),(nw_line,'NW'),(sub_line,'Substrate'),(air_line,'Air')]:
+            #    x = [0,sim.conf.getfloat('Parameters','array_period')]
+            #    y = [line_h[0],line_h[0]]
+            #    label_y = line_h[0] + 0.01
+            #    label_x = x[-1] - .01
+            #    plt.text(label_x,label_y,line_h[-1],ha='right',family='sans-serif',size=12)
+            #    line = mlines.Line2D(x,y,linestyle='solid',linewidth=2.0,color='black')
+            #    ax_hand.add_line(line)
+            ## Draw two vertical lines to show the edges of the nanowire
+            #cent = sim.conf.getfloat('Parameters','array_period')/2.0
+            #rad = sim.conf.getfloat('Parameters','nw_radius')
+            #shell = sim.conf.getfloat('Parameters','shell_t')
+            #bottom = sim.conf.getfloat('Parameters','ito_t')+ito_line
+            #top = sim.conf.getfloat('Parameters','nw_height')+nw_line
+            #for x in (cent-rad,cent+rad,cent-rad-shell,cent+rad+shell):
+            #    xv = [x,x]
+            #    yv = [bottom,top]
+            #    line = mlines.Line2D(xv,yv,linestyle='solid',linewidth=2.0,color='black')
+            #    ax_hand.add_line(line)
+    
+    def heatmap2d(self,sim,x,y,cs,labels,ptype,save_path=None,show=False,draw=False,fixed=None,colorsMap='jet'):
         """A general utility method for plotting a 2D heat map"""
         cm = plt.get_cmap(colorsMap)
         if fixed:
@@ -1256,52 +1380,16 @@ class Plotter(Processor):
         start, end = ax.get_xlim()
         ax.xaxis.set_ticks(np.arange(start,end,0.1))
         start, end = ax.get_ylim()
-        ax.yaxis.set_ticks(np.arange(start,end,0.1))
+        ax.yaxis.set_ticks(np.arange(start,end,0.2))
         ax.set_xlim((np.amin(x),np.amax(x)))
         ax.set_ylim((np.amin(y),np.amax(y)))
         fig.suptitle(labels[3])
-        # Draw geometric indicators and labels
-        # TODO: Fixed the geometry drawing. Can just start with simply drawing
-        # layer boundaries and then adding internal geometry from there somehow
-        #if draw:
-        #    if ptype[-1] == 'z':
-        #        self.log.info('draw nanowire circle')
-        #        cent =
-        #        sim.conf.getfloat('Simulation','params','array_period','value')/2.0
-        #        rad = sim.conf.getfloat('Simulation','params','nw_radius')
-        #        circ = mpatches.Circle((cent,cent),radius=rad,fill=False)
-        #        ax.add_artist(circ)
-        #    elif ptype[-1] == 'y' or ptype[-1] == 'x':
-        #        self.log.info('draw layers')
-        #        # Draw a line at the interface between each layer
-        #        ito_line = sim.conf.getfloat('Parameters','air_t')
-        #        nw_line = sim.conf.getfloat('Parameters','ito_t')+ito_line
-        #        sub_line = sim.conf.getfloat('Parameters','nw_height')+nw_line
-        #        air_line = sim.conf.getfloat('Parameters','substrate_t')+sub_line
-        #        for line_h in [(ito_line,'ITO'),(nw_line,'NW'),(sub_line,'Substrate'),(air_line,'Air')]:
-        #            x = [0,sim.conf.getfloat('Parameters','array_period')]
-        #            y = [line_h[0],line_h[0]]
-        #            label_y = line_h[0] + 0.01
-        #            label_x = x[-1] - .01
-        #            plt.text(label_x,label_y,line_h[-1],ha='right',family='sans-serif',size=12)
-        #            line = mlines.Line2D(x,y,linestyle='solid',linewidth=2.0,color='black')
-        #            ax.add_line(line)
-        #        # Draw two vertical lines to show the edges of the nanowire
-        #        cent = sim.conf.getfloat('Parameters','array_period')/2.0
-        #        rad = sim.conf.getfloat('Parameters','nw_radius')
-        #        shell = sim.conf.getfloat('Parameters','shell_t')
-        #        bottom = sim.conf.getfloat('Parameters','ito_t')+ito_line
-        #        top = sim.conf.getfloat('Parameters','nw_height')+nw_line
-        #        for x in (cent-rad,cent+rad,cent-rad-shell,cent+rad+shell):
-        #            xv = [x,x]
-        #            yv = [bottom,top]
-        #            line = mlines.Line2D(xv,yv,linestyle='solid',linewidth=2.0,color='black')
-        #            ax.add_line(line)
-        if sim.conf['General']['save_plots']:
-            name = labels[2]+'_'+ptype+'.pdf'
-            path = os.path.join(sim.conf['General']['sim_dir'],name)
-            fig.savefig(path)
-        if sim.conf['General']['show_plots']:
+        if draw:
+            ax = self.draw_geometry_2d(sim,ptype,ax)
+        if save_path:
+            print("SAVING PLOT")
+            fig.savefig(save_path)
+        if show:
             plt.show()
         plt.close(fig)
 
@@ -1313,14 +1401,6 @@ class Plotter(Processor):
         ys = sim.conf['Simulation']['y_samples']
         ys = int(float(ys))
         height = sim.conf.get_height()
-        #if plane == 'x' or plane == 'y':
-        #    pval = int(pval)
-        #else:
-        #    # Find the nearest zval to the one we want. This is necessary because comparing floats
-        #    # rarely works
-        #    desired_val = (height/zs)*int(pval)
-        #    pval = np.abs(sim.pos_inds[:,2]-desired_val).argmin()
-        #    #pval = int(sim.pos_inds[ind,2])
         pval = int(pval)
         period = sim.conf['Simulation']['params']['array_period']['value']
         dx = period/xs
@@ -1341,9 +1421,9 @@ class Plotter(Processor):
         ## Get all unique values for x,y,z and convert them to actual values not indices
         #x,y,z = np.unique(planes[:,0])*dx,np.unique(planes[:,1])*dy,np.unique(planes[:,2])
         freq = sim.conf['Simulation']['params']['frequency']['value']
-        print('FREQ TYPE: ',type(freq))
         wvlgth = (c.c/freq)*1E9
         title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(freq,wvlgth)
+        # TODO: Fix this
         if fixed:
             # Super hacky and terrible way to fix the minimum and maximum values of the color bar
             # for a plot across all sims
@@ -1353,17 +1433,31 @@ class Plotter(Processor):
         cs = self.get_plane(scalar,xs,ys,zs,plane,pval)
         self.log.info('Plotting plane')
         if plane == 'x':
-            #cs = planes[:,-1].reshape(z.shape[0],y.shape[0])
             labels = ('y [um]','z [um]', quantity,title)
-            self.heatmap2d(sim,y,z,cs,labels,'plane_2d_x',draw,fixed)
+            if sim.conf['General']['save_plots']:
+                p = os.path.join(sim.conf['General']['sim_dir'],
+                                 '%s_plane_2d_x.pdf'%quantity)
+            else: 
+                p = False
+            show = sim.conf['General']['show_plots']
+            self.heatmap2d(sim,y,z,cs,labels,plane,save_path=p,show=show,draw=draw,fixed=fixed)
         elif plane == 'y':
-            #cs = planes[:,-1].reshape(z.shape[0],x.shape[0])
             labels = ('x [um]','z [um]', quantity,title)
-            self.heatmap2d(sim,x,z,cs,labels,'plane_2d_y',draw,fixed)
+            if sim.conf['General']['save_plots']:
+                p = os.path.join(sim.conf['General']['sim_dir'],
+                                 '%s_plane_2d_y.pdf'%quantity)
+            else: 
+                p = False
+            show = sim.conf['General']['show_plots']
+            self.heatmap2d(sim,x,z,cs,labels,plane,save_path=p,show=show,draw=draw,fixed=fixed)
         elif plane == 'z':
-            #cs = planes[:,-1].reshape(y.shape[0],x.shape[0])
             labels = ('y [um]','x [um]', quantity,title)
-            self.heatmap2d(sim,x,y,cs,labels,'plane_2d_z',draw,fixed)
+            if sim.conf['General']['save_plots']:
+                p = os.path.join(sim.conf['General']['sim_dir'],
+                                 '%s_plane_2d_z.pdf'%quantity)
+            else: 
+                p = False
+            self.heatmap2d(sim,x,y,cs,labels,plane,save_path=p,show=show,draw=draw,fixed=fixed)
 
     def scatter3d(self,sim,x,y,z,cs,labels,ptype,colorsMap='jet'):
         """A general utility method for scatter plots in 3D"""
@@ -1496,6 +1590,8 @@ class Global_Plotter(Plotter):
                 self.log.info('Plotting %s with args %s',str(plot),str(argsets))
                 if argsets and type(argsets[0]) == list:
                     for argset in argsets:
+                        self.log.info('Plotting individual argset'
+                                      ' %s',str(argset))
                         if argset:
                             self.gen_plot(plot,argset)
                         else:
@@ -1557,36 +1653,72 @@ class Global_Plotter(Plotter):
                     plt.show()
                 plt.close(fig)
 
-    def global_avg(self,quantity,avg_type):
-        """Combine local average of a specific quantity for all leaves in each group"""
+    def scalar_reduce(self,quantity,plane,pval,draw=False,fixed=None):
+        """Plot the result of a particular scalar reduction for each group"""
         for group in self.sim_groups:
-            base = group[0].conf['General']['base_dir']
-            self.log.info('Computing global averages for group at %s'%base)
-            #key = '%s_%s'%(quantity,avg_type)
-            path = os.path.join(base,'%s_%s_global.avg.crnch'%(quantity,avg_type))
-            cs = np.loadtxt(path)
+            sim = group[0]
+            base = sim.conf['General']['base_dir']
+            self.log.info('Plotting scalar reduction of %s for quantity'
+                          ' %s'%(base,quantity))
             cm = plt.get_cmap('jet')
-            cNorm = matplotlib.colors.Normalize(vmin=np.amin(cs), vmax=np.amax(cs))
-            scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
-            fig = plt.figure(figsize=(9,7))
-            ax = fig.add_subplot(111)
-            labels = ('Radial Distance','Depth',quantity,avg_type)
-            ax.pcolormesh(cs,cmap=cm,norm=cNorm,alpha=.5)
-            scalarMap.set_array(cs)
-            cb = fig.colorbar(scalarMap)
-            cb.set_label(labels[2])
-            ax.set_xlabel(labels[0])
-            ax.set_ylabel(labels[1])
-            #rmax = group[0].conf['Simulation']['params']['array_period']['value']/np.sqrt(np.pi)
-            #dr = rmax/group[0].conf['Simulation']['r_samples']
-            #dz = group[0].conf.get_height()/group[0].conf['Simulation']['z_samples']
-            #fig.canvas.draw()
-            #xlabels = ['%.2f'%(int(item.get_text())*dr) for item in ax.get_xticklabels()]
-            #ylabels = ['%.2f'%(int(item.get_text())*dz) for item in ax.get_yticklabels()]
-            #ax.set_xticklabels(xlabels)
-            #ax.set_yticklabels(ylabels)
-            fig.suptitle(labels[3])
-            fig.savefig(os.path.join(base,'%s_%s_global.avg.pdf'%(quantity,avg_type)))
+            zs = sim.conf['Simulation']['z_samples']
+            xs = sim.conf['Simulation']['x_samples']
+            xs = int(float(xs))
+            ys = sim.conf['Simulation']['y_samples']
+            ys = int(float(ys))
+            height = sim.conf.get_height()
+            period = sim.conf['Simulation']['params']['array_period']['value']
+            dx = period/xs
+            dy = period/ys
+            dz = height/zs
+            x = np.arange(0,period,dx)
+            y = np.arange(0,period,dy)
+            z = np.arange(0,height+dz,dz)
+            print(y.shape)
+            print(z.shape)
+            if sim.conf['General']['save_as'] == 'npz':
+                globstr = os.path.join(base,'scalar_reduce*_%s.npy'%quantity)
+                files = glob.glob(globstr)
+            elif sim.conf['General']['save_as'] == 'text': 
+                globstr = os.path.join(base,'scalar_reduce*_%s.crnch'%quantity)
+                files = glob.glob(globstr)
+            else:
+                raise ValueError('Incorrect file type in config')
+            title = 'Reduction of %s'%quantity
+            for datfile in files:
+                if sim.conf['General']['save_as'] == 'npz':
+                    scalar = np.load(datfile)
+                elif sim.conf['General']['save_as'] == 'text': 
+                    scalar = np.loadtxt(datfile,group_comb)
+                else:
+                    raise ValueError('Incorrect file type in config')
+                cs = self.get_plane(scalar,xs,ys,zs,plane,pval)
+                if plane == 'x':
+                    labels = ('y [um]','z [um]', quantity,title)
+                    if sim.conf['General']['save_plots']:
+                        fname = 'scalar_reduce_%s_plane_2d_x.pdf'%quantity
+                        p = os.path.join(sim.conf['General']['base_dir'],fname)
+                    else: 
+                        p = False
+                    show = sim.conf['General']['show_plots']
+                    self.heatmap2d(sim,y,z,cs,labels,plane,save_path=p,show=show,draw=draw,fixed=fixed)
+                elif plane == 'y':
+                    labels = ('x [um]','z [um]', quantity,title)
+                    if sim.conf['General']['save_plots']:
+                        fname = 'scalar_reduce_%s_plane_2d_y.pdf'%quantity
+                        p = os.path.join(sim.conf['General']['base_dir'],fname)
+                    else: 
+                        p = False
+                    show = sim.conf['General']['show_plots']
+                    self.heatmap2d(sim,x,z,cs,labels,plane,save_path=p,show=show,draw=draw,fixed=fixed)
+                elif plane == 'z':
+                    labels = ('y [um]','x [um]', quantity,title)
+                    if sim.conf['General']['save_plots']:
+                        fname = 'scalar_reduce_%s_plane_2d_z.pdf'%quantity
+                        p = os.path.join(sim.conf['General']['base_dir'],fname)
+                    else: 
+                        p = False
+                    self.heatmap2d(sim,x,y,cs,labels,plane,save_path=p,show=show,draw=draw,fixed=fixed)
 
     def transmission_data(self,absorbance,reflectance,transmission):
         """Plot transmissions, absorption, and reflectance assuming leaves are frequency"""

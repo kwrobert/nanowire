@@ -1,8 +1,6 @@
 Code
 ====
 
-1) Fix simulation subproccesing in sim_wrapper so we get output/feedback from S4 library when
-   verbosity > 1
 2) Fix automatic post processing so we get feedback to stdout as well as logs
 3) Add error checking of plane values in setup.ini to make sure they do not exceed number of samples
 4) P̶a̶r̶a̶l̶l̶e̶l̶i̶z̶e̶ ̶p̶o̶s̶t̶p̶r̶o̶c̶e̶s̶s̶i̶n̶g̶
@@ -45,28 +43,16 @@ Code
 16) We can reduce the angular average to just 1/8th of the square unit cell because of the symmetry
     of the cell. 
 17) Set all input wave amplitudes to one and weight everything by the solar spectrum after the fact
-18) We need to adjust the number of sampling points based on the array dimensions.  
 
 Reading
 =======
 
-1) R̶e̶a̶d̶ ̶R̶a̶y̶s̶ ̶p̶a̶p̶e̶r̶ ̶a̶n̶d̶ ̶i̶d̶e̶n̶t̶i̶f̶y̶ ̶a̶n̶y̶ ̶g̶a̶p̶s̶ ̶i̶n̶ ̶t̶h̶e̶i̶r̶ ̶o̶p̶t̶i̶m̶i̶z̶a̶t̶i̶o̶n̶ ̶t̶h̶a̶t̶ ̶w̶e̶ ̶c̶o̶u̶l̶d̶ ̶f̶i̶l̶l̶
-    a) Notes in Zotero
-2) F̶i̶n̶d̶/̶a̶s̶k̶ ̶f̶o̶r̶ ̶g̶e̶n̶e̶r̶a̶t̶i̶o̶n̶ ̶r̶a̶t̶e̶ ̶d̶o̶c̶u̶m̶e̶n̶t̶ ̶A̶n̶n̶a̶ ̶m̶a̶d̶e̶ ̶a̶n̶d̶ ̶r̶e̶a̶d̶ ̶i̶t̶
-    a) Handwritten notes up on Dropbox. Kind of a mess. Will need to decrpypt it in the future
 3) Genetic algorithm book that I downloaded. Should be somewhere in papers/  
 4) Software design patterns book. Stored in zotero. 
 
 Simulation and Data Analysis
 ============================
 
-1) Run a full convergence analysis for different system sizes
-    a) p̶e̶r̶i̶o̶d̶ ̶2̶0̶0̶ ̶n̶m̶,̶ ̶r̶a̶d̶i̶u̶s̶ ̶7̶5̶
-    b) p̶e̶r̶i̶o̶d̶ ̶3̶0̶0̶ ̶n̶m̶,̶ ̶r̶a̶d̶i̶u̶s̶ ̶6̶0̶
-    c) N̶e̶e̶d̶ ̶t̶o̶ ̶f̶i̶n̶d̶ ̶s̶i̶m̶s̶ ̶t̶h̶a̶t̶ ̶f̶a̶i̶l̶e̶d̶,̶ ̶r̶e̶-̶r̶u̶n̶,̶ ̶t̶h̶e̶n̶ ̶c̶o̶m̶p̶l̶e̶t̶e̶ ̶p̶o̶s̶t̶p̶r̶o̶c̶e̶s̶s̶i̶n̶g̶ ̶
-        i) All failed simulations are running or complete 
-2) Run simulation with fixed total nanowire radius, but vary ratio between shell thickness
-   and core radius 
    
 Documentation
 =============
@@ -78,8 +64,7 @@ Other
 =====
 
 1) Investigate Ctrl-Space,CtrlP, and ag (the silver surfer) plugins for VIM.
-2) Read docs for Syntastic to find better settings.  
-3) Read docs for Vimtex to find better settings
+2) Read docs for Vimtex to find better settings
 4) Investigate VIM snippets (UltiSnippets). A way of doing a bunch of commands
    (like adding that annoying namespace wrapper in python scripts, or setting up
    the Argparse boilerplace in python). 

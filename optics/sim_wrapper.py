@@ -13,9 +13,29 @@ import scipy.optimize as optz
 import postprocess as pp
 import time
 import pprint
+import hashlib
+import copy
 # Get our custom config object and the logger function
 from utils.config import *
 
+def make_hash(o):
+    """Makes a hash from a dictionary, list, tuple or set to any level, that contains
+    only other hashable types (including any lists, tuples, sets, and
+    dictionaries)."""
+
+    if isinstance(o, (set, tuple, list)):
+
+        return tuple([make_hash(e) for e in o])
+
+    elif not isinstance(o, dict):
+        buf = repr(o).encode('utf-8')
+        return hashlib.md5(buf).hexdigest()
+
+    new_o = copy.deepcopy(o)
+    for k, v in new_o.items():
+        new_o[k] = make_hash(v)
+    out = repr(tuple(frozenset(sorted(new_o.items())))).encode('utf-8')
+    return hashlib.md5(out).hexdigest()
 
 def get_combos(conf,keysets):
     """Given a config object, return two lists. The first list contains the

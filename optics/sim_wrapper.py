@@ -37,7 +37,6 @@ def get_combos(conf,keysets):
             values = np.arange(pdict['start'],pdict['end']+pdict['step'],pdict['step'])
         else:
             raise ValueError('Invalid itertype specified at {}'.format(str(keyset)))
-        optionValues[par] = values
     log.debug("Option values dict after processing: %s"%str(optionValues))
     valuelist = list(optionValues.values())
     keys = list(optionValues.keys())

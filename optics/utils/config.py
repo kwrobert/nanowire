@@ -136,6 +136,10 @@ class Config(MutableMapping):
         with open(path,'w') as out:
             out.write(yaml.dump(self.data,default_flow_style=False))
 
+    def dump(self):
+        """Returns YAML representation of this particular config"""
+        return yaml.dump(self.data,default_flow_style=False)
+
     def get_height(self):
         """Returns the total height of the device"""
         height = 0

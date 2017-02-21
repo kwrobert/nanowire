@@ -14,16 +14,16 @@ import postprocess as pp
 import time
 import pprint
 import argparse as ap
+import ruamel.yaml as yaml
+import logging
 
 # get our custom config object and the logger function
-from utils.config import *
-from collections import OrderedDict
+from utils.simulation import *
+from collections import MutableMapping,OrderedDict
 from functools import wraps
 from contextlib import contextmanager
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Column, Integer, String, create_engine
 from sqlalchemy.orm import sessionmaker
-
 
 __DB_ENGINE__ = None
 __SESSION_FACTORY__ = None
@@ -37,6 +37,7 @@ def setup_db(name,verbose=False):
         __DB_ENGINE__ = create_engine('sqlite:///{}'.format(name),echo=verbose)
         __SESSION_FACTORY__ = sessionmaker(bind=__DB_ENGINE__)
         Base.metadata.create_all(__DB_ENGINE__)
+        Simulation.metadata.create_all(__DB_ENGINE__)
     else:
         raise RuntimeError('DB Engine already set')
 
@@ -63,69 +64,65 @@ def session_scope():
 #        return func(*args,**kwargs)
 #    return wrapper
 
-class Simulation(Base):
-
-    __tablename__ = 'master'
-    
-    id = Column(String,primary_key = True)
-    conf_yaml = Column(String)
-    state = None
-
-    def __init__(self,conf):
-        self.conf = conf
-        conf_id = make_hash(conf.data)
-        conf_yaml = conf.dump()
-        super(Simulation,self).__init__(conf_yaml=conf_yaml,id=conf_id,state='created')
-
-def make_hash(o):
-    """Makes a hash from a dictionary, list, tuple or set to any level, that contains
-    only other hashable types (including any lists, tuples, sets, and
-    dictionaries)."""
-    log = logging.getLogger('sim_wrapper')
-    if isinstance(o, (set, tuple, list)):
-        return tuple([make_hash(e) for e in o])
-    elif not isinstance(o, dict):
-        buf = repr(o).encode('utf-8')
-        return hashlib.md5(buf).hexdigest()
-    new_o = OrderedDict()
-    for k, v in sorted(new_o.items(),key=lambda tup: tup[0]):
-        log.info(k)
-        log.info(v)
-        new_o[k] = make_hash(v)
-    out = repr(tuple(frozenset(sorted(new_o.items())))).encode('utf-8')
-    return hashlib.md5(out).hexdigest()
+def configure_logger(level,logger_name,log_dir,logfile):
+    # Get numeric level safely
+    numeric_level = getattr(logging, level.upper(), None)
+    if not isinstance(numeric_level, int):
+        raise ValueError('Invalid log level: %s' % level)
+    # Set formatting
+    formatter = logging.Formatter('%(asctime)s [%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
+    # Get logger with name
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(numeric_level)
+    # Set up file handler
+    try:
+        os.makedirs(log_dir)
+    except OSError:
+        # Log dir already exists
+        pass
+    output_file = os.path.join(log_dir,logfile)
+    fhandler = logging.FileHandler(output_file)
+    fhandler.setFormatter(formatter)
+    logger.addHandler(fhandler)
+    # Create console handler
+    ch = logging.StreamHandler()
+    ch.setLevel(numeric_level)
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
+       
+    return logger
         
 
-def make_single_sim(conf):
+def make_single_sim(sim):
     """Create a configuration file for a single simulation, such that it is ready to be
-    consumed by the Lua script. Return the path to the config file and the config object
-    itself"""
-
-    log = logging.getLogger('sim_wrapper')
-    log.info("Running single sim")
-    # Create the new simulation config
-    sim_conf = conf.copy()
-    del sim_conf['Postprocessing']
-    # Instantiate simulation object
-    sim = Simulation(sim_conf)
-    path = os.path.join(sim.conf['General']['base_dir'],sim.id[0:10])
-    sim_conf['General']['sim_dir'] = path
-    print(path)
-    # The dir is already made when the logger is configured but this is a safety measure i guess?
-    try:
-        os.makedirs(path)
-    except OSError:
-        log.info('Data directory already exists, appending timestamp')
-        stamp = '{:%Y-%m-%d_%H-%M-%S}'.format(datetime.datetime.now())
-        path = path+'__{}'.format(stamp)
-        os.makedirs(path)
-    # Now write the config file to the data subdir
-    out = os.path.join(path,'sim_conf.yml')
-    sim_conf.write(out)
-    # Copy sim script to sim dir
-    base_script = sim_conf['General']['sim_script']
-    script = os.path.join(path,os.path.basename(base_script))
-    shutil.copy(base_script,script)
+    consumed by the Lua script. Return the path to the config file and the
+    Simulation object itself"""
+    with session_scope() as sess:
+        log = logging.getLogger('sim_wrapper')
+        log.info("Running single sim")
+        del sim['Postprocessing']
+        # Instantiate simulation object
+        #sim = Simulation(sim_conf)
+        path = os.path.join(sim['General']['base_dir'],sim.id[0:10])
+        print(sim.id)
+        sim['General']['sim_dir'] = path
+        print(sim.id)
+        sess.add(sim)
+        # The dir is already made when the logger is configured but this is a safety measure i guess?
+        try:
+            os.makedirs(path)
+        except OSError:
+            log.info('Data directory already exists, appending timestamp')
+            stamp = '{:%Y-%m-%d_%H-%M-%S}'.format(datetime.datetime.now())
+            path = path+'__{}'.format(stamp)
+            os.makedirs(path)
+        # Now write the config file to the data subdir
+        out = os.path.join(path,'sim_conf.yml')
+        sim.write(out)
+        # Copy sim script to sim dir
+        base_script = sim['General']['sim_script']
+        script = os.path.join(path,os.path.basename(base_script))
+        shutil.copy(base_script,script)
     return (path,sim)
     
 def run_sim(jobtup):
@@ -136,10 +133,10 @@ def run_sim(jobtup):
     log = logging.getLogger('sim_wrapper')
     jobpath,sim = jobtup
     with session_scope() as session:     
-        timed = sim.conf['General']['save_time']
+        timed = sim['General']['save_time']
         tout = os.path.join(jobpath,'timing.dat')
         simlog = os.path.join(jobpath,'sim.log')
-        script = sim.conf['General']['sim_script']
+        script = sim['General']['sim_script']
         ini_file = os.path.join(jobpath,'sim_conf.yml')
         if timed:
             log.debug('Executing script with timing wrapper ...')
@@ -148,14 +145,14 @@ def run_sim(jobtup):
         else:
             cmd = 'command lua %s %s 2>&1 | tee %s'%(script,ini_file,simlog)
         log.debug('Subprocess command: %s',cmd)
-        relpath = os.path.relpath(jobpath,sim.conf['General']['treebase'])
+        relpath = os.path.relpath(jobpath,sim['General']['treebase'])
         log.info("Starting simulation for %s ...",relpath)
         completed = subprocess.run(cmd,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         #log.info('Simulation stderr: %s',completed.stderr)
         log.info("Simulation stderr: %s",completed.stderr)
         log.debug('Simulation stdout: %s',completed.stdout)
         # Convert text data files to npz binary file
-        if sim.conf['General']['save_as'] == 'npz':
+        if sim['General']['save_as'] == 'npz':
             log.info('Converting data at %s to npz format',relpath)
             convert_data(jobpath,sim)
         log.info("Finished simulation for %s!",relpath)
@@ -234,14 +231,14 @@ def main():
     args = parser.parse_args()
 
     if os.path.isfile(args.config_file):
-        conf = Config(path=os.path.abspath(args.config_file))
+        sim = Simulation(path=os.path.abspath(args.config_file))
     else:
         print("\n The file you specified does not exist! \n")
         quit()
     
-    setup_db(conf['General']['db_name'])
+    setup_db(sim['General']['db_name'])
     #pre_check(os.path.abspath(args.config_file),conf)
-    run(conf,args.log_level)
+    run(sim,args.log_level)
 
 #def db_test():
 #    with session_scope() as session:

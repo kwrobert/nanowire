@@ -505,9 +505,6 @@ function Simulator:build_device()
             pl.utils.raise('Two of your layers have the same order')
         end
     end
-    print('LAYERS DICT')
-    pl.pretty.dump(layers)
-    print('########')
     for layer,ldata in pl.tablex.sortv(layers,layer_comp) do
         print('Building layer:',layer)
         print(layer)

@@ -4,9 +4,9 @@ import logging
 import ruamel.yaml as yaml
 import re
 from collections import MutableMapping,OrderedDict
-from copy import deepcopy 
+from copy import deepcopy
 
-    
+
 class Config(MutableMapping):
     """An object to represent the simulation config that behaves like a dict.
     It can be initialized with a path, or an actual python data structure as
@@ -23,7 +23,7 @@ class Config(MutableMapping):
 
     def _parse_file(self,path):
         """Parse the YAML file provided at the command line"""
-         
+
         with open(path,'r') as cfile:
             text = cfile.read()
         conf = yaml.load(text,Loader=yaml.Loader)
@@ -40,7 +40,7 @@ class Config(MutableMapping):
             if isinstance(value,dict):
                 if old_key:
                     new_key = '%s.%s'%(old_key,key)
-                else: 
+                else:
                     new_key = key
                 self._find_references(value,new_key)
             elif isinstance(value,str):
@@ -56,7 +56,7 @@ class Config(MutableMapping):
                         self.dep_graph[match]['ref_by'].append(new_key)
                     else:
                         self.dep_graph[match] = {'ref_count':1,'ref_by':[new_key]}
-                            
+
     def build_dependencies(self):
         # First we find all the references and the exact location(s) in the config
         # that each reference ocurrs at
@@ -68,7 +68,7 @@ class Config(MutableMapping):
             # Loop through all the other references. If the above reference exists
             # in the "ref_by" table, we know the above reference refers to another
             # value and we need to resolve that value first. Note we also do this
-            # for ref itself so we can catch circular references 
+            # for ref itself so we can catch circular references
             for other_ref,its_data in self.dep_graph.items():
                 if ref in its_data['ref_by']:
                     if other_ref == ref:
@@ -79,7 +79,7 @@ class Config(MutableMapping):
                             data['ref_to'].append(other_ref)
                         else:
                             data['ref_to'] = [other_ref]
-        
+
     def _resolve(self,ref):
         ref_data = self.dep_graph[ref]
         # Retrieve the value of this reference
@@ -129,17 +129,17 @@ class Config(MutableMapping):
                 if not is_resolved:
                     if not 'ref_to' in ref_data:
                         print('NO REFERENCES, RESOLVING')
-                        self._resolve(ref) 
+                        self._resolve(ref)
                         self.dep_graph[ref]['resolved'] = True
                     else:
                         print('CHECKING REFERENCES')
                         # If all the locations this reference points to are resolved, then we
-                        # can go ahead and resolve this one 
+                        # can go ahead and resolve this one
                         if self._check_resolved(ref_data['ref_to']):
                             self._resolve(ref)
                             self.dep_graph[ref]['resolved'] = True
             config_resolved = self._check_resolved(self.dep_graph.keys())
-                
+
     def evaluate(self,in_table=None,old_key=None):
         # Evaluates any expressions surrounded in back ticks `like_so+blah`
         if in_table:
@@ -151,7 +151,7 @@ class Config(MutableMapping):
             if isinstance(value,dict):
                 if old_key:
                     new_key = '%s.%s'%(old_key,key)
-                else: 
+                else:
                     new_key = key
                 self.evaluate(value,new_key)
             elif isinstance(value,str):
@@ -182,7 +182,7 @@ class Config(MutableMapping):
                 raise ValueError('Specified an invalid config type at {}'.format(loc))
 
         for layer,layer_data in self.data['Layers'].items():
-            for par,data in layer_data['params'].items(): 
+            for par,data in layer_data['params'].items():
                 if data['type'] == 'fixed':
                     self.fixed.append(('Layers',layer,'params',par))
                 elif data['type'] == 'variable':
@@ -232,7 +232,7 @@ class Config(MutableMapping):
 
     def __len__(self):
         return len(self.data)
-    
+
     def __str__(self):
         """We'll just borrow the string representation from dict"""
         return dict.__str__(self.data)
@@ -283,50 +283,14 @@ class Config(MutableMapping):
         """Returns a sorted version of a dictionary sorted by the 'order' key.
         Used to sort layers, geometric shapes into their proper physical order.
         Can pass in a kwarg to reverse the order if desired"""
-        try: 
+        try:
             for key,data in adict.items():
                 data['order']
         except KeyError:
             raise KeyError('The dictionary you are attempting to sort must '
-            'itself contain a dictionary that has an "order" key')
+                           'itself contain a dictionary that has an "order" key')
         sort_func = lambda tup: tup[1]['order']
         sorted_layers = OrderedDict(sorted(adict.items(),
-                                    key=sort_func,reverse=reverse)) 
+                                    key=sort_func,reverse=reverse))
         return sorted_layers
 
-
-def parse_file(path):
-    """Parse the YAML file provided at the command line"""
-     
-    with open(path,'r') as cfile:
-        text = cfile.read()
-    conf = yaml.load(text)
-    return conf
-
-#def configure_logger(level,logger_name,log_dir,logfile):
-#    # Get numeric level safely
-#    numeric_level = getattr(logging, level.upper(), None)
-#    if not isinstance(numeric_level, int):
-#        raise ValueError('Invalid log level: %s' % level)
-#    # Set formatting
-#    formatter = logging.Formatter('%(asctime)s [%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
-#    # Get logger with name
-#    logger = logging.getLogger(logger_name)
-#    logger.setLevel(numeric_level)
-#    # Set up file handler
-#    try:
-#        os.makedirs(log_dir)
-#    except OSError:
-#        # Log dir already exists
-#        pass
-#    output_file = os.path.join(log_dir,logfile)
-#    fhandler = logging.FileHandler(output_file)
-#    fhandler.setFormatter(formatter)
-#    logger.addHandler(fhandler)
-#    # Create console handler
-#    ch = logging.StreamHandler()
-#    ch.setLevel(numeric_level)
-#    ch.setFormatter(formatter)
-#    logger.addHandler(ch)
-#       
-#    return logger

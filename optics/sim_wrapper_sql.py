@@ -1,16 +1,16 @@
 import shutil
-import subprocess
+#import subprocess
 import itertools
 import os
 import glob
-import datetime
+#  import datetime
 import copy
-import hashlib
+#  import hashlib
 import multiprocessing as mp
-import pandas
+#import pandas
 import numpy as np
 import scipy.optimize as optz
-#  import postprocess as pp
+import postprocess as pp
 import time
 import pprint
 import argparse as ap
@@ -19,13 +19,13 @@ import logging
 
 # get our custom config object and the logger function
 #from utils.simulation import *
-from utils.config import Config
-from utils.simulator import Simulator
-from collections import MutableMapping,OrderedDict
-from functools import wraps
-from contextlib import contextmanager
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+#from utils.config import Config
+from utils.simulator import Simulator,Config
+from collections import OrderedDict
+#  from functools import wraps
+#  from contextlib import contextmanager
+#  from sqlalchemy.ext.declarative import declarative_base
+#  from sqlalchemy.orm import sessionmaker
 
 #__DB_ENGINE__ = None
 #__SESSION_FACTORY__ = None
@@ -91,7 +91,6 @@ def configure_logger(level,logger_name,log_dir,logfile):
     ch.setLevel(numeric_level)
     ch.setFormatter(formatter)
     logger.addHandler(ch)
-       
     return logger
 
 def parse_file(path):
@@ -112,7 +111,7 @@ def get_combos(conf,keysets):
     # Get the list of values from all our variable keysets
     optionValues = OrderedDict()
     for keyset in keysets:
-        par = keyset[-1]
+        par = '.'.join(keyset)
         pdict = conf[keyset]
         if pdict['itertype'] == 'numsteps':
             values = np.linspace(pdict['start'],pdict['end'],pdict['step'])
@@ -133,7 +132,6 @@ def get_combos(conf,keysets):
 
 def make_sims(global_conf):
     """Make all the individual simulations for each parameter combination"""
-   
     locs,combos = get_combos(global_conf,global_conf.variable)
     sims = []
     for combo in combos:
@@ -150,7 +148,6 @@ def make_sims(global_conf):
             sim_conf[global_conf.variable[i]] = {'type':'fixed','value':float(combo[i])}
         sims.append(sim_conf)
     return sims
-        
 #      with session_scope() as sess:
 #          log = logging.getLogger('sim_wrapper')
 #          log.info("Running single sim")
@@ -179,23 +176,67 @@ def make_sims(global_conf):
 #          shutil.copy(base_script,script)
     #  return (path,sim)
 
+def _get_data(sim,update=False):
+    log = logging.getLogger('sim_wrapper')
+    sim.conf.write(os.path.join(sim.dir,'sim_conf.yml'))
+    start = time.time()
+    if not update:
+        sim.configure()
+        sim.build_device()
+        sim.set_excitation()
+    else:
+        sim.update_thicknesses()
+    sim.save_field()
+    sim.save_fluxes()
+    end = time.time()
+    runtime = end-start
+    time_file = os.path.join(sim.dir,'time.dat')
+    with open(time_file,'w') as out:
+        out.write('{}\n'.format(runtime))
+    log.info('Simulation {} completed in {:.2}'
+             ' seconds!'.format(sim.id[0:10],runtime))
+
 def run_sim(sim_conf):
     """Actually runs simulation in a given directory using subprocess.call. Expects a tuple
     containing the absolute path to the job directory as the first element and
     the configuration object for the job as the second element"""
     log = logging.getLogger('sim_wrapper')
-    if not sim_conf.variable_thickness:
-        sim = Simulator(sim_conf)
-        log.info('Executing sim %s'%sim.id[0:10])
+    sim = Simulator(copy.deepcopy(sim_conf))
+    try:
         os.makedirs(sim.dir)
-        sim.conf.write(os.path.join(sim.dir,'sim_conf.yml'))
-        sim.configure()
-        sim.build_device()
-        sim.set_excitation()
-        sim.get_fields()
-        sim.get_fluxes()
+    except OSError:
+        pass
+    if not sim_conf.variable_thickness:
+        log.info('Executing sim %s'%sim.id[0:10])
+        _get_data(sim)
     else:
-        raise NotImplementedError('Need to figure out thicknesses')
+        log.info('Computing a thickness sweep at %s'%sim.id[0:10])
+        # Get all combinations of layer thicknesses
+        keys,combos = get_combos(sim_conf,sim_conf.variable_thickness)
+        # Update base directory to new sub directory
+        sim.conf['General']['base_dir'] = sim.dir
+        # Set things up for the first combo
+        log.info('Computing initial thickness at %s'%sim.id[0:10])
+        combo = combos.pop()
+        # First update all the thicknesses in the config
+        for i in range(len(combo)):
+            keyseq = sim_conf.variable_thickness[i]
+            sim.conf[keyseq] = {'type':'fixed','value':float(combo[i])}
+        # With all the params updated we can now make the subdir from the
+        # sim id and get the data
+        sim.update_id()
+        os.makedirs(sim.dir)
+        _get_data(sim)
+        # Now we can repeat the same exact process, but instead of rebuilding
+        # the device we just update the thicknesses
+        for combo in combos:
+            for i in range(len(combo)):
+                keyseq = sim_conf.variable_thickness[i]
+                sim.conf[keyseq] = {'type':'fixed','value':float(combo[i])}
+            sim.update_id()
+            log.info('Computing additional thickness at %s'%sim.id[0:10])
+            os.makedirs(sim.dir)
+            _get_data(sim,update=True)
     return
     #  with session_scope() as session:
         #  timed = sim['General']['save_time']
@@ -227,7 +268,7 @@ def execute_jobs(gconf,sims):
     """Given a list of simulation objects, run them either serially or in
     parallel"""
 
-    log=logging.getLogger('sim_wrapper')
+    log = logging.getLogger('sim_wrapper')
     if not gconf['General']['parallel']:
         log.info('Executing sims serially')
         for sim in sims:
@@ -236,12 +277,162 @@ def execute_jobs(gconf,sims):
     else:
         num_procs = mp.cpu_count() - gconf['General']['reserved_cores']
         log.info('Executing sims in parallel using %s cores ...',str(num_procs))
-        #  with mp.Pool(processes=num_procs) as pool:
-            #  result = pool.map(run_sim,sims)
         pool = mp.Pool(processes=num_procs)
-        res = pool.map(run_sim,sims)
+        pool.map(run_sim,sims)
         pool.close()
 
+def spectral_wrapper(opt_pars,baseconf):
+    """A wrapper function to handle spectral sweeps and postprocessing for the scipy minimizer. It
+    accepts the initial guess as a vector, the base config file, and the keys that map to the
+    initial guesses. It runs a spectral sweep (in parallel if specified), postprocesses the results,
+    and returns the spectrally weighted reflection"""
+    # TODO: Pass in the quantity we want to optimize as a parameter, then compute and return that
+    # instead of just assuming reflection
+
+    ## Optimizing shell thickness could result is negative thickness so we need to take absolute
+    ## value here
+    #opt_pars[0] = abs(opt_pars[0])
+    log = logging.getLogger('sim_wrapper')
+    log.info('Param keys: %s'%str(baseconf.optimized))
+    log.info('Current values %s'%str(opt_pars))
+    # Clean up old data unless the user asked us not to. We do this first so on the last
+    # iteration all our data is left intact
+    basedir = baseconf['General']['base_dir']
+    optdir = os.path.join(basedir,'opt_dir')
+    if not baseconf['General']['opt_keep_intermediates']:
+        globstr = os.path.join(optdir,'*')
+        dirs = glob.glob(globstr)
+        for adir in dirs:
+            shutil.rmtree(adir)
+    # Set the value key of all the params we are optimizing over to the current
+    # guess
+    for i in range(len(baseconf.optimized)):
+        keyseq = baseconf.optimized[i]
+        print(keyseq)
+        valseq = list(keyseq)+['value']
+        print(valseq)
+        baseconf[valseq] = float(opt_pars[i])
+    # Update the basedir
+    baseconf['General']['base_dir'] = optdir
+    # Make all the simulation objects
+    sims = make_sims(baseconf)
+    # Let's reuse the convergence information from the previous iteration if it exists
+    # NOTE: This kind of assumes your initial guess was somewhat decent with regards to the in plane
+    # geometric variables and the optimizer is staying relatively close to that initial guess. If
+    # the optimizer is moving far away from its previous guess at each step, then the fact that a
+    # specific frequency may have been converged previously does not mean it will still be converged
+    # with this new set of variables.
+    info_file = os.path.join(basedir,'conv_info.txt')
+    if os.path.isfile(info_file):
+        conv_dict = {}
+        with open(info_file,'r') as info:
+            for line in info:
+                conf_path,numbasis,conv_status = line.strip().split(',')
+                rel = os.path.relpath(conf_path,optdir)
+                log.info('Simulation at %s is %s at %s basis terms'%(rel,conv_status,numbasis))
+                # Turn off adaptive convergence for all the sims that have converged and set their number of
+                # basis terms to the proper value so we continue to use that value
+                if conv_status == 'converged':
+                    conv_dict[rel] = (True,numbasis)
+                # For sims that haven't converged, lets at least set the number of basis terms to the last
+                # tested value so we're closer to our goal of convergence
+                elif conv_status == 'unconverged':
+                    conv_dict[rel] = (False,numbasis)
+        for sim in sims:
+            conv,numbasis = conv_dict[sim.id[0:10]]
+            # Turn off adaptive convergence and update the number of basis
+            # terms
+            if conv:
+                sim.conf['General']['adaptive_convergence'] = False
+                sim.conf['Simulation']['params']['numbasis']['value'] = numbasis
+            else:
+                sim.conf['Simulation']['params']['numbasis']['value'] = numbasis
+    # With the leaf directories made and the number of basis terms adjusted, we can now kick off our frequency sweep
+    execute_jobs(baseconf,sims)
+
+
+    #####
+    # TODO: This needs to be generalized. The user could pass in the name of
+    # a postprocessing function in the config file. The function will be called
+    # and used as the quantity for optimization
+    #####
+
+    # With our frequency sweep done, we now need to postprocess the results.
+    # Configure logger
+    logger = configure_logger('error','postprocess',
+                              os.path.join(baseconf['General']['base_dir'],'logs'),
+                              'postprocess.log')
+    # Compute transmission data for each individual sim
+    cruncher = pp.Cruncher(baseconf)
+    cruncher.collect_sims()
+    for sim in cruncher.sims:
+        cruncher.transmissionData(sim)
+    # Now get the fraction of photons absorbed
+    gcruncher = pp.Global_Cruncher(baseconf,cruncher.sims,cruncher.sim_groups,cruncher.failed_sims)
+    photon_fraction = gcruncher.Jsc()[0]
+    # Lets store information we discovered from our adaptive convergence procedure so we can resue
+    # it in the next iteration.
+    if baseconf['General']['adaptive_convergence']:
+        log.info('Storing adaptive convergence results ...')
+        with open(info_file,'w') as info:
+            conv_files = glob.glob(os.path.join(basedir,'**/converged_at.txt'))
+            for convf in conv_files:
+                simpath = os.path.join(os.path.dirname(convf),'sim_conf.yml')
+                with open(convf,'r') as cfile:
+                    numbasis = cfile.readline().strip()
+                info.write('%s,%s,%s\n'%(simpath,numbasis,'converged'))
+            nconv_files = glob.glob(os.path.join(basedir,'**/not_converged_at.txt'))
+            for nconvf in nconv_files:
+                simpath = os.path.join(os.path.dirname(nconvf),'sim_conf.yml')
+                with open(nconvf,'r') as cfile:
+                    numbasis = cfile.readline().strip()
+                info.write('%s,%s,%s\n'%(simpath,numbasis,'unconverged'))
+
+    #print('Total time = %f'%delta)
+    #print('Num calls after = %i'%gcruncher.weighted_transmissionData.called)
+    # This is a minimizer, we want to maximize the fraction of photons absorbed and thus minimize
+    # 1 minus that fraction
+    return 1-photon_fraction
+
+def run_optimization(conf):
+    """Runs an optimization on a given set of parameters"""
+    log = logging.getLogger('sim_wrapper')
+    log.info("Running optimization")
+    print(conf.optimized)
+    # Make sure the only variable parameter we have is a sweep through
+    # frequency
+    for keyseq in conf.variable:
+        if keyseq[-1] != 'frequency':
+            log.error('You should only be sweep through frequency during an '
+            'optimization')
+            quit()
+    # Collect all the guesses
+    guess = np.zeros(len(conf.optimized))
+    for i in range(len(conf.optimized)):
+        keyseq = conf.optimized[i]
+        par_data = conf.get(keyseq)
+        guess[i] = par_data['guess']
+    # Max iterations and tolerance
+    tol = conf['General']['opt_tol']
+    max_iter = conf['General']['opt_max_iter']
+    os.makedirs(os.path.join(conf['General']['base_dir'],'opt_dir'))
+    # Run the simplex optimizer
+    opt_val = optz.minimize(spectral_wrapper,
+                            guess,
+                            args=(conf,),
+                            method='Nelder-Mead',
+                            options={'maxiter':max_iter,'xatol':tol,'disp':True})
+    log.info(opt_val.message)
+    log.info('Optimal values')
+    log.info(conf.optimized)
+    log.info(opt_val.x)
+    # Write out the results to a file
+    out_file = os.path.join(conf['General']['base_dir'],'optimization_results.txt')
+    with open(out_file,'w') as out:
+        out.write('# Param name, value\n')
+        for key, value in zip(conf.optimized,opt_val.x):
+            out.write('%s: %f\n'%(str(key),value))
+    return opt_val.x
 def run(conf,log):
     """The main run methods that decides what kind of simulation to run based on the
     provided config object"""
@@ -250,20 +441,20 @@ def run(conf,log):
     logdir = os.path.join(basedir,'logs')
     # Configure logger
     logger = configure_logger(log,'sim_wrapper',logdir,'sim_wrapper.log')
-    # Get all the sims
-    sims = make_sims(conf)
     # Just a simple single simulation
     if not conf.optimized:
+        # Get all the sims
+        sims = make_sims(conf)
         logger.info("Executing job campaign")
         execute_jobs(conf,sims)
     # If we have variable params, do a parameter sweep
     elif conf.optimized:
-        raise NotImplementedError('Havent figured out optimizations yet')
+        run_optimization(conf)
     else:
         logger.error('Unsupported configuration for a simulation run. Not a '
-        'single sim, sweep, or optimization. Make sure your sweeps are '
-        'configured correctly, and if you are running an optimization '
-        'make sure you do not have any sorting parameters specified')
+                     'single sim, sweep, or optimization. Make sure your sweeps are '
+                     'configured correctly, and if you are running an optimization '
+                     'make sure you do not have any sorting parameters specified')
 
 def pre_check(conf_path,conf):
     """Checks conf file for invalid values"""

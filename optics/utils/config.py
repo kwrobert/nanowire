@@ -1,9 +1,12 @@
 import os
+import pprint
 import logging
 import ruamel.yaml as yaml
+import re
 from collections import MutableMapping,OrderedDict
 from copy import deepcopy 
 
+    
 class Config(MutableMapping):
     """An object to represent the simulation config that behaves like a dict.
     It can be initialized with a path, or an actual python data structure as
@@ -16,6 +19,7 @@ class Config(MutableMapping):
             self.data = dict()
             self.update(dict(data))
         self._update_params()
+        self.dep_graph = {}
 
     def _parse_file(self,path):
         """Parse the YAML file provided at the command line"""
@@ -25,21 +29,152 @@ class Config(MutableMapping):
         conf = yaml.load(text,Loader=yaml.Loader)
         return conf
 
+    def _find_references(self,in_table=None,old_key=None):
+        """Build out the dependency graph of references in the config"""
+        if in_table:
+            t = in_table
+        else:
+            t = self.data
+        for key,value in t.items():
+            # If we got a dict back, recurse
+            if isinstance(value,dict):
+                if old_key:
+                    new_key = '%s.%s'%(old_key,key)
+                else: 
+                    new_key = key
+                self._find_references(value,new_key)
+            elif isinstance(value,str):
+                # If we get a string, check for matches to the
+                # replacement string and loop through all of then
+                matches = re.findall('%\(([^)]+)\)s',value)
+                new_key = '%s.%s'%(old_key,key)
+                for match in matches:
+                    # If we've already found this reference before, increment its
+                    # reference count and update the list of keys referring to it
+                    if match in self.dep_graph:
+                        self.dep_graph[match]['ref_count'] += 1
+                        self.dep_graph[match]['ref_by'].append(new_key)
+                    else:
+                        self.dep_graph[match] = {'ref_count':1,'ref_by':[new_key]}
+                            
+    def build_dependencies(self):
+        # First we find all the references and the exact location(s) in the config
+        # that each reference ocurrs at
+        self._find_references()
+        # Now we build out the "refers_to" entry for each reference to see if a
+        # reference at one place in the table refers to some other value
+        # For each reference we found
+        for ref,data in self.dep_graph.items():
+            # Loop through all the other references. If the above reference exists
+            # in the "ref_by" table, we know the above reference refers to another
+            # value and we need to resolve that value first. Note we also do this
+            # for ref itself so we can catch circular references 
+            for other_ref,its_data in self.dep_graph.items():
+                if ref in its_data['ref_by']:
+                    if other_ref == ref:
+                        raise ValueError('There is a circular reference in your'
+                                         ' config file at %s'%ref)
+                    else:
+                        if 'ref_to' in data:
+                            data['ref_to'].append(other_ref)
+                        else:
+                            data['ref_to'] = [other_ref]
+        
+    def _resolve(self,ref):
+        ref_data = self.dep_graph[ref]
+        # Retrieve the value of this reference
+        key_seq = ref.split('.')
+        repl_val = self[key_seq]
+        # Loop through all the locations that contain this reference
+        for loc in ref_data['ref_by']:
+            # Get the string we need to run the replacement on
+            rep_seq = loc.split('.')
+            entry_to_repl = self[rep_seq]
+            # Run the actual replacement and set the value at this
+            # location to the new string
+            pattern = '%\({}\)s'.format(ref)
+            rep_par = re.sub(pattern,str(repl_val),entry_to_repl)
+            # Make sure we store as a float if possible
+            try:
+                self[rep_seq] = float(rep_par)
+            except:
+                self[rep_seq] = rep_par
+
+    def _check_resolved(self,refs):
+        """Checks if a list of references have all been resolved"""
+        bools = []
+        for ref in refs:
+            if 'resolved' in self.dep_graph[ref]:
+                bools.append(self.dep_graph[ref]['resolved'])
+            else:
+                bools.append(False)
+        return all(bools)
+
+    def interpolate(self):
+        """Scans the config for any reference strings and resolves them to
+        their actual values by retrieving them from elsewhere in the config"""
+        self.build_dependencies()
+        config_resolved = False
+        while not config_resolved:
+            print('CONFIG NOT RESOLVED, MAKING PASS')
+            # Now we can actually perform any resolution
+            for ref,ref_data in self.dep_graph.items():
+                # If the actual location of this references doesn't itself refer to
+                # something else, we can safely resolve it because we know it has a
+                # value
+                if 'resolved' in ref_data:
+                    is_resolved = ref_data['resolved']
+                else:
+                    is_resolved = False
+                if not is_resolved:
+                    if not 'ref_to' in ref_data:
+                        print('NO REFERENCES, RESOLVING')
+                        self._resolve(ref) 
+                        self.dep_graph[ref]['resolved'] = True
+                    else:
+                        print('CHECKING REFERENCES')
+                        # If all the locations this reference points to are resolved, then we
+                        # can go ahead and resolve this one 
+                        if self._check_resolved(ref_data['ref_to']):
+                            self._resolve(ref)
+                            self.dep_graph[ref]['resolved'] = True
+            config_resolved = self._check_resolved(self.dep_graph.keys())
+                
+    def evaluate(self,in_table=None,old_key=None):
+        # Evaluates any expressions surrounded in back ticks `like_so+blah`
+        if in_table:
+            t = in_table
+        else:
+            t = self.data
+        for key, value in t.items():
+            # If we got a table back, recurse
+            if isinstance(value,dict):
+                if old_key:
+                    new_key = '%s.%s'%(old_key,key)
+                else: 
+                    new_key = key
+                self.evaluate(value,new_key)
+            elif isinstance(value,str):
+                if value[0] == '`' and value[-1] == '`':
+                    expr = value.strip('`')
+                    result = eval(expr)
+                    key_seq = old_key.split('.')
+                    key_seq.append(key)
+                    self[key_seq] = result
+
     def _update_params(self):
         self.fixed = []
         self.variable = []
-        self.sorting = []
-        self.evaluated = []
+        self.variable_thickness = []
         self.optimized = []
         for par,data in self.data['Simulation']['params'].items():
             if data['type'] == 'fixed':
                 self.fixed.append(('Simulation','params',par))
             elif data['type'] == 'variable':
-                self.variable.append(('Simulation','params',par))
-            elif data['type'] == 'sorting':
-                self.sorting.append(('Simulation','params',par))
-            elif data['type'] == 'evaluated':
-                self.evaluated.append(('Simulation','params',par))
+                if par == 'thickness':
+                    self.variable_thickness.append(('Simulation','params',par))
+                else:
+                    self.variable.append(('Simulation','params',par))
             elif data['type'] == 'optimized':
                 self.optimized.append(('Simulation','params',par))
             else:
@@ -51,20 +186,15 @@ class Config(MutableMapping):
                 if data['type'] == 'fixed':
                     self.fixed.append(('Layers',layer,'params',par))
                 elif data['type'] == 'variable':
-                    self.variable.append(('Layers',layer,'params',par))
-                elif data['type'] == 'sorting':
-                    self.sorting.append(('Layers',layer,'params',par))
-                elif data['type'] == 'evaluated':
-                    self.evaluated.append(('Layers',layer,'params',par))
+                    if par == 'thickness':
+                        self.variable_thickness.append(('Layers',layer,'params',par))
+                    else:
+                        self.variable.append(('Layers',layer,'params',par))
                 elif data['type'] == 'optimized':
                     self.optimized.append(('Layers',layer,'params',par))
                 else:
                     loc = '.'.join('Layers',layer,'params',par)
                     raise ValueError('Specified an invalid config type at {}'.format(loc))
-        # Make sure the sorting parameters are in the proper order according to
-        # the value of their keys
-        getkey = lambda seq: self[seq]['key']
-        self.sorting = sorted(self.sorting,key=getkey)
 
     def __getitem__(self, key):
         """This setup allows us to get a value using a sequence with the usual
@@ -173,30 +303,30 @@ def parse_file(path):
     conf = yaml.load(text)
     return conf
 
-def configure_logger(level,logger_name,log_dir,logfile):
-    # Get numeric level safely
-    numeric_level = getattr(logging, level.upper(), None)
-    if not isinstance(numeric_level, int):
-        raise ValueError('Invalid log level: %s' % level)
-    # Set formatting
-    formatter = logging.Formatter('%(asctime)s [%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
-    # Get logger with name
-    logger = logging.getLogger(logger_name)
-    logger.setLevel(numeric_level)
-    # Set up file handler
-    try:
-        os.makedirs(log_dir)
-    except OSError:
-        # Log dir already exists
-        pass
-    output_file = os.path.join(log_dir,logfile)
-    fhandler = logging.FileHandler(output_file)
-    fhandler.setFormatter(formatter)
-    logger.addHandler(fhandler)
-    # Create console handler
-    ch = logging.StreamHandler()
-    ch.setLevel(numeric_level)
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
-       
-    return logger
+#def configure_logger(level,logger_name,log_dir,logfile):
+#    # Get numeric level safely
+#    numeric_level = getattr(logging, level.upper(), None)
+#    if not isinstance(numeric_level, int):
+#        raise ValueError('Invalid log level: %s' % level)
+#    # Set formatting
+#    formatter = logging.Formatter('%(asctime)s [%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
+#    # Get logger with name
+#    logger = logging.getLogger(logger_name)
+#    logger.setLevel(numeric_level)
+#    # Set up file handler
+#    try:
+#        os.makedirs(log_dir)
+#    except OSError:
+#        # Log dir already exists
+#        pass
+#    output_file = os.path.join(log_dir,logfile)
+#    fhandler = logging.FileHandler(output_file)
+#    fhandler.setFormatter(formatter)
+#    logger.addHandler(fhandler)
+#    # Create console handler
+#    ch = logging.StreamHandler()
+#    ch.setLevel(numeric_level)
+#    ch.setFormatter(formatter)
+#    logger.addHandler(ch)
+#       
+#    return logger

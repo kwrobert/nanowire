@@ -1,4 +1,4 @@
-#import S4
+import S4
 import numpy as np
 from scipy import interpolate
 from scipy import constants

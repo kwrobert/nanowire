@@ -1,5 +1,0 @@
-This is a file to document possible reasons of discrepancy between Anna's simulations and mine:
-
-1) Anna uses nearest neighbor interpolate when computing values of n,k on a grid point. 
-2) Slightly different grids. Should be fixable by interpolating one set of data points on
-to the other set of data points/values. 

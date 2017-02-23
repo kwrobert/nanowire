@@ -132,6 +132,8 @@ def get_combos(conf,keysets):
 
 def make_sims(global_conf):
     """Make all the individual simulations for each parameter combination"""
+    log = logging.getLogger('sim_wrapper')
+    log.info('Constructing simulator objects ...')
     locs,combos = get_combos(global_conf,global_conf.variable)
     sims = []
     for combo in combos:
@@ -146,7 +148,7 @@ def make_sims(global_conf):
         # parameter name
         for i in range(len(combo)):
             sim_conf[global_conf.variable[i]] = {'type':'fixed','value':float(combo[i])}
-        sims.append(sim_conf)
+        sims.append(Simulator(copy.deepcopy(sim_conf)))
     return sims
 #      with session_scope() as sess:
 #          log = logging.getLogger('sim_wrapper')
@@ -196,23 +198,22 @@ def _get_data(sim,update=False):
     log.info('Simulation {} completed in {:.2}'
              ' seconds!'.format(sim.id[0:10],runtime))
 
-def run_sim(sim_conf):
+def run_sim(sim):
     """Actually runs simulation in a given directory using subprocess.call. Expects a tuple
     containing the absolute path to the job directory as the first element and
     the configuration object for the job as the second element"""
     log = logging.getLogger('sim_wrapper')
-    sim = Simulator(copy.deepcopy(sim_conf))
     try:
         os.makedirs(sim.dir)
     except OSError:
         pass
-    if not sim_conf.variable_thickness:
+    if not sim.conf.variable_thickness:
         log.info('Executing sim %s'%sim.id[0:10])
         _get_data(sim)
     else:
         log.info('Computing a thickness sweep at %s'%sim.id[0:10])
         # Get all combinations of layer thicknesses
-        keys,combos = get_combos(sim_conf,sim_conf.variable_thickness)
+        keys,combos = get_combos(sim.conf,sims._conf.variable_thickness)
         # Update base directory to new sub directory
         sim.conf['General']['base_dir'] = sim.dir
         # Set things up for the first combo
@@ -220,7 +221,7 @@ def run_sim(sim_conf):
         combo = combos.pop()
         # First update all the thicknesses in the config
         for i in range(len(combo)):
-            keyseq = sim_conf.variable_thickness[i]
+            keyseq = sim.conf.variable_thickness[i]
             sim.conf[keyseq] = {'type':'fixed','value':float(combo[i])}
         # With all the params updated we can now make the subdir from the
         # sim id and get the data
@@ -231,7 +232,7 @@ def run_sim(sim_conf):
         # the device we just update the thicknesses
         for combo in combos:
             for i in range(len(combo)):
-                keyseq = sim_conf.variable_thickness[i]
+                keyseq = sim.conf.variable_thickness[i]
                 sim.conf[keyseq] = {'type':'fixed','value':float(combo[i])}
             sim.update_id()
             log.info('Computing additional thickness at %s'%sim.id[0:10])
@@ -298,12 +299,10 @@ def spectral_wrapper(opt_pars,baseconf):
     # Clean up old data unless the user asked us not to. We do this first so on the last
     # iteration all our data is left intact
     basedir = baseconf['General']['base_dir']
-    optdir = os.path.join(basedir,'opt_dir')
     if not baseconf['General']['opt_keep_intermediates']:
-        globstr = os.path.join(optdir,'*')
-        dirs = glob.glob(globstr)
-        for adir in dirs:
-            shutil.rmtree(adir)
+        for item in os.listdir(basedir):
+            if os.path.isdir(item) and item != 'logs':
+                shutil.rmtree(item)
     # Set the value key of all the params we are optimizing over to the current
     # guess
     for i in range(len(baseconf.optimized)):
@@ -312,10 +311,21 @@ def spectral_wrapper(opt_pars,baseconf):
         valseq = list(keyseq)+['value']
         print(valseq)
         baseconf[valseq] = float(opt_pars[i])
-    # Update the basedir
-    baseconf['General']['base_dir'] = optdir
-    # Make all the simulation objects
+    # Make all the sim objects
     sims = make_sims(baseconf)
+    # Set the params we are optimizing over for each sim to the current guess.
+    # This we is less efficient than just modifying them in the baseconf and
+    # intializing all sims from that conf. The problem with that approach is
+    # that each sim will then have a new hash, and we won't be able to retrieve
+    # convergence information from the previous run. Here we can update their
+    # params without updating the hash and be able to use the hash for lookups 
+    #for sim in sims:
+    #    for i in range(len(baseconf.optimized)):
+    #        keyseq = baseconf.optimized[i]
+    #        print(keyseq)
+    #        valseq = list(keyseq)+['value']
+    #        print(valseq)
+    #        sim.conf[valseq] = float(opt_pars[i])
     # Let's reuse the convergence information from the previous iteration if it exists
     # NOTE: This kind of assumes your initial guess was somewhat decent with regards to the in plane
     # geometric variables and the optimizer is staying relatively close to that initial guess. If
@@ -327,29 +337,30 @@ def spectral_wrapper(opt_pars,baseconf):
         conv_dict = {}
         with open(info_file,'r') as info:
             for line in info:
-                conf_path,numbasis,conv_status = line.strip().split(',')
-                rel = os.path.relpath(conf_path,optdir)
-                log.info('Simulation at %s is %s at %s basis terms'%(rel,conv_status,numbasis))
-                # Turn off adaptive convergence for all the sims that have converged and set their number of
-                # basis terms to the proper value so we continue to use that value
+                freq,numbasis,conv_status = line.strip().split(',')
                 if conv_status == 'converged':
-                    conv_dict[rel] = (True,numbasis)
-                # For sims that haven't converged, lets at least set the number of basis terms to the last
-                # tested value so we're closer to our goal of convergence
+                    conv_dict[freq] = (True,numbasis)
                 elif conv_status == 'unconverged':
-                    conv_dict[rel] = (False,numbasis)
+                    conv_dict[freq] = (False,numbasis)
+        print(conv_dict)
         for sim in sims:
-            conv,numbasis = conv_dict[sim.id[0:10]]
+            freq = str(sim.conf['Simulation']['params']['frequency']['value'])
+            conv,numbasis = conv_dict[freq]
             # Turn off adaptive convergence and update the number of basis
             # terms
             if conv:
+                log.info('Frequency %s converged at %s basis'
+                         ' terms'%(freq,numbasis))
                 sim.conf['General']['adaptive_convergence'] = False
-                sim.conf['Simulation']['params']['numbasis']['value'] = numbasis
+                sim.conf['Simulation']['params']['numbasis']['value'] = int(numbasis)
+            # For sims that haven't converged, set the number of basis terms to the last
+            # tested value so we're closer to our goal of convergence
             else:
-                sim.conf['Simulation']['params']['numbasis']['value'] = numbasis
+                log.info('Frequency %s unconverged at %s basis'
+                         ' terms'%(freq,numbasis))
+                sim.conf['Simulation']['params']['numbasis']['value'] = int(numbasis)
     # With the leaf directories made and the number of basis terms adjusted, we can now kick off our frequency sweep
     execute_jobs(baseconf,sims)
-
 
     #####
     # TODO: This needs to be generalized. The user could pass in the name of
@@ -375,19 +386,28 @@ def spectral_wrapper(opt_pars,baseconf):
     if baseconf['General']['adaptive_convergence']:
         log.info('Storing adaptive convergence results ...')
         with open(info_file,'w') as info:
-            conv_files = glob.glob(os.path.join(basedir,'**/converged_at.txt'))
-            for convf in conv_files:
-                simpath = os.path.join(os.path.dirname(convf),'sim_conf.yml')
-                with open(convf,'r') as cfile:
-                    numbasis = cfile.readline().strip()
-                info.write('%s,%s,%s\n'%(simpath,numbasis,'converged'))
-            nconv_files = glob.glob(os.path.join(basedir,'**/not_converged_at.txt'))
-            for nconvf in nconv_files:
-                simpath = os.path.join(os.path.dirname(nconvf),'sim_conf.yml')
-                with open(nconvf,'r') as cfile:
-                    numbasis = cfile.readline().strip()
-                info.write('%s,%s,%s\n'%(simpath,numbasis,'unconverged'))
-
+            for sim in sims:
+                freq = sim.conf['Simulation']['params']['frequency']['value']
+                conv_path = os.path.join(sim.dir,'converged_at.txt')
+                nconv_path = os.path.join(sim.dir,'not_converged_at.txt')
+                if os.path.isfile(conv_path):
+                    conv_f = open(conv_path,'r')
+                    numbasis = conv_f.readline().strip()
+                    conv_f.close()
+                    conv = 'converged'
+                elif os.path.isfile(nconv_path):
+                    conv_f = open(nconv_path,'r')
+                    numbasis = conv_f.readline().strip()
+                    conv_f.close()
+                    conv = 'unconverged'
+                else:
+                    # If we were converged on a previous iteration, adaptive
+                    # convergence was switched off and there will be no file to
+                    # read from
+                    conv = 'converged'
+                    numbasis = sim.conf['Simulation']['params']['numbasis']['value']
+                info.write('%s,%s,%s\n'%(str(freq),numbasis,conv))
+        log.info('Finished storing convergence results!')
     #print('Total time = %f'%delta)
     #print('Num calls after = %i'%gcruncher.weighted_transmissionData.called)
     # This is a minimizer, we want to maximize the fraction of photons absorbed and thus minimize
@@ -404,7 +424,7 @@ def run_optimization(conf):
     for keyseq in conf.variable:
         if keyseq[-1] != 'frequency':
             log.error('You should only be sweep through frequency during an '
-            'optimization')
+                      'optimization')
             quit()
     # Collect all the guesses
     guess = np.zeros(len(conf.optimized))
@@ -433,6 +453,7 @@ def run_optimization(conf):
         for key, value in zip(conf.optimized,opt_val.x):
             out.write('%s: %f\n'%(str(key),value))
     return opt_val.x
+    
 def run(conf,log):
     """The main run methods that decides what kind of simulation to run based on the
     provided config object"""

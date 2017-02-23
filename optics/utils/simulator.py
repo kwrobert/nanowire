@@ -51,19 +51,19 @@ def configure_logger(level,logger_name,log_dir,logfile):
         # Log dir already exists
         pass
     output_file = os.path.join(log_dir,logfile)
-    out = open(output_file,'a')
+    #out = open(output_file,'a')
     fhandler = logging.FileHandler(output_file)
     fhandler.setFormatter(formatter)
     logger.addHandler(fhandler)
-    sl = StreamToLogger(logger,logging.INFO)
-    sys.stdout = sl
-    sl = StreamToLogger(logger,logging.ERROR)
-    sys.stderr = sl
-    # Duplicate this new log file descriptor to system stdout so we can
-    # intercept output from external S4 C library
-    # TODO: Make this go through the logger instead of directly to the file
-    # right now entries aren't properly formatted
-    os.dup2(out.fileno(),1)
+    #sl = StreamToLogger(logger,logging.INFO)
+    #sys.stdout = sl
+    #sl = StreamToLogger(logger,logging.ERROR)
+    #sys.stderr = sl
+    ## Duplicate this new log file descriptor to system stdout so we can
+    ## intercept output from external S4 C library
+    ## TODO: Make this go through the logger instead of directly to the file
+    ## right now entries aren't properly formatted
+    #os.dup2(out.fileno(),1)
     return logger
 
 def make_hash(o):
@@ -534,6 +534,7 @@ class Simulator():
     def get_field(self):
         """Constructs and returns a 2D numpy array of the vector electric
         field. The field components are complex numbers"""
+        self.log.info('Computing fields ...')
         x_samp = self.conf['Simulation']['x_samples']
         y_samp = self.conf['Simulation']['y_samples']
         z_samp = self.conf['Simulation']['z_samples']
@@ -554,6 +555,7 @@ class Simulator():
                 count += 1
                 ycount += 1
             xcount += 1
+        self.log.info('Finished computing fields!')
         return arr
 
     def save_field(self):
@@ -564,6 +566,7 @@ class Simulator():
                 out = os.path.join(self.dir,'converged_at.txt')
             else:
                 out = os.path.join(self.dir,'not_converged_at.txt')
+            self.log.info('Writing convergence file ...')
             with open(out,'w') as outf:
                 outf.write('{}\n'.format(numbasis))
         else:
@@ -594,6 +597,7 @@ class Simulator():
             forw,back = self.s4.GetPowerFlux(Layer=layer,zOffset=offset)
             key = layer+'_bottom'
             flux_dict[key] = (forw,back)
+        self.log.info('Finished computing fluxes!')
         return flux_dict
 
     def save_fluxes(self):

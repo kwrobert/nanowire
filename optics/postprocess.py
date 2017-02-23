@@ -24,7 +24,34 @@ import pandas
 import multiprocessing as mp
 import multiprocessing.dummy as mpd
 
-from utils.config import Config,configure_logger
+from utils.config import Config
+
+def configure_logger(level,logger_name,log_dir,logfile):
+    # Get numeric level safely
+    numeric_level = getattr(logging, level.upper(), None)
+    if not isinstance(numeric_level, int):
+        raise ValueError('Invalid log level: %s' % level)
+    # Set formatting
+    formatter = logging.Formatter('%(asctime)s [%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
+    # Get logger with name
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(numeric_level)
+    # Set up file handler
+    try:
+        os.makedirs(log_dir)
+    except OSError:
+        # Log dir already exists
+        pass
+    output_file = os.path.join(log_dir,logfile)
+    fhandler = logging.FileHandler(output_file)
+    fhandler.setFormatter(formatter)
+    logger.addHandler(fhandler)
+    # Create console handler
+    ch = logging.StreamHandler()
+    ch.setLevel(numeric_level)
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
+    return logger
 
 def counted(fn):
     def wrapper(self):
@@ -118,14 +145,14 @@ class Simulation(object):
             self.log.info('Collection complete!')
         elif ftype == 'npz':
             # Load E field data
-            e_path = os.path.join(sim_path,base_name+'.E.raw.npz')
+            e_path = os.path.join(sim_path,base_name+'.E.npz')
             e_data, e_lookup = self.load_npz(e_path)
             self.log.debug('E shape after getting: %s',str(e_data.shape))
             pos_inds = np.zeros((e_data.shape[0],3))
             pos_inds[:,:] = e_data[:,0:3]
             # Load H field data
             if not ignore:
-                h_path = os.path.join(sim_path,base_name+'.H.raw.npz')
+                h_path = os.path.join(sim_path,base_name+'.H.npz')
                 h_data, h_lookup = self.load_npz(h_path)
             else:
                 h_data = None
@@ -294,7 +321,7 @@ class Processor(object):
         if ftype == 'text':
             datfile = self.gconf['General']['base_name']+'.E'
         else:
-            datfile = self.gconf['General']['base_name']+'.E.raw.npz'
+            datfile = self.gconf['General']['base_name']+'.E.npz'
 
         group_dict = {}
         for root,dirs,files in os.walk(self.gconf['General']['base_dir']):
@@ -413,7 +440,7 @@ class Cruncher(Processor):
     either appends them to the existing data files or creates new ones as needed"""
 
     def __init__(self,global_conf,sims=[],sim_groups=[],failed_sims=[]):
-        super().__init__(global_conf,sims,sim_groups,failed_sims)
+        super(Cruncher,self).__init__(global_conf,sims,sim_groups,failed_sims)
         self.log.debug("This is THE CRUNCHER!!!!!")
 
     def calculate(self,quantity,sim,args):
@@ -559,7 +586,7 @@ class Cruncher(Processor):
         """Returns a 2D matrix containing the N,K values at each point in space
         for a circular in-plane geometry"""
         # Set up the parameters
-        cx,cy = sdata['center']
+        cx,cy = sdata['center']['x'],sdata['center']['y']
         rad = sdata['radius']
         rad_sq = rad*rad
         mat = sdata['material']
@@ -842,7 +869,7 @@ class Global_Cruncher(Cruncher):
     """Computes global quantities for an entire run, instead of local quantities for an individual
     simulation"""
     def __init__(self,global_conf,sims=[],sim_groups=[],failed_sims=[]):
-        super().__init__(global_conf,sims,sim_groups,failed_sims)
+        super(Global_Cruncher,self).__init__(global_conf,sims,sim_groups,failed_sims)
         self.log.debug('This is the global cruncher')
 
     def calculate(self,quantity,args):
@@ -1090,7 +1117,7 @@ class Global_Cruncher(Cruncher):
             base = group[0].conf['General']['base_dir']
             self.log.info('Performing scalar reduction for group at %s'%base)
             group[0].get_data()
-            group_comb = group[0].get_scalar_quantity(quantity) 
+            group_comb = group[0].get_scalar_quantity(quantity)
             group[0].clear_data()
             # This approach is more memory efficient then building a 2D array
             # of all the data from each group and summing along an axis
@@ -1107,13 +1134,13 @@ class Global_Cruncher(Cruncher):
             path = os.path.join(base,fname)
             if group[0].conf['General']['save_as'] == 'npz':
                 np.save(path,group_comb)
-            elif group[0].conf['General']['save_as'] == 'text': 
+            elif group[0].conf['General']['save_as'] == 'text':
                 path+='.crnch'
                 np.savetxt(path,group_comb)
             else:
                 raise ValueError('Invalid file type in config')
-            
-            
+
+
             #group[0].get_avgs()
             #first = group[0].avgs[key]
             #group[0].clear_data()
@@ -1230,7 +1257,7 @@ class Global_Cruncher(Cruncher):
 class Plotter(Processor):
     """Plots all the things listed in the config file"""
     def __init__(self,global_conf,sims=[],sim_groups=[],failed_sims=[]):
-        super().__init__(global_conf,sims,sim_groups,failed_sims)
+        super(Plotter,self).__init__(global_conf,sims,sim_groups,failed_sims)
         self.log.debug("This is the plotter")
 
     def process(self,sim):
@@ -1274,7 +1301,7 @@ class Plotter(Processor):
         """This function draws the layer boundaries and in-plane geometry on 2D
         heatmaps"""
         # TODO: If we want to make things general, this function could actually
-        # get really complicated for several reasons. 
+        # get really complicated for several reasons.
         # 1. Each layer can have a unique in plane geometry. If we are plotting
         # an xy plane (plane = z, poor notation which should be fixed), we need
         # to identify which layer we are in so we can extract the geometry
@@ -1283,7 +1310,7 @@ class Plotter(Processor):
         # know which plane we are at so we can scale the cross-sectional width
         # of any geometric features appropriately. This will definitely
         # involved some seriously nontrivial geometry depending on what shape
-        # we are dealing with, how its rotated, etc. 
+        # we are dealing with, how its rotated, etc.
         self.log.warning('Drawing capabilities are severely limited until I'
                          ' figure out how to handle a general geometry')
         period = sim.conf['Simulation']['params']['array_period']['value']
@@ -1295,8 +1322,8 @@ class Plotter(Processor):
         dz = sim.conf.get_height()/sim.conf['Simulation']['z_samples']
         if plane[-1] == 'z':
             self.log.info('draw nanowire circle')
-            core = mpatches.Circle(cent,radius=core_rad,fill=False)
-            shell = mpatches.Circle(cent,radius=shell_rad,fill=False)
+            core = mpatches.Circle((cent['x'],cent['y']),radius=core_rad,fill=False)
+            shell = mpatches.Circle((cent['x'],cent['y']),radius=shell_rad,fill=False)
             ax_hand.add_artist(core)
             ax_hand.add_artist(shell)
         elif plane[-1] == 'y' or plane[-1] == 'x':
@@ -1316,19 +1343,18 @@ class Plotter(Processor):
                     start = prev_tup[2]
                     end = int(dist/dz) + 1
                     boundaries.append((dist,start,end))
-                if layer_t > 0: 
+                if layer_t > 0:
                     x = [0,period]
                     y = [start*dz,start*dz]
                     label_y = y[0] + 0.05
                     label_x = x[-1] - .01
-                    label_text = boundaries[count-1][-1]
                     plt.text(label_x,label_y,layer,ha='right',family='sans-serif',size=12)
                     line = mlines.Line2D(x,y,linestyle='solid',linewidth=2.0,color='black')
                     ax_hand.add_line(line)
                     count += 1
                 if layer == 'NW_AlShell':
                     for rad in (core_rad,shell_rad):
-                        for x in (cent[0]-rad,cent[0]+rad):
+                        for x in (cent['x']-rad,cent['x']+rad):
                             # Need two locations w/ same x values
                             xv = [x,x]
                             yv = [start*dz,end*dz]
@@ -1360,7 +1386,7 @@ class Plotter(Processor):
             #    yv = [bottom,top]
             #    line = mlines.Line2D(xv,yv,linestyle='solid',linewidth=2.0,color='black')
             #    ax_hand.add_line(line)
-    
+
     def heatmap2d(self,sim,x,y,cs,labels,ptype,save_path=None,show=False,draw=False,fixed=None,colorsMap='jet'):
         """A general utility method for plotting a 2D heat map"""
         cm = plt.get_cmap(colorsMap)
@@ -1387,7 +1413,6 @@ class Plotter(Processor):
         if draw:
             ax = self.draw_geometry_2d(sim,ptype,ax)
         if save_path:
-            print("SAVING PLOT")
             fig.savefig(save_path)
         if show:
             plt.show()
@@ -1432,30 +1457,29 @@ class Plotter(Processor):
         self.log.info('Retrieving plane ...')
         cs = self.get_plane(scalar,xs,ys,zs,plane,pval)
         self.log.info('Plotting plane')
+        show = sim.conf['General']['show_plots']
         if plane == 'x':
             labels = ('y [um]','z [um]', quantity,title)
             if sim.conf['General']['save_plots']:
                 p = os.path.join(sim.conf['General']['sim_dir'],
                                  '%s_plane_2d_x.pdf'%quantity)
-            else: 
+            else:
                 p = False
-            show = sim.conf['General']['show_plots']
             self.heatmap2d(sim,y,z,cs,labels,plane,save_path=p,show=show,draw=draw,fixed=fixed)
         elif plane == 'y':
             labels = ('x [um]','z [um]', quantity,title)
             if sim.conf['General']['save_plots']:
                 p = os.path.join(sim.conf['General']['sim_dir'],
                                  '%s_plane_2d_y.pdf'%quantity)
-            else: 
+            else:
                 p = False
-            show = sim.conf['General']['show_plots']
             self.heatmap2d(sim,x,z,cs,labels,plane,save_path=p,show=show,draw=draw,fixed=fixed)
         elif plane == 'z':
             labels = ('y [um]','x [um]', quantity,title)
             if sim.conf['General']['save_plots']:
                 p = os.path.join(sim.conf['General']['sim_dir'],
                                  '%s_plane_2d_z.pdf'%quantity)
-            else: 
+            else:
                 p = False
             self.heatmap2d(sim,x,y,cs,labels,plane,save_path=p,show=show,draw=draw,fixed=fixed)
 
@@ -1579,7 +1603,7 @@ class Plotter(Processor):
 class Global_Plotter(Plotter):
     """Plots global quantities for an entire run that are not specific to a single simulation"""
     def __init__(self,global_conf,sims=[],sim_groups=[],failed_sims=[]):
-        super().__init__(global_conf,sims,sim_groups,failed_sims)
+        super(Global_Plotter,self).__init__(global_conf,sims,sim_groups,failed_sims)
         self.log.debug("Global plotter init")
 
     def process_all(self):
@@ -1679,7 +1703,7 @@ class Global_Plotter(Plotter):
             if sim.conf['General']['save_as'] == 'npz':
                 globstr = os.path.join(base,'scalar_reduce*_%s.npy'%quantity)
                 files = glob.glob(globstr)
-            elif sim.conf['General']['save_as'] == 'text': 
+            elif sim.conf['General']['save_as'] == 'text':
                 globstr = os.path.join(base,'scalar_reduce*_%s.crnch'%quantity)
                 files = glob.glob(globstr)
             else:
@@ -1688,7 +1712,7 @@ class Global_Plotter(Plotter):
             for datfile in files:
                 if sim.conf['General']['save_as'] == 'npz':
                     scalar = np.load(datfile)
-                elif sim.conf['General']['save_as'] == 'text': 
+                elif sim.conf['General']['save_as'] == 'text':
                     scalar = np.loadtxt(datfile,group_comb)
                 else:
                     raise ValueError('Incorrect file type in config')
@@ -1698,7 +1722,7 @@ class Global_Plotter(Plotter):
                     if sim.conf['General']['save_plots']:
                         fname = 'scalar_reduce_%s_plane_2d_x.pdf'%quantity
                         p = os.path.join(sim.conf['General']['base_dir'],fname)
-                    else: 
+                    else:
                         p = False
                     show = sim.conf['General']['show_plots']
                     self.heatmap2d(sim,y,z,cs,labels,plane,save_path=p,show=show,draw=draw,fixed=fixed)
@@ -1707,7 +1731,7 @@ class Global_Plotter(Plotter):
                     if sim.conf['General']['save_plots']:
                         fname = 'scalar_reduce_%s_plane_2d_y.pdf'%quantity
                         p = os.path.join(sim.conf['General']['base_dir'],fname)
-                    else: 
+                    else:
                         p = False
                     show = sim.conf['General']['show_plots']
                     self.heatmap2d(sim,x,z,cs,labels,plane,save_path=p,show=show,draw=draw,fixed=fixed)
@@ -1716,7 +1740,7 @@ class Global_Plotter(Plotter):
                     if sim.conf['General']['save_plots']:
                         fname = 'scalar_reduce_%s_plane_2d_z.pdf'%quantity
                         p = os.path.join(sim.conf['General']['base_dir'],fname)
-                    else: 
+                    else:
                         p = False
                     self.heatmap2d(sim,x,y,cs,labels,plane,save_path=p,show=show,draw=draw,fixed=fixed)
 

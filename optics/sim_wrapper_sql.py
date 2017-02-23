@@ -2,7 +2,7 @@ import shutil
 #import subprocess
 import itertools
 import os
-import glob
+#import glob
 #  import datetime
 import copy
 #  import hashlib
@@ -12,7 +12,7 @@ import numpy as np
 import scipy.optimize as optz
 import postprocess as pp
 import time
-import pprint
+#import pprint
 import argparse as ap
 import ruamel.yaml as yaml
 import logging
@@ -20,7 +20,9 @@ import logging
 # get our custom config object and the logger function
 #from utils.simulation import *
 #from utils.config import Config
-from utils.simulator import Simulator,Config
+from utils.simulator import Simulator
+from utils.config import Config
+from utils.utils import configure_logger
 from collections import OrderedDict
 #  from functools import wraps
 #  from contextlib import contextmanager
@@ -66,33 +68,6 @@ from collections import OrderedDict
 #        return func(*args,**kwargs)
 #    return wrapper
 
-def configure_logger(level,logger_name,log_dir,logfile):
-    # Get numeric level safely
-    numeric_level = getattr(logging, level.upper(), None)
-    if not isinstance(numeric_level, int):
-        raise ValueError('Invalid log level: %s' % level)
-    # Set formatting
-    formatter = logging.Formatter('%(asctime)s [%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
-    # Get logger with name
-    logger = logging.getLogger(logger_name)
-    logger.setLevel(numeric_level)
-    # Set up file handler
-    try:
-        os.makedirs(log_dir)
-    except OSError:
-        # Log dir already exists
-        pass
-    output_file = os.path.join(log_dir,logfile)
-    fhandler = logging.FileHandler(output_file)
-    fhandler.setFormatter(formatter)
-    logger.addHandler(fhandler)
-    # Create console handler
-    ch = logging.StreamHandler()
-    ch.setLevel(numeric_level)
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
-    return logger
-
 def parse_file(path):
     with open(path,'r') as cfile:
         text = cfile.read()
@@ -106,7 +81,7 @@ def get_combos(conf,keysets):
     this config object's non-fixed parameters. The elements of the inner list
     of value correspond to the elements of the key list"""
 
-    log = logging.getLogger('sim_wrapper')
+    log = logging.getLogger()
     log.info("Constructing dictionary of options and their values ...")
     # Get the list of values from all our variable keysets
     optionValues = OrderedDict()
@@ -132,7 +107,7 @@ def get_combos(conf,keysets):
 
 def make_sims(global_conf):
     """Make all the individual simulations for each parameter combination"""
-    log = logging.getLogger('sim_wrapper')
+    log = logging.getLogger()
     log.info('Constructing simulator objects ...')
     locs,combos = get_combos(global_conf,global_conf.variable)
     sims = []
@@ -151,7 +126,7 @@ def make_sims(global_conf):
         sims.append(Simulator(copy.deepcopy(sim_conf)))
     return sims
 #      with session_scope() as sess:
-#          log = logging.getLogger('sim_wrapper')
+#          log = logging.getLogger()
 #          log.info("Running single sim")
 #          del sim['Postprocessing']
 #          # Instantiate simulation object
@@ -179,7 +154,7 @@ def make_sims(global_conf):
     #  return (path,sim)
 
 def _get_data(sim,update=False):
-    log = logging.getLogger('sim_wrapper')
+    log = logging.getLogger()
     sim.conf.write(os.path.join(sim.dir,'sim_conf.yml'))
     start = time.time()
     if not update:
@@ -202,7 +177,7 @@ def run_sim(sim):
     """Actually runs simulation in a given directory using subprocess.call. Expects a tuple
     containing the absolute path to the job directory as the first element and
     the configuration object for the job as the second element"""
-    log = logging.getLogger('sim_wrapper')
+    log = logging.getLogger()
     try:
         os.makedirs(sim.dir)
     except OSError:
@@ -269,7 +244,7 @@ def execute_jobs(gconf,sims):
     """Given a list of simulation objects, run them either serially or in
     parallel"""
 
-    log = logging.getLogger('sim_wrapper')
+    log = logging.getLogger()
     if not gconf['General']['parallel']:
         log.info('Executing sims serially')
         for sim in sims:
@@ -293,7 +268,7 @@ def spectral_wrapper(opt_pars,baseconf):
     ## Optimizing shell thickness could result is negative thickness so we need to take absolute
     ## value here
     #opt_pars[0] = abs(opt_pars[0])
-    log = logging.getLogger('sim_wrapper')
+    log = logging.getLogger()
     log.info('Param keys: %s'%str(baseconf.optimized))
     log.info('Current values %s'%str(opt_pars))
     # Clean up old data unless the user asked us not to. We do this first so on the last
@@ -370,9 +345,9 @@ def spectral_wrapper(opt_pars,baseconf):
 
     # With our frequency sweep done, we now need to postprocess the results.
     # Configure logger
-    logger = configure_logger('error','postprocess',
-                              os.path.join(baseconf['General']['base_dir'],'logs'),
-                              'postprocess.log')
+    #log = configure_logger('error','postprocess',
+    #                          os.path.join(baseconf['General']['base_dir'],'logs'),
+    #                          'postprocess.log')
     # Compute transmission data for each individual sim
     cruncher = pp.Cruncher(baseconf)
     cruncher.collect_sims()
@@ -416,7 +391,7 @@ def spectral_wrapper(opt_pars,baseconf):
 
 def run_optimization(conf):
     """Runs an optimization on a given set of parameters"""
-    log = logging.getLogger('sim_wrapper')
+    log = logging.getLogger()
     log.info("Running optimization")
     print(conf.optimized)
     # Make sure the only variable parameter we have is a sweep through
@@ -459,9 +434,9 @@ def run(conf,log):
     provided config object"""
 
     basedir = conf['General']['base_dir']
-    logdir = os.path.join(basedir,'logs')
+    lfile = os.path.join(basedir,'logs/sim_wrapper.log')
     # Configure logger
-    logger = configure_logger(log,'sim_wrapper',logdir,'sim_wrapper.log')
+    logger = configure_logger(level=log,console=True,logfile=lfile)
     # Just a simple single simulation
     if not conf.optimized:
         # Get all the sims

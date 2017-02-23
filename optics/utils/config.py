@@ -1,6 +1,6 @@
-import os
-import pprint
-import logging
+#import os
+#import pprint
+#import logging
 import ruamel.yaml as yaml
 import re
 from collections import MutableMapping,OrderedDict
@@ -116,7 +116,7 @@ class Config(MutableMapping):
         self.build_dependencies()
         config_resolved = False
         while not config_resolved:
-            print('CONFIG NOT RESOLVED, MAKING PASS')
+            #print('CONFIG NOT RESOLVED, MAKING PASS')
             # Now we can actually perform any resolution
             for ref,ref_data in self.dep_graph.items():
                 # If the actual location of this references doesn't itself refer to
@@ -127,12 +127,12 @@ class Config(MutableMapping):
                 else:
                     is_resolved = False
                 if not is_resolved:
-                    if not 'ref_to' in ref_data:
-                        print('NO REFERENCES, RESOLVING')
+                    if 'ref_to' not in ref_data:
+                        #print('NO REFERENCES, RESOLVING')
                         self._resolve(ref)
                         self.dep_graph[ref]['resolved'] = True
                     else:
-                        print('CHECKING REFERENCES')
+                        #print('CHECKING REFERENCES')
                         # If all the locations this reference points to are resolved, then we
                         # can go ahead and resolve this one
                         if self._check_resolved(ref_data['ref_to']):
@@ -289,8 +289,6 @@ class Config(MutableMapping):
         except KeyError:
             raise KeyError('The dictionary you are attempting to sort must '
                            'itself contain a dictionary that has an "order" key')
-        sort_func = lambda tup: tup[1]['order']
-        sorted_layers = OrderedDict(sorted(adict.items(),
-                                    key=sort_func,reverse=reverse))
+        sorted_layers = OrderedDict(sorted(adict.items(),key=lambda tup: tup[1]['order'],
+                                           reverse=reverse))
         return sorted_layers
-

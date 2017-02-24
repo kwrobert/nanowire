@@ -1,41 +1,78 @@
 import shutil
-import subprocess
+#import subprocess
 import itertools
-import argparse as ap
 import os
-import glob
-import datetime
-from collections import OrderedDict
+#import glob
+#  import datetime
+import copy
+#  import hashlib
 import multiprocessing as mp
-import pandas
+#import pandas
 import numpy as np
 import scipy.optimize as optz
 import postprocess as pp
 import time
-import pprint
-import hashlib
-import copy
-# Get our custom config object and the logger function
-from utils.config import *
+#import pprint
+import argparse as ap
+import ruamel.yaml as yaml
+import logging
 
-def make_hash(o):
-    """Makes a hash from a dictionary, list, tuple or set to any level, that contains
-    only other hashable types (including any lists, tuples, sets, and
-    dictionaries)."""
+# get our custom config object and the logger function
+#from utils.simulation import *
+#from utils.config import Config
+from utils.simulator import Simulator
+from utils.config import Config
+from utils.utils import configure_logger
+from collections import OrderedDict
+#  from functools import wraps
+#  from contextlib import contextmanager
+#  from sqlalchemy.ext.declarative import declarative_base
+#  from sqlalchemy.orm import sessionmaker
 
-    if isinstance(o, (set, tuple, list)):
+#__DB_ENGINE__ = None
+#__SESSION_FACTORY__ = None
+#Base = declarative_base()
+#
+#def setup_db(name,verbose=False):
+#    """Sets up the module-scope database engine and the session factory"""
+#    global __DB_ENGINE__
+#    global __SESSION_FACTORY__
+#    if not __DB_ENGINE__ and not __SESSION_FACTORY__:
+#        __DB_ENGINE__ = create_engine('sqlite:///{}'.format(name),echo=verbose)
+#        __SESSION_FACTORY__ = sessionmaker(bind=__DB_ENGINE__)
+#        Base.metadata.create_all(__DB_ENGINE__)
+#        Simulation.metadata.create_all(__DB_ENGINE__)
+#    else:
+#        raise RuntimeError('DB Engine already set')
+#
+#@contextmanager
+#def session_scope():
+#    """Provide a transactional scope around a series of operations."""
+#    session = __SESSION_FACTORY__()
+#    try:
+#        yield session
+#        session.commit()
+#    except:
+#        session.rollback()
+#        raise
+#    finally:
+#        session.close()
 
-        return tuple([make_hash(e) for e in o])
+#def dbconnect(func):
+#    @wraps(func)
+#    def wrapper(*args,**kwargs):
+#        session = __SESSION_FACTORY__() 
+#        print('Setting up session scope')
+#        print('Here is session in wrapper')
+#        print(session)
+#        return func(*args,**kwargs)
+#    return wrapper
 
-    elif not isinstance(o, dict):
-        buf = repr(o).encode('utf-8')
-        return hashlib.md5(buf).hexdigest()
-
-    new_o = copy.deepcopy(o)
-    for k, v in new_o.items():
-        new_o[k] = make_hash(v)
-    out = repr(tuple(frozenset(sorted(new_o.items())))).encode('utf-8')
-    return hashlib.md5(out).hexdigest()
+def parse_file(path):
+    with open(path,'r') as cfile:
+        text = cfile.read()
+    conf = yaml.load(text,Loader=yaml.Loader)
+    return conf
 
 def get_combos(conf,keysets):
     """Given a config object, return two lists. The first list contains the
@@ -44,12 +81,12 @@ def get_combos(conf,keysets):
     this config object's non-fixed parameters. The elements of the inner list
     of value correspond to the elements of the key list"""
 
-    log = logging.getLogger('sim_wrapper')
+    log = logging.getLogger()
     log.info("Constructing dictionary of options and their values ...")
     # Get the list of values from all our variable keysets
     optionValues = OrderedDict()
     for keyset in keysets:
-        par = keyset[-1]
+        par = '.'.join(keyset)
         pdict = conf[keyset]
         if pdict['itertype'] == 'numsteps':
             values = np.linspace(pdict['start'],pdict['end'],pdict['step'])
@@ -57,6 +94,7 @@ def get_combos(conf,keysets):
             values = np.arange(pdict['start'],pdict['end']+pdict['step'],pdict['step'])
         else:
             raise ValueError('Invalid itertype specified at {}'.format(str(keyset)))
+        optionValues[par] = values
     log.debug("Option values dict after processing: %s"%str(optionValues))
     valuelist = list(optionValues.values())
     keys = list(optionValues.keys())
@@ -67,220 +105,164 @@ def get_combos(conf,keysets):
     log.debug('The list of parameter combos: %s',str(combos))
     return keys,combos
 
-def make_leaves(nodes):
-    """Accepts a list of tuples, where the first element of the tuple is the full path to
-    the node under which the leaves will be created, and the second element is
-    un-finalized config object for that node"""
-
-    log = logging.getLogger('sim_wrapper')
-    log.info("Building all leaves for each node...")
-    # Get a list of the parameters names (keys) and a list of lists of values where the
-    # ith value of the inner lists corresponds to the ith param name in keys. The inner
-    # list consists of a unique combination of variable parameters. Note all nodes sweep
-    # through the same parameters so we only need to compute this once.
-    keys,combos = get_combos(nodes[0][1],nodes[0][1].variable)
-    # Build all the leaves at every node in the directory tree
-    leaves = []
-    for nodepath,conf in nodes:
-        # Loop through each unique combination of parameters
-        for combo in combos:
-            # Make a unique working directory based on parameter combo
-            workdir = ''
-            for i in range(len(combo)):
-                substr = '{}_{:G}__'.format(keys[i],combo[i])
-                workdir += substr
-            workdir=workdir.rstrip('__')
-            fullpath = os.path.join(nodepath,workdir)
-            try:
-                os.makedirs(fullpath)
-            except OSError:
-                log.info("Working directory already exists, appending new to name")
-                workdir = workdir+"__new"
-                fullpath = os.path.join(nodepath,workdir)
-                os.makedirs(fullpath)
-            log.info('Created leaf %s',fullpath)
-            # Write new config file to sim dir. We make a copy then remove the postprocessing
-            # section
-            sim_conf = conf.copy()
-            del sim_conf['Postprocessing']
-            sim_conf['General']['sim_dir'] = fullpath
-            # Now we just overwrite all the variable parameters with their new
-            # fixed values. Note that itertools.product is so wonderful and
-            # nice that it preserves the order of the values in every combo
-            # such that the combo values always line up with the proper
-            # parameter name
-            for i in range(len(combo)):
-                sim_conf[conf.variable[i]] = {'type':'fixed','value':float(combo[i])}
-            # Now that all the parameters have been defined, we can add the evaluated parameters that
-            # depend on the values of some other parameters
-            #for par, val in conf.items('Evaluated Parameters'):
-            #    # Wrap the value in back ticks so we know to evaluate the results of the interpolated
-            #    # expression in the simulation script
-            #    wrapped = '`'+str(val)+'`'
-            #    sim_conf.set('Parameters',par,wrapped)
-            # Now write the config file to the appropriate subdir
-            out = os.path.join(fullpath,'sim_conf.yml')
-            sim_conf.write(out)
-            base_script = sim_conf['General']['sim_script']
-            script = os.path.join(nodepath,os.path.basename(base_script))
-            if not os.path.exists(script):
-                shutil.copy(base_script,script)
-            leaves.append((fullpath,sim_conf))
-    log.debug('Here are the leaves: %s',str(leaves))
-    log.info('Finished building leaves!')
-    return leaves
-
-def make_nodes(conf):
-    """Given a global config file that specifies all the different sorted and
-    variable sweeps, create all the nodes and all the leaves in the directory
-    tree. First, the nodes are built. Then, the list of nodes is passed to
-    make_leaves to create all the leaves"""
-
-    # Get access to logger
-    log = logging.getLogger('sim_wrapper')
-    log.info("Constructing all nodes in sorted directory tree ...")
-    # Get a list of the parameters names (keys) and a list of lists of values where the ith value
-    # of the inner lists corresponds to the ith param name in keys. The inner list consists of
-    # a unique combination of variable parameters
-    keys,combos = get_combos(conf,conf.sorting)
-    # Make all the nodes in the directory tree
-    nodes = []
-    # Loop through all the combos. Each combo corresponds to a unique path down
-    # the directory tree
+def make_confs(global_conf):
+    """Make all the configuration dicts for each parameter combination"""
+    log = logging.getLogger()
+    log.info('Constructing simulator objects ...')
+    locs,combos = get_combos(global_conf,global_conf.variable)
+    confs = []
     for combo in combos:
-        # Copy global config object
-        sub_conf = conf.copy()
-        # Build each node in the path and add params to new config object
-        path = conf['General']['base_dir']
+        # Make a copy of the global config for this parameter combos. This copy
+        # represents an individual simulation
+        sim_conf = global_conf.copy()
+        del sim_conf['Postprocessing']
+        # Now we just overwrite all the variable parameters with their new
+        # fixed values. Note that itertools.product is so wonderful and
+        # nice that it preserves the order of the values in every combo
+        # such that the combo values always line up with the proper
+        # parameter name
         for i in range(len(combo)):
-            # Now we just overwrite all the sorting parameters with their new
-            # fixed values. Note that itertools.product is so wonderful and
-            # nice that it preserves the order of the values in every combo
-            # such that the combo values always line up with the proper
-            # parameter name
-            sub_conf[conf.sorting[i]] = {'type':'fixed','value':float(combo[i])}
-            subdir = '{}_{:G}'.format(keys[i],combo[i])
-            path = os.path.join(path,subdir)
-            try:
-                os.makedirs(path)
-            except OSError:
-                pass
-            log.info("Created node %s",path)
-            sub_conf['General']['base_dir'] = path
-            # At each node in the tree we write out a complete config file that
-            # could be used to rerun all jobs in a certain section of the tree,
-            # or postprocess only that section of the tree
-            conf_file = os.path.join(path,'sorted_sweep_conf_%s.yml'%keys[i])
-            sub_conf.write(conf_file)
-        nodes.append((path,sub_conf))
-    log.debug('Here are the nodes: %s',str(nodes))
-    log.info('Finished building nodes!')
-    leaves = make_leaves(nodes)
-    return leaves
+            sim_conf[global_conf.variable[i]] = {'type':'fixed','value':float(combo[i])}
+        confs.append(sim_conf)
+    return confs
+#      with session_scope() as sess:
+#          log = logging.getLogger()
+#          log.info("Running single sim")
+#          del sim['Postprocessing']
+#          # Instantiate simulation object
+#          #sim = Simulation(sim_conf)
+#          path = os.path.join(sim['General']['base_dir'],sim.id[0:10])
+#          print(sim.id)
+#          sim['General']['sim_dir'] = path
+#          print(sim.id)
+#          sess.add(sim)
+#          # The dir is already made when the logger is configured but this is a safety measure i guess?
+#          try:
+#              os.makedirs(path)
+#          except OSError:
+#              log.info('Data directory already exists, appending timestamp')
+#              stamp = '{:%Y-%m-%d_%H-%M-%S}'.format(datetime.datetime.now())
+#              path = path+'__{}'.format(stamp)
+#              os.makedirs(path)
+#          # Now write the config file to the data subdir
+#          out = os.path.join(path,'sim_conf.yml')
+#          sim.write(out)
+#          # Copy sim script to sim dir
+#          base_script = sim['General']['sim_script']
+#          script = os.path.join(path,os.path.basename(base_script))
+#          shutil.copy(base_script,script)
+    #  return (path,sim)
 
-def make_single_sim(conf):
-    """Create a configuration file for a single simulation, such that it is ready to be
-    consumed by the Lua script. Return the path to the config file and the config object
-    itself"""
+def _get_data(sim,update=False):
+    log = logging.getLogger()
+    sim.conf.write(os.path.join(sim.dir,'sim_conf.yml'))
+    start = time.time()
+    if not update:
+        sim.configure()
+        sim.build_device()
+        sim.set_excitation()
+    else:
+        sim.update_thicknesses()
+    sim.save_field()
+    sim.save_fluxes()
+    end = time.time()
+    runtime = end-start
+    time_file = os.path.join(sim.dir,'time.dat')
+    with open(time_file,'w') as out:
+        out.write('{}\n'.format(runtime))
+    log.info('Simulation {} completed in {:.2}'
+             ' seconds!'.format(sim.id[0:10],runtime))
 
-    log = logging.getLogger('sim_wrapper')
-    log.info("Running single sim")
-    # Make the simulation dir
-    basedir = conf['General']['base_dir']
-    # The dir is already made when the logger is configured but this is a safety measure i guess?
-    try:
-        path = os.path.join(basedir,'data')
-        os.makedirs(path)
-    except OSError:
-        log.info('Data directory already exists, appending timestamp')
-        stamp = '{:%Y-%m-%d_%H-%M-%S}'.format(datetime.datetime.now())
-        path = os.path.join(basedir,'data__'+stamp)
-        os.makedirs(path)
-    # Write new config file to sim dir. We make a copy then remove the postprocessing
-    # section
-    sim_conf = conf.copy()
-    del sim_conf['Postprocessing']
-    sim_conf['General']['sim_dir'] = path
-    # Now write the config file to the data subdir
-    out = os.path.join(path,'sim_conf.yml')
-    sim_conf.write(out)
-    # Copy sim script to sim dir
-    base_script = sim_conf['General']['sim_script']
-    script = os.path.join(path,os.path.basename(base_script))
-    shutil.copy(base_script,script)
-    return (path,sim_conf)
-
-def convert_data(path,conf):
-    """Converts text file spit out by S4 into npz format for faster loading during postprocessing"""
-    # Have we decided to ignore and remove H field files?
-    ignore = conf['General']['ignore_h']
-    # Convert e field data files
-    bname = conf['General']['base_name']
-    efile = os.path.join(path,bname+'.E')
-    d = pandas.read_csv(efile,delim_whitespace=True,header=None,skip_blank_lines=True)
-    edata = d.as_matrix()
-    econv = efile+'.raw'
-    np.savez(econv,data=edata,headers=[None])
-    hfile = os.path.join(path,bname+'.H')
-    if not ignore:
-        # Convert h field files
-        d = pandas.read_csv(hfile,delim_whitespace=True,header=None,skip_blank_lines=True)
-        hdata = d.as_matrix()
-        hconv = hfile+'.raw'
-        np.savez(hconv,data=hdata,headers=[None])
-    # Remove the old text files
-    os.remove(efile)
-    os.remove(hfile)
-    return None
-
-def run_sim(jobtup):
+def run_sim(conf):
     """Actually runs simulation in a given directory using subprocess.call. Expects a tuple
     containing the absolute path to the job directory as the first element and
     the configuration object for the job as the second element"""
-
-    log = logging.getLogger('sim_wrapper')
-    jobpath,jobconf = jobtup
-    timed = jobconf['General']['save_time']
-    tout = os.path.join(jobpath,'timing.dat')
-    simlog = os.path.join(jobpath,'sim.log')
-    script = jobconf['General']['sim_script']
-    ini_file = os.path.join(jobpath,'sim_conf.yml')
-    if timed:
-        log.debug('Executing script with timing wrapper ...')
-        cmd = 'command time -vv -o %s lua %s %s 2>&1 | tee %s'%(tout,script,ini_file,simlog)
-        #cmd = '/usr/bin/perf stat -o timing.dat -r 5 /usr/bin/lua %s %s'%(script,ini_file)
+    log = logging.getLogger()
+    sim = Simulator(copy.deepcopy(conf))
+    try:
+        os.makedirs(sim.dir)
+    except OSError:
+        pass
+    if not sim.conf.variable_thickness:
+        log.info('Executing sim %s'%sim.id[0:10])
+        _get_data(sim)
     else:
-        cmd = 'command lua %s %s 2>&1 | tee %s'%(script,ini_file,simlog)
-    log.debug('Subprocess command: %s',cmd)
-    relpath = os.path.relpath(jobpath,jobconf['General']['treebase'])
-    log.info("Starting simulation for %s ...",relpath)
-    completed = subprocess.run(cmd,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-    #log.info('Simulation stderr: %s',completed.stderr)
-    log.info("Simulation stderr: %s",completed.stderr)
-    log.debug('Simulation stdout: %s',completed.stdout)
-    # Convert text data files to npz binary file
-    if jobconf['General']['save_as'] == 'npz':
-        log.info('Converting data at %s to npz format',relpath)
-        convert_data(jobpath,jobconf)
-    log.info("Finished simulation for %s!",relpath)
-    return None
+        log.info('Computing a thickness sweep at %s'%sim.id[0:10])
+        orig_id = sim.id[0:10]
+        # Get all combinations of layer thicknesses
+        keys,combos = get_combos(sim.conf,sim.conf.variable_thickness)
+        # Update base directory to new sub directory
+        sim.conf['General']['base_dir'] = sim.dir
+        # Set things up for the first combo
+        combo = combos.pop()
+        # First update all the thicknesses in the config. We make a copy of the
+        # list because it gets continually updated in the config object
+        var_thickness = sim.conf.variable_thickness
+        for i in range(len(combo)):
+            keyseq = var_thickness[i]
+            sim.conf[keyseq] = {'type':'fixed','value':float(combo[i])}
+        # With all the params updated we can now make the subdir from the
+        # sim id and get the data
+        sim.update_id()
+        os.makedirs(sim.dir)
+        subpath = os.path.join(orig_id,sim.id[0:10])
+        log.info('Computing initial thickness at %s'%subpath)
+        _get_data(sim)
+        # Now we can repeat the same exact process, but instead of rebuilding
+        # the device we just update the thicknesses
+        for combo in combos:
+            for i in range(len(combo)):
+                keyseq = var_thickness[i]
+                sim.conf[keyseq] = {'type':'fixed','value':float(combo[i])}
+            sim.update_id()
+            subpath = os.path.join(orig_id,sim.id[0:10])
+            log.info('Computing additional thickness at %s'%subpath)
+            os.makedirs(sim.dir)
+            _get_data(sim,update=True)
+    return
+    #  with session_scope() as session:
+    #      timed = sim['General']['save_time']
+    #      tout = os.path.join(jobpath,'timing.dat')
+    #      simlog = os.path.join(jobpath,'sim.log')
+    #      script = sim['General']['sim_script']
+    #      ini_file = os.path.join(jobpath,'sim_conf.yml')
+    #      if timed:
+    #          log.debug('Executing script with timing wrapper ...')
+    #          cmd = 'command time -vv -o %s lua %s %s 2>&1 | tee %s'%(tout,script,ini_file,simlog)
+    #          #cmd = '/usr/bin/perf stat -o timing.dat -r 5 /usr/bin/lua %s %s'%(script,ini_file)
+    #      else:
+    #          cmd = 'command lua %s %s 2>&1 | tee %s'%(script,ini_file,simlog)
+    #      log.debug('Subprocess command: %s',cmd)
+    #      relpath = os.path.relpath(jobpath,sim['General']['treebase'])
+    #      log.info("Starting simulation for %s ...",relpath)
+    #      completed = subprocess.run(cmd,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    #      #log.info('Simulation stderr: %s',completed.stderr)
+    #      log.info("Simulation stderr: %s",completed.stderr)
+    #      log.debug('Simulation stdout: %s',completed.stdout)
+    #      # Convert text data files to npz binary file
+    #      if sim['General']['save_as'] == 'npz':
+    #          log.info('Converting data at %s to npz format',relpath)
+    #          convert_data(jobpath,sim)
+    #      log.info("Finished simulation for %s!",relpath)
+    #  return None
 
-def execute_jobs(gconf,jobs):
-    """Given a list of length 2 tuples containing job directories and their
-    configuration objects (in that order), executes the jobs. If specified, a
-    multiprocessing pool is used to run the jobs in parallel. If not, jobs are
-    executed serially"""
+def execute_jobs(gconf,confs):
+    """Given a list of configuration dictionaries, run them either serially or in
+    parallel by applying run_sim to each dict. We do this instead of applying
+    to an actual Simulator object because the Simulator objects are not
+    pickeable and thus cannot be parallelized by the multiprocessing lib"""
 
-    log=logging.getLogger('sim_wrapper')
+    log = logging.getLogger()
     if not gconf['General']['parallel']:
-        log.info('Executing jobs serially')
-        for job in jobs:
-            run_sim(job)
+        log.info('Executing sims serially')
+        for conf in confs:
+            run_sim(conf)
     else:
         num_procs = mp.cpu_count() - gconf['General']['reserved_cores']
-        log.info('Executing jobs in parallel using %s cores ...',str(num_procs))
-        with mp.Pool(processes=num_procs) as pool:
-            result = pool.map(run_sim,jobs)
+        log.info('Executing sims in parallel using %s cores ...',str(num_procs))
+        pool = mp.Pool(processes=num_procs)
+        pool.map(run_sim,confs)
+        pool.close()
 
 def spectral_wrapper(opt_pars,baseconf):
     """A wrapper function to handle spectral sweeps and postprocessing for the scipy minimizer. It
@@ -293,26 +275,39 @@ def spectral_wrapper(opt_pars,baseconf):
     ## Optimizing shell thickness could result is negative thickness so we need to take absolute
     ## value here
     #opt_pars[0] = abs(opt_pars[0])
-    log=logging.getLogger('sim_wrapper')
-    # Make sure we don't have any preexisting frequency dirs. We do this first so on the last
-    # iteration all our data is left intact
+    log = logging.getLogger()
     log.info('Param keys: %s'%str(baseconf.optimized))
     log.info('Current values %s'%str(opt_pars))
+    # Clean up old data unless the user asked us not to. We do this first so on the last
+    # iteration all our data is left intact
     basedir = baseconf['General']['base_dir']
-    globstr = os.path.join(basedir,'frequency*')
-    dirs = glob.glob(globstr)
-    for adir in dirs:
-        shutil.rmtree(adir)
+    if not baseconf['General']['opt_keep_intermediates']:
+        for item in os.listdir(basedir):
+            if os.path.isdir(item) and item != 'logs':
+                shutil.rmtree(item)
     # Set the value key of all the params we are optimizing over to the current
     # guess
     for i in range(len(baseconf.optimized)):
         keyseq = baseconf.optimized[i]
-        valseq = (*keyseq,'value')
+        print(keyseq)
+        valseq = list(keyseq)+['value']
+        print(valseq)
         baseconf[valseq] = float(opt_pars[i])
-    # With the parameters set, we can now make the leaf directories, which should only contain
-    # frequency values
-    node = (basedir,baseconf)
-    leaves = make_leaves([node])
+    # Make all the sim objects
+    sims = make_confs(baseconf)
+    # Set the params we are optimizing over for each sim to the current guess.
+    # This we is less efficient than just modifying them in the baseconf and
+    # intializing all sims from that conf. The problem with that approach is
+    # that each sim will then have a new hash, and we won't be able to retrieve
+    # convergence information from the previous run. Here we can update their
+    # params without updating the hash and be able to use the hash for lookups 
+    #for sim in sims:
+    #    for i in range(len(baseconf.optimized)):
+    #        keyseq = baseconf.optimized[i]
+    #        print(keyseq)
+    #        valseq = list(keyseq)+['value']
+    #        print(valseq)
+    #        sim.conf[valseq] = float(opt_pars[i])
     # Let's reuse the convergence information from the previous iteration if it exists
     # NOTE: This kind of assumes your initial guess was somewhat decent with regards to the in plane
     # geometric variables and the optimizer is staying relatively close to that initial guess. If
@@ -321,33 +316,33 @@ def spectral_wrapper(opt_pars,baseconf):
     # with this new set of variables.
     info_file = os.path.join(basedir,'conv_info.txt')
     if os.path.isfile(info_file):
+        conv_dict = {}
         with open(info_file,'r') as info:
             for line in info:
-                conf_path,numbasis,conv_status = line.strip().split(',')
-                sim_conf = Config(conf_path)
-                rel = os.path.relpath(conf_path,basedir)
-                log.info('Simulation at %s is %s at %s basis terms'%(rel,conv_status,numbasis))
-                # Turn off adaptive convergence for all the sims that have converged and set their number of
-                # basis terms to the proper value so we continue to use that value
+                freq,numbasis,conv_status = line.strip().split(',')
                 if conv_status == 'converged':
-                    sim_conf[('General','adaptive_convergence')] = 'False'
-                    sim_conf[('Simulation','params','numbasis','value')] = numbasis
-                    with open(conf_path,'w') as configfile:
-                        sim_conf.write(configfile)
-                    # We have to recreate the converged_at.txt file because it gets deleted every
-                    # iteration and we need it to create the info file later on
-                    fpath = os.path.join(os.path.dirname(conf_path),'converged_at.txt')
-                    with open(fpath,'w') as conv_at:
-                        conv_at.write('%s\n'%numbasis)
-                # For sims that haven't converged, lets at least set the number of basis terms to the last
-                # tested value so we're closer to our goal of convergence
+                    conv_dict[freq] = (True,numbasis)
                 elif conv_status == 'unconverged':
-                    sim_conf.set(('Simulation','params','numbasis','value'),numbasis)
-                    with open(conf_path,'w') as configfile:
-                        sim_conf.write(configfile)
+                    conv_dict[freq] = (False,numbasis)
+        print(conv_dict)
+        for sim in sims:
+            freq = str(sim.conf['Simulation']['params']['frequency']['value'])
+            conv,numbasis = conv_dict[freq]
+            # Turn off adaptive convergence and update the number of basis
+            # terms
+            if conv:
+                log.info('Frequency %s converged at %s basis'
+                         ' terms'%(freq,numbasis))
+                sim.conf['General']['adaptive_convergence'] = False
+                sim.conf['Simulation']['params']['numbasis']['value'] = int(numbasis)
+            # For sims that haven't converged, set the number of basis terms to the last
+            # tested value so we're closer to our goal of convergence
+            else:
+                log.info('Frequency %s unconverged at %s basis'
+                         ' terms'%(freq,numbasis))
+                sim.conf['Simulation']['params']['numbasis']['value'] = int(numbasis)
     # With the leaf directories made and the number of basis terms adjusted, we can now kick off our frequency sweep
-    execute_jobs(baseconf,leaves)
-
+    execute_jobs(baseconf,sims)
 
     #####
     # TODO: This needs to be generalized. The user could pass in the name of
@@ -357,9 +352,9 @@ def spectral_wrapper(opt_pars,baseconf):
 
     # With our frequency sweep done, we now need to postprocess the results.
     # Configure logger
-    logger = configure_logger('error','postprocess',
-                              os.path.join(baseconf['General']['base_dir'],'logs'),
-                              'postprocess.log')
+    #log = configure_logger('error','postprocess',
+    #                          os.path.join(baseconf['General']['base_dir'],'logs'),
+    #                          'postprocess.log')
     # Compute transmission data for each individual sim
     cruncher = pp.Cruncher(baseconf)
     cruncher.collect_sims()
@@ -373,19 +368,28 @@ def spectral_wrapper(opt_pars,baseconf):
     if baseconf['General']['adaptive_convergence']:
         log.info('Storing adaptive convergence results ...')
         with open(info_file,'w') as info:
-            conv_files = glob.glob(os.path.join(basedir,'**/converged_at.txt'))
-            for convf in conv_files:
-                simpath = os.path.join(os.path.dirname(convf),'sim_conf.ini')
-                with open(convf,'r') as cfile:
-                    numbasis = cfile.readline().strip()
-                info.write('%s,%s,%s\n'%(simpath,numbasis,'converged'))
-            nconv_files = glob.glob(os.path.join(basedir,'**/not_converged_at.txt'))
-            for nconvf in nconv_files:
-                simpath = os.path.join(os.path.dirname(nconvf),'sim_conf.ini')
-                with open(nconvf,'r') as cfile:
-                    numbasis = cfile.readline().strip()
-                info.write('%s,%s,%s\n'%(simpath,numbasis,'unconverged'))
-
+            for sim in sims:
+                freq = sim.conf['Simulation']['params']['frequency']['value']
+                conv_path = os.path.join(sim.dir,'converged_at.txt')
+                nconv_path = os.path.join(sim.dir,'not_converged_at.txt')
+                if os.path.isfile(conv_path):
+                    conv_f = open(conv_path,'r')
+                    numbasis = conv_f.readline().strip()
+                    conv_f.close()
+                    conv = 'converged'
+                elif os.path.isfile(nconv_path):
+                    conv_f = open(nconv_path,'r')
+                    numbasis = conv_f.readline().strip()
+                    conv_f.close()
+                    conv = 'unconverged'
+                else:
+                    # If we were converged on a previous iteration, adaptive
+                    # convergence was switched off and there will be no file to
+                    # read from
+                    conv = 'converged'
+                    numbasis = sim.conf['Simulation']['params']['numbasis']['value']
+                info.write('%s,%s,%s\n'%(str(freq),numbasis,conv))
+        log.info('Finished storing convergence results!')
     #print('Total time = %f'%delta)
     #print('Num calls after = %i'%gcruncher.weighted_transmissionData.called)
     # This is a minimizer, we want to maximize the fraction of photons absorbed and thus minimize
@@ -393,7 +397,8 @@ def spectral_wrapper(opt_pars,baseconf):
     return 1-photon_fraction
 
 def run_optimization(conf):
-    log = logging.getLogger('sim_wrapper')
+    """Runs an optimization on a given set of parameters"""
+    log = logging.getLogger()
     log.info("Running optimization")
     print(conf.optimized)
     # Make sure the only variable parameter we have is a sweep through
@@ -401,7 +406,7 @@ def run_optimization(conf):
     for keyseq in conf.variable:
         if keyseq[-1] != 'frequency':
             log.error('You should only be sweep through frequency during an '
-            'optimization')
+                      'optimization')
             quit()
     # Collect all the guesses
     guess = np.zeros(len(conf.optimized))
@@ -412,6 +417,7 @@ def run_optimization(conf):
     # Max iterations and tolerance
     tol = conf['General']['opt_tol']
     max_iter = conf['General']['opt_max_iter']
+    os.makedirs(os.path.join(conf['General']['base_dir'],'opt_dir'))
     # Run the simplex optimizer
     opt_val = optz.minimize(spectral_wrapper,
                             guess,
@@ -429,40 +435,29 @@ def run_optimization(conf):
         for key, value in zip(conf.optimized,opt_val.x):
             out.write('%s: %f\n'%(str(key),value))
     return opt_val.x
-
+    
 def run(conf,log):
     """The main run methods that decides what kind of simulation to run based on the
     provided config object"""
 
     basedir = conf['General']['base_dir']
-    logdir = os.path.join(basedir,'logs')
+    lfile = os.path.join(basedir,'logs/sim_wrapper.log')
     # Configure logger
-    logger = configure_logger(log,'sim_wrapper',logdir,'sim_wrapper.log')
+    logger = configure_logger(level=log,console=True,logfile=lfile)
     # Just a simple single simulation
-    if conf.fixed and not conf.variable and not conf.sorting and not conf.optimized:
-        logger.debug('Entering single sim function from main')
-        job = make_single_sim(conf)
-        #run_sim(job)
+    if not conf.optimized:
+        # Get all the sims
+        sims = make_confs(conf)
+        logger.info("Executing job campaign")
+        execute_jobs(conf,sims)
     # If we have variable params, do a parameter sweep
-    elif conf.variable and not conf.optimized:
-        # If we have sorting parameters we need to make the nodes first
-        if conf.sorting:
-            logger.debug('Creating nodes and leaves')
-            jobs = make_nodes(conf)
-        else:
-            logger.debug('Creating leaves')
-            # make_leaves expects a list of tuples with contents (jobpath,jobconfobject)
-            jobs = make_leaves([(basedir,conf)])
-        execute_jobs(conf,jobs)
-    # Looks like we need to run an optimization
-    elif conf.optimized and not conf.sorting:
-        logger.debug('Entering optimization function from main')
+    elif conf.optimized:
         run_optimization(conf)
     else:
         logger.error('Unsupported configuration for a simulation run. Not a '
-        'single sim, sweep, or optimization. Make sure your sweeps are '
-        'configured correctly, and if you are running an optimization '
-        'make sure you do not have any sorting parameters specified')
+                     'single sim, sweep, or optimization. Make sure your sweeps are '
+                     'configured correctly, and if you are running an optimization '
+                     'make sure you do not have any sorting parameters specified')
 
 def pre_check(conf_path,conf):
     """Checks conf file for invalid values"""
@@ -473,7 +468,7 @@ def pre_check(conf_path,conf):
 
     # Warn user if they are about to dump a bunch of simulation data and directories into a
     # directory that already exists
-    base = conf["General"]["basedir"]
+    base = conf["General"]["base_dir"]
     if os.path.isdir(base):
         print('WARNING!!! You are about to start a simulation in a directory that already exists')
         print('WARNING!!! This will dump a whole bunch of crap into that directory and possibly')
@@ -503,13 +498,30 @@ def main():
     args = parser.parse_args()
 
     if os.path.isfile(args.config_file):
-        conf = Config(path=os.path.abspath(args.config_file))
+        global_conf = Config(path=os.path.abspath(args.config_file))
     else:
         print("\n The file you specified does not exist! \n")
         quit()
+    
+    #setup_db(sim['General']['db_name'])
+    ##pre_check(os.path.abspath(args.config_file),conf)
+    run(global_conf,args.log_level)
 
-    #pre_check(os.path.abspath(args.config_file),conf)
-    run(conf,args.log_level)
+#def db_test():
+#    with session_scope() as session:
+#        print(session)
+#
+#def main():
+#    setup_db('new_test.db')
+#    db_test()
+#    #Session = sessionmaker(bind=engine)
+#    #session = Session()
+#    #conf = {'some_stuff':'wtih a value'}
+#    #sim = Simulation(conf)
+#    #print(sim.__table__)
+#    #print(sim.id)
+#    #session.add(sim)
+#    #session.commit()
 
 if __name__ == '__main__':
     main()

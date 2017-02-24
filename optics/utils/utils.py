@@ -25,7 +25,8 @@ class StreamToLogger(object):
         # to work properly for me.
         self.level(sys.stderr)
 
-def configure_logger(level='info',name=None,console=False,logfile=None):
+def configure_logger(level='info',name=None,console=False,logfile=None,
+                     propagate=True):
     """Creates a logger providing some arguments to make it more configurable.
        name: Name of logger to be created. Defaults to the root logger
        level: The log level of the logger, defaults to INFO
@@ -39,12 +40,14 @@ def configure_logger(level='info',name=None,console=False,logfile=None):
     if not isinstance(numeric_level, int):
         raise ValueError('Invalid log level: %s' % level)
     # Set formatting
-    formatter = logging.Formatter('%(asctime)s [%(module)s:%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
+    formatter = logging.Formatter('%(asctime)s [%(module)s:%(name)s:%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
     # Create logger
     if name:
         logger = logging.getLogger(name)
     else:
         logger = logging.getLogger()
+    if not propagate:
+        logger.propagate = False
     logger.setLevel(numeric_level)
     if logfile:
         log_dir,logfile = os.path.split(logfile)

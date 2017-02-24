@@ -105,12 +105,12 @@ def get_combos(conf,keysets):
     log.debug('The list of parameter combos: %s',str(combos))
     return keys,combos
 
-def make_sims(global_conf):
-    """Make all the individual simulations for each parameter combination"""
+def make_confs(global_conf):
+    """Make all the configuration dicts for each parameter combination"""
     log = logging.getLogger()
     log.info('Constructing simulator objects ...')
     locs,combos = get_combos(global_conf,global_conf.variable)
-    sims = []
+    confs = []
     for combo in combos:
         # Make a copy of the global config for this parameter combos. This copy
         # represents an individual simulation
@@ -123,8 +123,8 @@ def make_sims(global_conf):
         # parameter name
         for i in range(len(combo)):
             sim_conf[global_conf.variable[i]] = {'type':'fixed','value':float(combo[i])}
-        sims.append(Simulator(copy.deepcopy(sim_conf)))
-    return sims
+        confs.append(sim_conf)
+    return confs
 #      with session_scope() as sess:
 #          log = logging.getLogger()
 #          log.info("Running single sim")
@@ -173,11 +173,12 @@ def _get_data(sim,update=False):
     log.info('Simulation {} completed in {:.2}'
              ' seconds!'.format(sim.id[0:10],runtime))
 
-def run_sim(sim):
+def run_sim(conf):
     """Actually runs simulation in a given directory using subprocess.call. Expects a tuple
     containing the absolute path to the job directory as the first element and
     the configuration object for the job as the second element"""
     log = logging.getLogger()
+    sim = Simulator(copy.deepcopy(conf))
     try:
         os.makedirs(sim.dir)
     except OSError:
@@ -187,74 +188,80 @@ def run_sim(sim):
         _get_data(sim)
     else:
         log.info('Computing a thickness sweep at %s'%sim.id[0:10])
+        orig_id = sim.id[0:10]
         # Get all combinations of layer thicknesses
-        keys,combos = get_combos(sim.conf,sims._conf.variable_thickness)
+        keys,combos = get_combos(sim.conf,sim.conf.variable_thickness)
         # Update base directory to new sub directory
         sim.conf['General']['base_dir'] = sim.dir
         # Set things up for the first combo
-        log.info('Computing initial thickness at %s'%sim.id[0:10])
         combo = combos.pop()
-        # First update all the thicknesses in the config
+        # First update all the thicknesses in the config. We make a copy of the
+        # list because it gets continually updated in the config object
+        var_thickness = sim.conf.variable_thickness
         for i in range(len(combo)):
-            keyseq = sim.conf.variable_thickness[i]
+            keyseq = var_thickness[i]
             sim.conf[keyseq] = {'type':'fixed','value':float(combo[i])}
         # With all the params updated we can now make the subdir from the
         # sim id and get the data
         sim.update_id()
         os.makedirs(sim.dir)
+        subpath = os.path.join(orig_id,sim.id[0:10])
+        log.info('Computing initial thickness at %s'%subpath)
         _get_data(sim)
         # Now we can repeat the same exact process, but instead of rebuilding
         # the device we just update the thicknesses
         for combo in combos:
             for i in range(len(combo)):
-                keyseq = sim.conf.variable_thickness[i]
+                keyseq = var_thickness[i]
                 sim.conf[keyseq] = {'type':'fixed','value':float(combo[i])}
             sim.update_id()
-            log.info('Computing additional thickness at %s'%sim.id[0:10])
+            subpath = os.path.join(orig_id,sim.id[0:10])
+            log.info('Computing additional thickness at %s'%subpath)
             os.makedirs(sim.dir)
             _get_data(sim,update=True)
     return
     #  with session_scope() as session:
-        #  timed = sim['General']['save_time']
-        #  tout = os.path.join(jobpath,'timing.dat')
-        #  simlog = os.path.join(jobpath,'sim.log')
-        #  script = sim['General']['sim_script']
-        #  ini_file = os.path.join(jobpath,'sim_conf.yml')
-        #  if timed:
-            #  log.debug('Executing script with timing wrapper ...')
-            #  cmd = 'command time -vv -o %s lua %s %s 2>&1 | tee %s'%(tout,script,ini_file,simlog)
-            #  #cmd = '/usr/bin/perf stat -o timing.dat -r 5 /usr/bin/lua %s %s'%(script,ini_file)
-        #  else:
-            #  cmd = 'command lua %s %s 2>&1 | tee %s'%(script,ini_file,simlog)
-        #  log.debug('Subprocess command: %s',cmd)
-        #  relpath = os.path.relpath(jobpath,sim['General']['treebase'])
-        #  log.info("Starting simulation for %s ...",relpath)
-        #  completed = subprocess.run(cmd,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-        #  #log.info('Simulation stderr: %s',completed.stderr)
-        #  log.info("Simulation stderr: %s",completed.stderr)
-        #  log.debug('Simulation stdout: %s',completed.stdout)
-        #  # Convert text data files to npz binary file
-        #  if sim['General']['save_as'] == 'npz':
-            #  log.info('Converting data at %s to npz format',relpath)
-            #  convert_data(jobpath,sim)
-        #  log.info("Finished simulation for %s!",relpath)
+    #      timed = sim['General']['save_time']
+    #      tout = os.path.join(jobpath,'timing.dat')
+    #      simlog = os.path.join(jobpath,'sim.log')
+    #      script = sim['General']['sim_script']
+    #      ini_file = os.path.join(jobpath,'sim_conf.yml')
+    #      if timed:
+    #          log.debug('Executing script with timing wrapper ...')
+    #          cmd = 'command time -vv -o %s lua %s %s 2>&1 | tee %s'%(tout,script,ini_file,simlog)
+    #          #cmd = '/usr/bin/perf stat -o timing.dat -r 5 /usr/bin/lua %s %s'%(script,ini_file)
+    #      else:
+    #          cmd = 'command lua %s %s 2>&1 | tee %s'%(script,ini_file,simlog)
+    #      log.debug('Subprocess command: %s',cmd)
+    #      relpath = os.path.relpath(jobpath,sim['General']['treebase'])
+    #      log.info("Starting simulation for %s ...",relpath)
+    #      completed = subprocess.run(cmd,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    #      #log.info('Simulation stderr: %s',completed.stderr)
+    #      log.info("Simulation stderr: %s",completed.stderr)
+    #      log.debug('Simulation stdout: %s',completed.stdout)
+    #      # Convert text data files to npz binary file
+    #      if sim['General']['save_as'] == 'npz':
+    #          log.info('Converting data at %s to npz format',relpath)
+    #          convert_data(jobpath,sim)
+    #      log.info("Finished simulation for %s!",relpath)
     #  return None
 
-def execute_jobs(gconf,sims):
-    """Given a list of simulation objects, run them either serially or in
-    parallel"""
+def execute_jobs(gconf,confs):
+    """Given a list of configuration dictionaries, run them either serially or in
+    parallel by applying run_sim to each dict. We do this instead of applying
+    to an actual Simulator object because the Simulator objects are not
+    pickeable and thus cannot be parallelized by the multiprocessing lib"""
 
     log = logging.getLogger()
     if not gconf['General']['parallel']:
         log.info('Executing sims serially')
-        for sim in sims:
-            run_sim(sim)
-              
+        for conf in confs:
+            run_sim(conf)
     else:
         num_procs = mp.cpu_count() - gconf['General']['reserved_cores']
         log.info('Executing sims in parallel using %s cores ...',str(num_procs))
         pool = mp.Pool(processes=num_procs)
-        pool.map(run_sim,sims)
+        pool.map(run_sim,confs)
         pool.close()
 
 def spectral_wrapper(opt_pars,baseconf):
@@ -287,7 +294,7 @@ def spectral_wrapper(opt_pars,baseconf):
         print(valseq)
         baseconf[valseq] = float(opt_pars[i])
     # Make all the sim objects
-    sims = make_sims(baseconf)
+    sims = make_confs(baseconf)
     # Set the params we are optimizing over for each sim to the current guess.
     # This we is less efficient than just modifying them in the baseconf and
     # intializing all sims from that conf. The problem with that approach is
@@ -440,7 +447,7 @@ def run(conf,log):
     # Just a simple single simulation
     if not conf.optimized:
         # Get all the sims
-        sims = make_sims(conf)
+        sims = make_confs(conf)
         logger.info("Executing job campaign")
         execute_jobs(conf,sims)
     # If we have variable params, do a parameter sweep

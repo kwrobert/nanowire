@@ -21,8 +21,8 @@ class Simulator():
         self.conf['General']['sim_dir'] = sim_dir
         self.dir = sim_dir
         lfile = os.path.join(sim_dir,'sim.log')
-        self.log = configure_logger(level=log_level,
-                                    name='Simulator',logfile=lfile)
+        self.log = configure_logger(level=log_level, name=self.id[0:10],
+                                    logfile=lfile,propagate=False)
         self.s4 = S4.New(Lattice=((period,0),(0,period)),NumBasis=numbasis)
 
     def update_id(self):

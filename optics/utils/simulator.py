@@ -80,20 +80,26 @@ class Simulator():
         E_mag = self._get_incident_amplitude()
         polar = self.conf['Simulation']['params']['polar_angle']['value']
         azimuth = self.conf['Simulation']['params']['azimuthal_angle']['value']
-        # To define circularly polarized light, basically just stick a j (imaginary number) in front of
-        # one of your components. The handedness is determined by the component you stick the j in front
-        # of. From POV of source, looking away from source toward direction of propagation, right handed
-        # circular polarization has j in front of y component. Magnitudes are the same. This means
-        # E-field vector rotates clockwise when observed from POV of source. Left handed =
-        # counterclockwise.
-        # In S4, if indicent angles are 0, p-polarization is along x-axis. The minus sign on front of the
-        # x magnitude is just to get things to look like Anna's simulations.
+        # To define circularly polarized light, basically just stick a j
+        # (imaginary number) in front of one of your components. The component
+        # you choose to stick the j in front of is a matter of convention. In
+        # S4, if the incident azimuthal angle is 0, p-polarization is along
+        # x-axis. Here, we choose to make the y-component imaginary. The
+        # handedness is determined both by the component you stick the j in
+        # front of and the sign of the imaginary component. In our convention,
+        # minus sign means rhcp, plus sign means lhcp. To be circularly
+        # polarized, the magnitudes of the two components must be the same.
+        # This means E-field vector rotates clockwise when observed from POV of
+        # source. Left handed = counterclockwise.
+        # TODO: This might not be properly generalized to handle
+        # polarized light if the azimuth angle IS NOT 0. Might need some extra
+        # factors of cos/sin of azimuth to gen proper projections onto x/y axes
         polarization = self.conf['Simulation']['polarization']
         if polarization == 'rhcp':
             # Right hand circularly polarized
             self.s4.SetExcitationPlanewave(IncidenceAngles=(polar,azimuth),
-                                           sAmplitude=complex(E_mag,0),
-                                           pAmplitude=complex(0,E_mag))
+                                           sAmplitude=complex(0,-E_mag),
+                                           pAmplitude=complex(E_mag,0))
         elif polarization == 'lhcp':
             # Left hand circularly polarized
             self.s4.SetExcitationPlanewave(IncidenceAngles=(polar,azimuth),

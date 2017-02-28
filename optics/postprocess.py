@@ -25,33 +25,7 @@ import multiprocessing as mp
 import multiprocessing.dummy as mpd
 
 from utils.config import Config
-
-def configure_logger(level,logger_name,log_dir,logfile):
-    # Get numeric level safely
-    numeric_level = getattr(logging, level.upper(), None)
-    if not isinstance(numeric_level, int):
-        raise ValueError('Invalid log level: %s' % level)
-    # Set formatting
-    formatter = logging.Formatter('%(asctime)s [%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
-    # Get logger with name
-    logger = logging.getLogger(logger_name)
-    logger.setLevel(numeric_level)
-    # Set up file handler
-    try:
-        os.makedirs(log_dir)
-    except OSError:
-        # Log dir already exists
-        pass
-    output_file = os.path.join(log_dir,logfile)
-    fhandler = logging.FileHandler(output_file)
-    fhandler.setFormatter(formatter)
-    logger.addHandler(fhandler)
-    # Create console handler
-    ch = logging.StreamHandler()
-    ch.setLevel(numeric_level)
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
-    return logger
+from utils.utils import configure_logger,cmp_dicts
 
 def counted(fn):
     def wrapper(self):
@@ -290,32 +264,10 @@ class Processor(object):
         # A place to store any failed sims (i.e sims that are missing their data file)
         self.failed_sims = failed_sims
 
-    def dir_keys(self,path):
-        """A function to take a path, and return a list of all the numbers in the path. This is
-        mainly used for sorting by the parameters they contain"""
-
-        regex = '[-+]?[0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?'  # matching any floating point
-        m = re.findall(regex, path)
-        if m:
-            val = m
-            val = list(map(float,val))
-        else:
-            self.log.info('Your path does not contain any numbers')
-            val = os.path.basename(path)
-        return val
-
-    def sim_key(self,sim):
-        """A wrapper function around dir_keys that takes a sim object as an arg, extracts it path,
-        then passes that to dir_keys"""
-        path = sim.conf['General']['sim_dir']
-        key = self.dir_keys(path)
-        return key
-
     def collect_sims(self):
         """Collect all the simulations beneath the base of the directory tree"""
         # Clear out the lists
         self.sims = []
-        self.sim_groups = []
         self.failed_sims = []
         ftype = self.gconf['General']['save_as']
         if ftype == 'text':
@@ -339,18 +291,9 @@ class Processor(object):
             elif 'sim_conf.yml' in files:
                 sim_obj = Simulation(Config(os.path.join(root,'sim_conf.yml')))
                 self.log.error('The following sim is missing its data file: %s',
-                               sim_obj.conf.get('General','sim_dir'))
+                               sim_obj.conf['General']['sim_dir'])
                 self.failed_sims.append(sim_obj)
-        # Now we can create the list of sim_groups
-        # This makes it so we can compute convergence if we have every other param fixed but we
-        # swept through # of basis terms
-        if not group_dict:
-            self.sim_groups = [self.sims]
-        else:
-            self.sim_groups = [group for group in group_dict.values()]
-        self.sort_sims()
-        self.log.debug('Sims: %s'%str(self.sims))
-        return self.sims,self.sim_groups,self.failed_sims
+        return self.sims,self.failed_sims
 
     def sort_sims(self):
         """Sorts simulations by their parameters the way a human would. Called human sorting or
@@ -376,7 +319,7 @@ class Processor(object):
     def filter_by_param(self,pars):
         """Accepts a dict where the keys are parameter names and the values are a list of possible
         values for that parameter. Any simulation whose parameter does not match any of the provided
-        values is removed from the sims list attribute"""
+        values is removed from the sims and sim_groups attribute"""
 
         assert(type(pars) == dict)
         for par,vals in pars.items():
@@ -388,6 +331,87 @@ class Processor(object):
             self.sim_groups = groups
         assert(len(self.sims) >= 1)
         return self.sims,self.sim_groups
+
+    def group_against(self,key,sort_key=None):
+        """Groups simulations by against particular parameter. Within each
+        group, the parameter specified will vary, and all other
+        parameters will remain fixed. Populates the sim_groups attribute and
+        also returns a list of lists. The simulations with each group will be
+        sorted in increasing order of the specified parameter. An optional key
+        may be passed in, the groups will be sorted in increasing order of the
+        specified key"""
+
+        # We need a copy of the list containing all the sim objects
+        sims = self.sims
+        sim_groups = [[sims.pop()]]
+        # While there are still sims that havent been assigned to a group
+        while sims:
+            # Get the comparison dict for this sim
+            sim = sims.pop()
+            val1 = sim.conf[key]
+            # We want the specified key to vary, so we remove it from the
+            # comparison dict
+            del sim.conf[key]
+            cmp1 = {'Simulation':sim.conf['Simulation'],'Layers':sim.conf['Layers']}
+            match = False
+            # Loop through each group, checking if this sim belongs in the
+            # group
+            for group in sim_groups:
+                sim2 = group[0]
+                val2 = sim2.conf[key]
+                del sim2.conf[key]
+                cmp2 = {'Simulation':group[0].conf['Simulation'],'Layers':group[0].conf['Layers']}
+                params_same = cmp_dicts(cmp1,cmp2)
+                if params_same:
+                    match = True
+                    # We need to restore the param we removed from the
+                    # configuration earlier
+                    sim.conf[key] = val1
+                    group.append(sim)
+                group[0].conf[key] = val2
+            # If we didnt find a matching group, we need to create a new group
+            # for this simulation
+            if not match:
+                sim.conf[key] = val1
+                sim_groups.append([sim])
+        # Sort the individual sims within a group in increasing order of the
+        # parameter we are grouping against
+        for group in sim_groups:
+            group.sort(key=lambda sim: sim.conf[key])
+        # Sort the groups in increasing order of the provided sort key
+        if sort_key:
+            sim_groups.sort(key=lambda group: group[0].conf[key])
+
+        self.sim_groups = sim_groups
+        return sim_groups
+
+    def group_by(self,key,sort_key=None):
+        """Groups simulations by a particular parameter. Within each group, the
+        parameter specified will remain fixed, and all other parameters will
+        vary. Populates the sim_groups attribute and also returns a list of
+        lists. The groups will be sorted in increasing order of the specified
+        parameter. An optional key may be passed in, the individual sims within
+        each group will be sorted in increasing order of the specified key"""
+
+        # This works by storing the different values of the specifed parameter
+        # as keys, and a list of sims whose value matches the key as the value
+        pdict = {}
+        for sim in self.sims:
+            if sim.conf[key] in pdict:
+                pdict[sim.conf[key]].append(sim)
+            else:
+                pdict[sim.conf[key]] = [sim]
+        # Now all the sims with matching values for the provided key are just
+        # the lists located at each key. We sort the groups in increasing order
+        # of the provided key
+        groups = sorted(pdict.values(),key=lambda group: group[0].conf[key])
+        # If specified, sort the sims within each group in increasing order of
+        # the provided sorting key
+        if sort_key:
+            for group in groups:
+                group.sort(key=lambda sim: sim.conf[sort_key])
+        self.sim_groups = groups
+        return groups
 
     def get_plane(self,arr,xsamp,ysamp,zsamp,plane,pval):
         """Given a 1D array containing values for a 3D scalar field, reshapes
@@ -1135,23 +1159,10 @@ class Global_Cruncher(Cruncher):
             if group[0].conf['General']['save_as'] == 'npz':
                 np.save(path,group_comb)
             elif group[0].conf['General']['save_as'] == 'text':
-                path+='.crnch'
+                path += '.crnch'
                 np.savetxt(path,group_comb)
             else:
                 raise ValueError('Invalid file type in config')
-
-
-            #group[0].get_avgs()
-            #first = group[0].avgs[key]
-            #group[0].clear_data()
-            #group_avg = np.zeros((len(group),first.shape[0],first.shape[1]))
-            #group_avg[0,:,:] = first
-            #for i in range(1,len(group)):
-            #    group[i].get_avgs()
-            #    group_avg[i,:,:] = group[i].avgs[key]
-            #group_avg = np.average(group_avg,axis=0)
-            #path = os.path.join(base,'%s_%s_global.avg.crnch'%(quantity,avg_type))
-            #np.savetxt(path,group_avg)
 
     def Jsc(self):
         """Computes photocurrent density"""
@@ -1802,21 +1813,40 @@ def main():
                         help="""Logging level for the run""")
     parser.add_argument('--filter_by',nargs='*',help="""List of parameters you wish to filter by,
             specified like: p1:v1,v2,v3 p2:v1,v2,v3""")
+    parser.add_argument('-gb','--group_by',help="""The parameter you
+            would like to group simulations by, specified as a dot separated path 
+            to the key in the config as: path.to.key.value""")
+    parser.add_argument('-ga','--group_against',help="""The parameter
+            you would like to group against, specified as a dot separated path 
+            to the key in the config as: path.to.key.value""")
     args = parser.parse_args()
     if os.path.isfile(args.config_file):
         conf = Config(path=os.path.abspath(args.config_file))
     else:
-        print("\n The file you specified does not exist! \n")
-        quit()
+        raise ValueError("The file you specified does not exist!")
+
+    if not (args.group_by or args.group_against):
+        raise ValueError('Need to group sims somehow. A sensible value would be'
+                         ' by/against frequency')
+    else:
+        if args.group_by:
+            group_by = args.group_by.split('.')
+        else:
+            group_ag = args.group_against.split('.')
 
     # Configure logger
-    logger = configure_logger(args.log_level,'postprocess',
-                              os.path.join(conf['General']['base_dir'],'logs'),
-                              'postprocess.log')
+    lfile = os.path.join(conf['General']['base_dir'],'logs/postprocess.log')
+    logger = configure_logger(level=args.log_level,name='postprocess',
+                              console=True,logfile=lfile)
+                                
 
     # Collect the sims once up here and reuse them later
     proc = Processor(conf)
-    sims, sim_groups, failed_sims = proc.collect_sims()
+    sims, failed_sims = proc.collect_sims()
+    if args.group_by:
+        sim_groups = proc.group_by(group_by)
+    else:
+        sim_groups = proc.group_against(group_ag)
     # Filter if specified
     if args.filter_by:
         filt_dict = {}

@@ -88,6 +88,27 @@ def make_hash(o):
     out = repr(tuple(frozenset(sorted(new_o.items())))).encode('utf-8')
     return hashlib.md5(out).hexdigest()
 
+def cmp_dicts(d1,d2):
+    """Recursively compares two dictionaries"""
+    # First test the keys
+    for k1 in d1.keys():
+        if k1 not in d2:
+            return False
+    for k2 in d2.keys():
+        if k2 not in d1:
+            return False
+    # Now we need to test the contents recursively. We store the results of
+    # each recursive comparison in a list and assert that they all must be True
+    # at the end
+    comps = []
+    for k1,v1 in d1.items():
+        v2 = d2[k1]
+        if isinstance(v1,dict) and isinstance(v2,dict):
+            comps.append(cmp_dicts(v1,v2))
+        else:
+            if v1 != v2:
+                return False
+    return all(comps)
 
 #  def configure_logger(level,logger_name,log_dir,logfile):
 #      # Get numeric level safely

@@ -261,8 +261,13 @@ def execute_jobs(gconf,confs):
         num_procs = mp.cpu_count() - gconf['General']['reserved_cores']
         log.info('Executing sims in parallel using %s cores ...',str(num_procs))
         pool = mp.Pool(processes=num_procs)
-        pool.map(run_sim,confs)
-        pool.close()
+        try:
+            res = pool.map_async(run_sim,confs)
+            res.get(999999999) 
+            pool.close()
+        except KeyboardInterrupt:
+            pool.terminate()
+        pool.join()
 
 def spectral_wrapper(opt_pars,baseconf):
     """A wrapper function to handle spectral sweeps and postprocessing for the scipy minimizer. It
@@ -295,19 +300,6 @@ def spectral_wrapper(opt_pars,baseconf):
         baseconf[valseq] = float(opt_pars[i])
     # Make all the sim objects
     sims = make_confs(baseconf)
-    # Set the params we are optimizing over for each sim to the current guess.
-    # This we is less efficient than just modifying them in the baseconf and
-    # intializing all sims from that conf. The problem with that approach is
-    # that each sim will then have a new hash, and we won't be able to retrieve
-    # convergence information from the previous run. Here we can update their
-    # params without updating the hash and be able to use the hash for lookups 
-    #for sim in sims:
-    #    for i in range(len(baseconf.optimized)):
-    #        keyseq = baseconf.optimized[i]
-    #        print(keyseq)
-    #        valseq = list(keyseq)+['value']
-    #        print(valseq)
-    #        sim.conf[valseq] = float(opt_pars[i])
     # Let's reuse the convergence information from the previous iteration if it exists
     # NOTE: This kind of assumes your initial guess was somewhat decent with regards to the in plane
     # geometric variables and the optimizer is staying relatively close to that initial guess. If
@@ -324,7 +316,6 @@ def spectral_wrapper(opt_pars,baseconf):
                     conv_dict[freq] = (True,numbasis)
                 elif conv_status == 'unconverged':
                     conv_dict[freq] = (False,numbasis)
-        print(conv_dict)
         for sim in sims:
             freq = str(sim.conf['Simulation']['params']['frequency']['value'])
             conv,numbasis = conv_dict[freq]

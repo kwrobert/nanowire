@@ -4,6 +4,7 @@ import scipy.constants as c
 import scipy.integrate as intg
 import argparse as ap
 import os
+import copy
 import re
 import glob
 import logging
@@ -26,6 +27,9 @@ import multiprocessing.dummy as mpd
 
 from utils.config import Config
 from utils.utils import configure_logger,cmp_dicts
+
+logger = configure_logger(level='INFO',name='postprocess',
+                          console=True,logfile='logs/postprocess.log')
 
 def counted(fn):
     def wrapper(self):
@@ -341,8 +345,11 @@ class Processor(object):
         may be passed in, the groups will be sorted in increasing order of the
         specified key"""
 
-        # We need a copy of the list containing all the sim objects
-        sims = self.sims
+        self.log.info('Grouping sims against: %s'%str(key))
+        # We need only need a shallow copy of the list containing all the sim objects
+        # We don't want to modify the orig list but we wish to share the sim
+        # objects the two lists contain
+        sims = copy.copy(self.sims)
         sim_groups = [[sims.pop()]]
         # While there are still sims that havent been assigned to a group
         while sims:
@@ -393,6 +400,7 @@ class Processor(object):
         parameter. An optional key may be passed in, the individual sims within
         each group will be sorted in increasing order of the specified key"""
 
+        self.log.info('Grouping sims by: %s'%str(key))
         # This works by storing the different values of the specifed parameter
         # as keys, and a list of sims whose value matches the key as the value
         pdict = {}
@@ -823,6 +831,7 @@ class Cruncher(Processor):
 
     def transmissionData(self,sim):
         """Computes reflection, transmission, and absorbance"""
+        self.log.info('Computing transmission data ...')
         base = sim.conf['General']['sim_dir']
         path = os.path.join(base,'fluxes.dat')
         data = {}
@@ -859,6 +868,7 @@ class Cruncher(Processor):
         self.log.debug('Absorbance %f'%absorbance)
         #assert(reflectance >= 0 and transmission >= 0 and absorbance >= 0)
         outpath = os.path.join(base,'ref_trans_abs.dat')
+        self.log.info('Writing transmission file')
         with open(outpath,'w') as out:
             out.write('# Reflectance,Transmission,Absorbance\n')
             out.write('%f,%f,%f'%(reflectance,transmission,absorbance))
@@ -1209,10 +1219,10 @@ class Global_Cruncher(Cruncher):
             #wv_fact = .1
             #Jsc = (Jsc*wv_fact)/power
             Jsc = Jsc/power
-            outf = os.path.join(base,'jsc.dat')
-            with open(outf,'w') as out:
-                out.write('%f\n'%Jsc)
-            print('Jsc = %f'%Jsc)
+            #outf = os.path.join(base,'jsc.dat')
+            #with open(outf,'w') as out:
+            #    out.write('%f\n'%Jsc)
+            #print('Jsc = %f'%Jsc)
             Jsc_list.append(Jsc)
         return Jsc_list
 

@@ -843,12 +843,16 @@ class Cruncher(Processor):
                 data[key] = list(map(float,els))
         # sorted_layers is an OrderedDict, and thus has the popitem method
         sorted_layers = sim.conf.sorted_dict(sim.conf['Layers'])
+        self.log.info('SORTED LAYERS: %s'%str(sorted_layers))
         first_layer = sorted_layers.popitem(last=False)
+        self.log.info('FIRST LAYER: %s'%str(first_layer))
         # An ordered dict is actually just a list of tuples so we can access
         # the key directly like so
         first_name = first_layer[0]
         last_layer = sorted_layers.popitem()
-        last_name = last_layer[0]
+        #  last_name = last_layer[0]
+        last_name = last_layer[0]+'_bottom'
+        self.log.info('LAST LAYER: %s'%str(last_layer))
         #p_inc = data[first_layer.keys()[0]][0]
         #p_ref = np.abs(data[first_layer.keys()[0]][1])
         #p_trans = data[last_layer.keys()[0]][0]

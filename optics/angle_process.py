@@ -31,10 +31,10 @@ def main():
     lfile = os.path.join(conf['General']['base_dir'],'logs/angle_calcs.log')
     logger = configure_logger(level='INFO',
                               console=True,logfile=lfile)
-    #print(crnchr.sims)
-    #for sim in crnchr.sims:
-    #    print('a sim')
-    #    crnchr.transmissionData(sim)
+    print(crnchr.sims)
+    for sim in crnchr.sims:
+        print('a sim')
+        crnchr.transmissionData(sim)
     
     gcrnch = Global_Cruncher(conf,sims=crnchr.sims,sim_groups=crnchr.sim_groups)
     jsc_vals = gcrnch.Jsc()
@@ -42,14 +42,14 @@ def main():
     res = {}
     for i in range(len(gcrnch.sim_groups)):
         sim = gcrnch.sim_groups[i][0]
-        thickness = sim.conf[('Layers','NW_AlShell','params','thickness','value')]
+        thickness = sim.conf[('Layers','Substrate','params','thickness','value')]
         angle = sim.conf[('Simulation','params','polar_angle','value')]
         if not thickness in res:
             res[thickness] = [(angle,jsc_vals[i])]
         else:
             res[thickness].append((angle,jsc_vals[i]))
 
-    print(res)
+    logger.info(res)
     for t,vals in res.items():
         vals.sort()
 
@@ -57,12 +57,12 @@ def main():
     plt.figure()
     plt.xlabel('Angle in Degrees from Surface Normal')
     plt.ylabel('Fractional Absorption')
-    plt.title('Unpassivated')
+    plt.title('Planar')
     for t in sorted(res.keys()):
         vals = res[t]
-        print('######## THICKNESS = %f ############'%t)
+        logger.info('######## THICKNESS = %f ############'%t)
         angs,jscs = zip(*vals)
-        plt.plot(angs,jscs,label="NW Length %.2f"%t)
+        plt.plot(angs,jscs,label="Substrate Thickness %.2f"%t)
     plt.legend(loc='best')
     plt.savefig('angle_study_unpassivated.pdf')
     plt.show()

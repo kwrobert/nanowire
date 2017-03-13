@@ -185,9 +185,16 @@ class Simulator():
         x_samp = self.conf['Simulation']['x_samples']
         y_samp = self.conf['Simulation']['y_samples']
         z_samp = self.conf['Simulation']['z_samples']
-        height = self.get_height()
-        dz = height/z_samp
-        zvec = np.arange(0,height+dz,dz)
+        max_depth = self.conf['Simulation']['max_depth']
+        if max_depth:
+            self.log.info('Computing up to depth of {} '
+                          'microns'.format(max_depth))
+            dz = max_depth/z_samp
+            zvec = np.arange(0,max_depth+dz,dz)
+        else:
+            self.log.info('Computing for entire device')
+            height = self.get_height()
+            zvec = np.arange(0,height+dz,dz)
         arr = np.zeros((x_samp*y_samp*len(zvec),9))
         count = 0
         for z in zvec:
@@ -200,9 +207,9 @@ class Simulator():
                              (c.real,c.imag)]
                     row = [xcount,ycount,z]+fixed
                     arr[count,:] = row
-                count += 1
-                ycount += 1
-            xcount += 1
+                    count += 1
+                    ycount += 1
+                xcount += 1
         self.log.info('Finished computing fields!')
         return arr
 

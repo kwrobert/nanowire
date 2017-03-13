@@ -14,7 +14,7 @@ import matplotlib
 try:
     os.environ['DISPLAY']
 except KeyError:
-    matplotlib.use('Agg')
+    matplotlib.use('GTKAgg')
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.cm as cmx
@@ -28,8 +28,10 @@ import multiprocessing.dummy as mpd
 from utils.config import Config
 from utils.utils import configure_logger,cmp_dicts
 
-logger = configure_logger(level='INFO',name='postprocess',
-                          console=True,logfile='logs/postprocess.log')
+# Configure module level logger if not running as main process
+if not __name__ == '__main__':
+    logger = configure_logger(level='INFO',name='postprocess',
+                              console=True,logfile='logs/postprocess.log')
 
 def counted(fn):
     def wrapper(self):
@@ -1318,8 +1320,10 @@ class Plotter(Processor):
         try:
             getattr(self,plot)(sim,*args)
         except KeyError:
+            #  self.log.error("Unable to plot the following quantity: %s",
+            #                 plot,exc_info=True,stack_info=True)
             self.log.error("Unable to plot the following quantity: %s",
-                           plot,exc_info=True,stack_info=True)
+                           plot,exc_info=True)
             raise
 
     def draw_geometry_2d(self,sim,plane,ax_hand):
@@ -1344,7 +1348,13 @@ class Plotter(Processor):
         shell_rad = sim.conf['Layers']['NW_AlShell']['geometry']['shell']['radius']
         dx = period/sim.conf['Simulation']['x_samples']
         dy = period/sim.conf['Simulation']['y_samples']
-        dz = sim.conf.get_height()/sim.conf['Simulation']['z_samples']
+        max_depth = sim.conf['Simulation']['max_depth']
+        if max_depth:
+            dz = max_depth/sim.conf['Simulation']['z_samples']
+            height = max_depth
+        else:
+            height = sim.conf.get_height()
+            dz = height/sim.conf['Simulation']['z_samples']
         if plane[-1] == 'z':
             self.log.info('draw nanowire circle')
             core = mpatches.Circle((cent['x'],cent['y']),radius=core_rad,fill=False)
@@ -1370,8 +1380,8 @@ class Plotter(Processor):
                     boundaries.append((dist,start,end))
                 if layer_t > 0:
                     x = [0,period]
-                    y = [start*dz,start*dz]
-                    label_y = y[0] + 0.05
+                    y = [height-start*dz,height-start*dz]
+                    label_y = y[0] - 0.15
                     label_x = x[-1] - .01
                     plt.text(label_x,label_y,layer,ha='right',family='sans-serif',size=12)
                     line = mlines.Line2D(x,y,linestyle='solid',linewidth=2.0,color='black')
@@ -1382,35 +1392,10 @@ class Plotter(Processor):
                         for x in (cent['x']-rad,cent['x']+rad):
                             # Need two locations w/ same x values
                             xv = [x,x]
-                            yv = [start*dz,end*dz]
+                            yv = [height-start*dz,height-end*dz]
                             line = mlines.Line2D(xv,yv,linestyle='solid',linewidth=2.0,color='black')
                             ax_hand.add_line(line)
             return ax_hand
-            #self.log.info('draw layers')
-            ## Draw a line at the interface between each layer
-            #ito_line = sim.conf.getfloat('Parameters','air_t')
-            #nw_line = sim.conf.getfloat('Parameters','ito_t')+ito_line
-            #sub_line = sim.conf.getfloat('Parameters','nw_height')+nw_line
-            #air_line = sim.conf.getfloat('Parameters','substrate_t')+sub_line
-            #for line_h in [(ito_line,'ITO'),(nw_line,'NW'),(sub_line,'Substrate'),(air_line,'Air')]:
-            #    x = [0,sim.conf.getfloat('Parameters','array_period')]
-            #    y = [line_h[0],line_h[0]]
-            #    label_y = line_h[0] + 0.01
-            #    label_x = x[-1] - .01
-            #    plt.text(label_x,label_y,line_h[-1],ha='right',family='sans-serif',size=12)
-            #    line = mlines.Line2D(x,y,linestyle='solid',linewidth=2.0,color='black')
-            #    ax_hand.add_line(line)
-            ## Draw two vertical lines to show the edges of the nanowire
-            #cent = sim.conf.getfloat('Parameters','array_period')/2.0
-            #rad = sim.conf.getfloat('Parameters','nw_radius')
-            #shell = sim.conf.getfloat('Parameters','shell_t')
-            #bottom = sim.conf.getfloat('Parameters','ito_t')+ito_line
-            #top = sim.conf.getfloat('Parameters','nw_height')+nw_line
-            #for x in (cent-rad,cent+rad,cent-rad-shell,cent+rad+shell):
-            #    xv = [x,x]
-            #    yv = [bottom,top]
-            #    line = mlines.Line2D(xv,yv,linestyle='solid',linewidth=2.0,color='black')
-            #    ax_hand.add_line(line)
 
     def heatmap2d(self,sim,x,y,cs,labels,ptype,save_path=None,show=False,draw=False,fixed=None,colorsMap='jet'):
         """A general utility method for plotting a 2D heat map"""
@@ -1422,7 +1407,11 @@ class Plotter(Processor):
         scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
         fig = plt.figure(figsize=(9,7))
         ax = fig.add_subplot(111)
-        ax.pcolormesh(x, y, cs,cmap=cm,norm=cNorm,alpha=.5)
+        #  ax.pcolormesh(x, y, cs,cmap=cm,norm=cNorm,alpha=.5,linewidth=0)
+        #  ax.pcolor(x, y,
+        #          cs,cmap=cm,norm=cNorm,alpha=.5,linewidth=0,edgecolors='none')
+        ax.imshow(cs,cmap=cm,norm=cNorm,extent=[x.min(),x.max(),y.min(),y.max()],aspect='auto')
+        #  ax.matshow(cs,cmap=cm,norm=cNorm)
         scalarMap.set_array(cs)
         cb = fig.colorbar(scalarMap)
         cb.set_label(labels[2])
@@ -1450,7 +1439,12 @@ class Plotter(Processor):
         xs = int(float(xs))
         ys = sim.conf['Simulation']['y_samples']
         ys = int(float(ys))
-        height = sim.conf.get_height()
+        max_depth = sim.conf['Simulation']['max_depth']
+        if max_depth:
+            self.log.info('Plotting to max depth of {}'.format(max_depth))
+            height = max_depth
+        else:
+            height = sim.conf.get_height()
         pval = int(pval)
         period = sim.conf['Simulation']['params']['array_period']['value']
         dx = period/xs
@@ -1464,6 +1458,7 @@ class Plotter(Processor):
         # Get the scalar values
         self.log.info('Retrieving scalar %s'%quantity)
         scalar = sim.get_scalar_quantity(quantity)
+        self.log.info('DATA SHAPE: %s'%str(scalar.shape))
         ## Filter out any undesired data that isn't on the planes
         #mat = np.column_stack((sim.pos_inds[:,0],sim.pos_inds[:,1],sim.pos_inds[:,2],scalar))
         #planes = np.array([row for row in mat if row[plane_table[plane]] == pval])
@@ -1473,11 +1468,6 @@ class Plotter(Processor):
         freq = sim.conf['Simulation']['params']['frequency']['value']
         wvlgth = (c.c/freq)*1E9
         title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(freq,wvlgth)
-        # TODO: Fix this
-        if fixed:
-            # Super hacky and terrible way to fix the minimum and maximum values of the color bar
-            # for a plot across all sims
-            fixed = tuple(fixed.split(':'))
         # Get the plane we wish to plot
         self.log.info('Retrieving plane ...')
         cs = self.get_plane(scalar,xs,ys,zs,plane,pval)
@@ -1567,7 +1557,8 @@ class Plotter(Processor):
         scalar = sim.get_scalar_quantity(quantity)
         # Filter out any undesired data that isn't on the planes
         mat = np.column_stack((sim.pos_inds[:,0],sim.pos_inds[:,1],sim.pos_inds[:,2],scalar))
-        planes = np.array([row for row in mat if row[0] == xplane or row[1] == yplane])
+        planes = np.array([row for row in mat if round(row[0]) == xplane or
+                          round(row[1]) == yplane])
         planes[:,0] = planes[:,0]*dx
         planes[:,1] = planes[:,1]*dy
         labels = ('X [um]','Y [um]','Z [um]',quantity)
@@ -1723,8 +1714,6 @@ class Global_Plotter(Plotter):
             x = np.arange(0,period,dx)
             y = np.arange(0,period,dy)
             z = np.arange(0,height+dz,dz)
-            print(y.shape)
-            print(z.shape)
             if sim.conf['General']['save_as'] == 'npz':
                 globstr = os.path.join(base,'scalar_reduce*_%s.npy'%quantity)
                 files = glob.glob(globstr)

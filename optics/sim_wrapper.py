@@ -61,7 +61,7 @@ from collections import OrderedDict
 #def dbconnect(func):
 #    @wraps(func)
 #    def wrapper(*args,**kwargs):
-#        session = __SESSION_FACTORY__() 
+#        session = __SESSION_FACTORY__()
 #        print('Setting up session scope')
 #        print('Here is session in wrapper')
 #        print(session)
@@ -258,12 +258,14 @@ def execute_jobs(gconf,confs):
         for conf in confs:
             run_sim(conf)
     else:
+        # All this crap is necessary for killing the parent and all child
+        # processes with CTRL-C
         num_procs = mp.cpu_count() - gconf['General']['reserved_cores']
         log.info('Executing sims in parallel using %s cores ...',str(num_procs))
         pool = mp.Pool(processes=num_procs)
         try:
             res = pool.map_async(run_sim,confs)
-            res.get(999999999) 
+            res.get(999999999)
             pool.close()
         except KeyboardInterrupt:
             pool.terminate()
@@ -426,7 +428,7 @@ def run_optimization(conf):
         for key, value in zip(conf.optimized,opt_val.x):
             out.write('%s: %f\n'%(str(key),value))
     return opt_val.x
-    
+
 def run(conf,log):
     """The main run methods that decides what kind of simulation to run based on the
     provided config object"""
@@ -464,7 +466,7 @@ def pre_check(conf_path,conf):
         print('WARNING!!! You are about to start a simulation in a directory that already exists')
         print('WARNING!!! This will dump a whole bunch of crap into that directory and possibly')
         print('WARNING!!! overwrite old simulation data.')
-        ans = input('Would you like to continue? CTRL-C to exit, any other key to continue: ')
+        input('Would you like to continue? CTRL-C to exit, any other key to continue: ')
     # Copy provided config file to basedir
     try:
         os.makedirs(base)
@@ -493,7 +495,7 @@ def main():
     else:
         print("\n The file you specified does not exist! \n")
         quit()
-    
+
     #setup_db(sim['General']['db_name'])
     ##pre_check(os.path.abspath(args.config_file),conf)
     run(global_conf,args.log_level)

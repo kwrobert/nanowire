@@ -4,8 +4,9 @@ import numpy as np
 import scipy.interpolate as spi
 import scipy.constants as constants
 import S4
+#  import profilehooks as ph
 
-from itertools import chain
+from itertools import chain,product
 from utils import make_hash,configure_logger
 
 class Simulator():
@@ -151,6 +152,7 @@ class Simulator():
 
     def get_height(self):
         """Get the total height of the device"""
+
         height = 0
         for layer,ldata in self.conf['Layers'].items():
             layer_t = ldata['params']['thickness']['value']
@@ -175,6 +177,7 @@ class Simulator():
             thickness = ldata['params']['thickness']['value']
             self.s4.SetLayerThickness(Layer=layer,Thickness=thickness)
 
+    #  @ph.timecall
     def get_field(self):
         """Constructs and returns a 2D numpy array of the vector electric
         field. The field components are complex numbers"""
@@ -193,8 +196,9 @@ class Simulator():
             for xval in E:
                 ycount = 0
                 for yval in xval:
-                    tmp = [(c.real,c.imag) for c in yval]
-                    row = [xcount,ycount,z]+list(chain(*tmp))
+                    fixed = [val for c in yval for val in
+                             (c.real,c.imag)]
+                    row = [xcount,ycount,z]+fixed
                     arr[count,:] = row
                 count += 1
                 ycount += 1
@@ -202,8 +206,40 @@ class Simulator():
         self.log.info('Finished computing fields!')
         return arr
 
+    def row_iter(self,data,xsamp,ysamp,z):
+        inds = product(range(xsamp),range(ysamp))
+        for raw_row in chain(*data):
+            fixed = [val for c in raw_row for val in
+                     (c.real,c.imag)]
+            ind = inds.next()
+            final = [ind[0],ind[1],z]+fixed
+            yield final
+
+    #  @ph.timecall
+    def get_field2(self):
+        """Constructs and returns a 2D numpy array of the vector electric
+        field. The field components are complex numbers. This is about 1-2
+        seconds slower than the current get_field method, but I'm keeping it
+        around because the implementation feels nice"""
+        self.log.info('Computing fields ...')
+        x_samp = self.conf['Simulation']['x_samples']
+        y_samp = self.conf['Simulation']['y_samples']
+        z_samp = self.conf['Simulation']['z_samples']
+        height = self.get_height()
+        dz = height/z_samp
+        zvec = np.arange(0,height+dz,dz)
+        arr = np.zeros((x_samp*y_samp*len(zvec),9))
+        count = 0
+        for z in zvec:
+            E,H = self.s4.GetFieldsOnGrid(z=z,NumSamples=(x_samp,y_samp),Format='Array')
+            for row in self.row_iter(E,x_samp,y_samp,z):
+                arr[count,:] = row
+                count += 1
+        self.log.info('Finished computing fields!')
+        return arr
+
     def save_field(self):
-        # Gets the fields throughout the device
+        """Saves the fields throughout the device to an npz file"""
         if self.conf['General']['adaptive_convergence']:
             efield,numbasis,conv = self.adaptive_convergence()
             if conv:
@@ -220,7 +256,15 @@ class Simulator():
         if self.conf['General']['save_as'] == 'text':
             np.savetxt(out,efield,header=','.join(headers))
         elif self.conf['General']['save_as'] == 'npz':
+            # Compression adds a small amount of time. The time cost is
+            # nonlinear in the file size, meaning the penalty gets larger as the
+            # field grid gets finer. However, the storage gains are enormous!
+            # Compression brought the file from 1.1G to 3.9M in a test case.
+            # I think the compression ratio is so high because npz is a binary
+            # format, and all compression algs benefit from large sections of
+            # repeated characters
             np.savez_compressed(out,headers=headers,data=efield)
+            #  np.savez(out,headers=headers,data=efield)
         else:
             raise ValueError('Invalid file type specified in config')
 
@@ -281,7 +325,7 @@ class Simulator():
     def adaptive_convergence(self):
         """Performs adaptive convergence by checking the error between vector
         fields for simulations with two different numbers of basis terms.
-        Returns the field array, last number of basis terms simulations, and a
+        Returns the field array, last number of basis terms simulated, and a
         boolean representing whether or not the simulation is converged"""
         self.log.info('Beginning adaptive convergence procedure')
         start_basis = self.conf['Simulation']['params']['numbasis']['value']
@@ -303,7 +347,6 @@ class Simulator():
             start_basis = new_basis
             field1 = field2
             iter_count += 1
-
         if percent_diff > max_diff:
             self.log.warning('Exceeded maximum number of iterations')
             return field2,new_basis,False

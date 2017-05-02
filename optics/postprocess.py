@@ -11,10 +11,10 @@ import logging
 from collections import OrderedDict
 import matplotlib
 # Enables saving plots over ssh
-try:
-    os.environ['DISPLAY']
-except KeyError:
-    matplotlib.use('GTKAgg')
+#try:
+#    os.environ['DISPLAY']
+#except KeyError:
+#    matplotlib.use('GTKAgg')
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.cm as cmx

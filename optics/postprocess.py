@@ -847,14 +847,14 @@ class Cruncher(Processor):
         sorted_layers = sim.conf.sorted_dict(sim.conf['Layers'])
         self.log.info('SORTED LAYERS: %s'%str(sorted_layers))
         first_layer = sorted_layers.popitem(last=False)
-        self.log.info('FIRST LAYER: %s'%str(first_layer))
+        # self.log.info('FIRST LAYER: %s'%str(first_layer))
         # An ordered dict is actually just a list of tuples so we can access
         # the key directly like so
         first_name = first_layer[0]
         last_layer = sorted_layers.popitem()
         #  last_name = last_layer[0]
         last_name = last_layer[0]+'_bottom'
-        self.log.info('LAST LAYER: %s'%str(last_layer))
+        # self.log.info('LAST LAYER: %s'%str(last_layer))
         #p_inc = data[first_layer.keys()[0]][0]
         #p_ref = np.abs(data[first_layer.keys()[0]][1])
         #p_trans = data[last_layer.keys()[0]][0]
@@ -866,9 +866,12 @@ class Cruncher(Processor):
         absorbance = 1 - reflectance - transmission
         #absorbance = 1 - reflectance
         tot = reflectance+transmission+absorbance
+        print(tot)
+        print(sim.conf['General']['sim_dir'])
         delta = np.abs(tot-1)
+        print(delta)
         #self.log.info('Total = %f'%tot)
-        assert(delta < .0001)
+        # assert(delta < .0001)
         self.log.debug('Reflectance %f'%reflectance)
         self.log.debug('Transmission %f'%transmission)
         self.log.debug('Absorbance %f'%absorbance)

@@ -355,6 +355,7 @@ def spectral_wrapper(opt_pars,baseconf):
         cruncher.transmissionData(sim)
     # Now get the fraction of photons absorbed
     gcruncher = pp.Global_Cruncher(baseconf,cruncher.sims,cruncher.sim_groups,cruncher.failed_sims)
+    gcruncher.group_against(['Simulation','params','frequency'])
     photon_fraction = gcruncher.Jsc()[0]
     # Lets store information we discovered from our adaptive convergence procedure so we can resue
     # it in the next iteration.

@@ -11,3 +11,4 @@ comsolcompare/*
 .ipynb*/
 sanity_check_run/*
 *.pyc
+__init__.py

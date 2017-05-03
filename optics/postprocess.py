@@ -692,6 +692,7 @@ class Cruncher(Processor):
         z_samples = sim.conf['Simulation']['z_samples']
         x_samples = sim.conf['Simulation']['x_samples']
         y_samples = sim.conf['Simulation']['y_samples']
+        z_samples = int(z_samples)
         samps = (x_samples,y_samples,z_samples)
         # Reshape into an actual 3D matrix. Rows correspond to different y fixed x, columns to fixed
         # y variable x, and each layer in depth is a new z value
@@ -760,6 +761,7 @@ class Cruncher(Processor):
         z_samples = sim.conf['Simulation']['z_samples']
         x_samples = sim.conf['Simulation']['x_samples']
         y_samples = sim.conf['Simulation']['y_samples']
+        z_samples = int(z_samples)
         rsamp = sim.conf['Simulation']['r_samples']
         thsamp = sim.conf['Simulation']['theta_samples']
         # Reshape into an actual 3D matrix. Rows correspond to different y fixed x, columns to fixed

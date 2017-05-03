@@ -430,7 +430,8 @@ class Processor(object):
         plane=x and pval=30 would return data on the 30th y,z plane (a plane at
         the given x index). The number of samples (i.e data points) in each
         coordinate direction need not be equal"""
-
+	
+        zsamp = int(zsamp)
         scalar = arr.reshape(zsamp+1,xsamp,ysamp)
         if plane == 'x':
             # z along rows, y along columns

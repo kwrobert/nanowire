@@ -1,4 +1,5 @@
 from __future__ import print_function
+import sys
 import os
 import time
 import numpy as np
@@ -447,7 +448,14 @@ def main():
         conf = Config(path=os.path.abspath(args.config_file))
     else:
         print("\n The file you specified does not exist! \n")
-        quit()
+        sys.exit(1)
+    # If we're using gc3 for execution, we need to change the sim_dir to
+    # reflect whatever random directory gc3 is running this simulation in so
+    # all the output files end up in the correct location
+    if conf['General']['execution'] == 'gc3':
+        pwd = os.getcwd()
+        print('CURRENT DIR: {}'.format(pwd))
+        conf['General']['sim_dir'] = pwd
     # Instantiate the simulator using this config object
     sim = Simulator(conf)
     try:

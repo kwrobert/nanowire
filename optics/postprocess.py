@@ -1348,7 +1348,10 @@ class Plotter(Processor):
         period = sim.conf['Simulation']['params']['array_period']['value']
         cent = sim.conf['Layers']['NW_AlShell']['geometry']['core']['center']
         core_rad = sim.conf['Layers']['NW_AlShell']['geometry']['core']['radius']
-        shell_rad = sim.conf['Layers']['NW_AlShell']['geometry']['shell']['radius']
+        try:
+            shell_rad = sim.conf['Layers']['NW_AlShell']['geometry']['shell']['radius']
+        except KeyError:
+            shell_rad = False
         dx = period/sim.conf['Simulation']['x_samples']
         dy = period/sim.conf['Simulation']['y_samples']
         max_depth = sim.conf['Simulation']['max_depth']
@@ -1361,9 +1364,10 @@ class Plotter(Processor):
         if plane[-1] == 'z':
             self.log.info('draw nanowire circle')
             core = mpatches.Circle((cent['x'],cent['y']),radius=core_rad,fill=False)
-            shell = mpatches.Circle((cent['x'],cent['y']),radius=shell_rad,fill=False)
             ax_hand.add_artist(core)
-            ax_hand.add_artist(shell)
+            if shell_rad:
+                shell = mpatches.Circle((cent['x'],cent['y']),radius=shell_rad,fill=False)
+                ax_hand.add_artist(shell)
         elif plane[-1] == 'y' or plane[-1] == 'x':
             boundaries = []
             count = 0
@@ -1391,7 +1395,11 @@ class Plotter(Processor):
                     ax_hand.add_line(line)
                     count += 1
                 if layer == 'NW_AlShell':
-                    for rad in (core_rad,shell_rad):
+                    if shell_rad:
+                        rads = (core_rad,shell_rad)
+                    else:
+                        rads = (core_rad,)
+                    for rad in rads:
                         for x in (cent['x']-rad,cent['x']+rad):
                             # Need two locations w/ same x values
                             xv = [x,x]

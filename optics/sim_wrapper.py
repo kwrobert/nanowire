@@ -249,8 +249,8 @@ def gc3_submit(gconf, sim_confs):
     cfg = gc3libs.config.Configuration(*gc3libs.Default.CONFIG_FILE_LOCATIONS,
                                        auto_enable_auth=True)
     gcore = Core(cfg)
-    # eng = Engine(gcore, tasks=jobs, retrieve_overwrites=True)
-    eng = Engine(gcore, tasks=jobs)
+    eng = Engine(gcore, tasks=jobs, retrieve_overwrites=True)
+    # eng = Engine(gcore, tasks=jobs)
     try:
         eng.progress()
         stats = eng.stats()

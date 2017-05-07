@@ -16,13 +16,16 @@ import time
 import argparse as ap
 import ruamel.yaml as yaml
 import logging
+import gc3libs
+from gc3libs.core import Core, Engine
 
 # get our custom config object and the logger function
 #from utils.simulation import *
 #from utils.config import Config
 from utils.simulator import Simulator
 from utils.config import Config
-from utils.utils import configure_logger
+from utils.utils import configure_logger, make_hash
+from rcwa_app import RCWA_App
 from collections import OrderedDict
 #  from functools import wraps
 #  from contextlib import contextmanager
@@ -185,7 +188,8 @@ def run_sim(conf):
         pass
     if not sim.conf.variable_thickness:
         log.info('Executing sim %s'%sim.id[0:10])
-        _get_data(sim)
+        # _get_data(sim)
+        sim.get_data()
     else:
         log.info('Computing a thickness sweep at %s'%sim.id[0:10])
         orig_id = sim.id[0:10]
@@ -207,7 +211,7 @@ def run_sim(conf):
         os.makedirs(sim.dir)
         subpath = os.path.join(orig_id,sim.id[0:10])
         log.info('Computing initial thickness at %s'%subpath)
-        _get_data(sim)
+        sim.get_data()
         # Now we can repeat the same exact process, but instead of rebuilding
         # the device we just update the thicknesses
         for combo in combos:
@@ -218,33 +222,57 @@ def run_sim(conf):
             subpath = os.path.join(orig_id,sim.id[0:10])
             log.info('Computing additional thickness at %s'%subpath)
             os.makedirs(sim.dir)
-            _get_data(sim,update=True)
+            sim.get_data(update=True)
     return
-    #  with session_scope() as session:
-    #      timed = sim['General']['save_time']
-    #      tout = os.path.join(jobpath,'timing.dat')
-    #      simlog = os.path.join(jobpath,'sim.log')
-    #      script = sim['General']['sim_script']
-    #      ini_file = os.path.join(jobpath,'sim_conf.yml')
-    #      if timed:
-    #          log.debug('Executing script with timing wrapper ...')
-    #          cmd = 'command time -vv -o %s lua %s %s 2>&1 | tee %s'%(tout,script,ini_file,simlog)
-    #          #cmd = '/usr/bin/perf stat -o timing.dat -r 5 /usr/bin/lua %s %s'%(script,ini_file)
-    #      else:
-    #          cmd = 'command lua %s %s 2>&1 | tee %s'%(script,ini_file,simlog)
-    #      log.debug('Subprocess command: %s',cmd)
-    #      relpath = os.path.relpath(jobpath,sim['General']['treebase'])
-    #      log.info("Starting simulation for %s ...",relpath)
-    #      completed = subprocess.run(cmd,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-    #      #log.info('Simulation stderr: %s',completed.stderr)
-    #      log.info("Simulation stderr: %s",completed.stderr)
-    #      log.debug('Simulation stdout: %s',completed.stdout)
-    #      # Convert text data files to npz binary file
-    #      if sim['General']['save_as'] == 'npz':
-    #          log.info('Converting data at %s to npz format',relpath)
-    #          convert_data(jobpath,sim)
-    #      log.info("Finished simulation for %s!",relpath)
-    #  return None
+
+def gc3_submit(gconf, sim_confs):
+    log = logging.getLogger()
+    log.info('GC3 FUNCTION')
+    jobs = []
+    for conf in sim_confs:
+        # Set up the config object and make local simulation directory
+        conf.interpolate()
+        conf.evaluate()
+        sim_id = make_hash(conf.data)
+        sim_dir = os.path.join(conf['General']['base_dir'], sim_id[0:10])
+        conf['General']['sim_dir'] = sim_dir
+        try:
+            os.makedirs(sim_dir)
+        except OSError:
+            pass
+        conf.write(os.path.join(sim_dir, 'sim_conf.yml'))
+        # Create the GC3 Application object and append to list of apps to run
+        app = RCWA_App(conf)
+        jobs.append(app)
+    print(jobs)
+    # Get the config for all resources, auth, etc.
+    cfg = gc3libs.config.Configuration(*gc3libs.Default.CONFIG_FILE_LOCATIONS,
+                                       auto_enable_auth=True)
+    gcore = Core(cfg)
+    # eng = Engine(gcore, tasks=jobs, retrieve_overwrites=True)
+    eng = Engine(gcore, tasks=jobs)
+    try:
+        eng.progress()
+        stats = eng.stats()
+        while stats['TERMINATED'] < stats['total']:
+            print('Checking jobs')
+            eng.progress()
+            stats = eng.stats()
+            print(stats)
+            states = eng.update_job_state()
+            print(states)
+    except KeyboardInterrupt:
+        # Kill all remote jobs
+        for task in jobs:
+            eng.kill(task)
+        # update job states
+        eng.progress()
+        # free remote resources
+        for task in jobs:
+            eng.free(task)
+        # now raise exception
+        raise
+
 
 def execute_jobs(gconf,confs):
     """Given a list of configuration dictionaries, run them either serially or in
@@ -253,14 +281,14 @@ def execute_jobs(gconf,confs):
     pickeable and thus cannot be parallelized by the multiprocessing lib"""
 
     log = logging.getLogger()
-    if not gconf['General']['parallel']:
+    if gconf['General']['execution'] == 'serial':
         log.info('Executing sims serially')
         for conf in confs:
             run_sim(conf)
-    else:
+    elif gconf['General']['execution'] == 'parallel':
         # All this crap is necessary for killing the parent and all child
         # processes with CTRL-C
-        num_procs = mp.cpu_count() - gconf['General']['reserved_cores']
+        num_procs = gconf['General']['num_cores']
         log.info('Executing sims in parallel using %s cores ...',str(num_procs))
         pool = mp.Pool(processes=num_procs)
         try:
@@ -270,6 +298,9 @@ def execute_jobs(gconf,confs):
         except KeyboardInterrupt:
             pool.terminate()
         pool.join()
+    elif gconf['General']['execution'] == 'gc3':
+        log.info('Executing jobs using gc3 submission tools')
+        gc3_submit(gconf, confs)
 
 def spectral_wrapper(opt_pars,baseconf):
     """A wrapper function to handle spectral sweeps and postprocessing for the scipy minimizer. It

@@ -262,6 +262,8 @@ def gc3_submit(gconf, sim_confs):
             states = eng.update_job_state()
             print(states)
     except KeyboardInterrupt:
+        print('KILLING REMOTE JOBS BEFORE QUITTING')
+        print('PLEASE BE PATIENT')
         # Kill all remote jobs
         for task in jobs:
             eng.kill(task)
@@ -274,7 +276,7 @@ def gc3_submit(gconf, sim_confs):
         raise
 
 
-def execute_jobs(gconf,confs):
+def execute_jobs(gconf, confs):
     """Given a list of configuration dictionaries, run them either serially or in
     parallel by applying run_sim to each dict. We do this instead of applying
     to an actual Simulator object because the Simulator objects are not

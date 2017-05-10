@@ -710,6 +710,7 @@ class Cruncher(Processor):
         for layer,ldata in ordered_layers.items():
             # Get boundaries between layers and their starting and ending indices
             layer_t = ldata['params']['thickness']['value']
+            self.log.debug('LAYER: %s'%layer)
             if count == 0:
                 start = 0
                 end = int(layer_t/dz)+1
@@ -720,6 +721,8 @@ class Cruncher(Processor):
                 start = prev_tup[2]
                 end = int(dist/dz) + 1
                 boundaries.append((dist,start,end))
+            self.log.debug('START: %i'%start)
+            self.log.debug('END: %i'%end)
             if 'geometry' in ldata:
                 # This function returns the N,K profile in that layer as a 2D
                 # matrix. Each element contains the product of n and k at that
@@ -729,7 +732,12 @@ class Cruncher(Processor):
             else:
                 # Its just a simple slab
                 lmat = ldata['base_material']
+                self.log.debug('LAYER MATERIAL: %s'%lmat)
+                self.log.debug('MATERIAL n: %s'%str(nk[lmat][0]))
+                self.log.debug('MATERIAL k: %s'%str(nk[lmat][1]))
                 gvec[start:end,:,:] = fact*nk[lmat][0]*nk[lmat][1]*normEsq[start:end,:,:]
+            self.log.debug('GEN RATE MATRIX: ')
+            self.log.debug(str(gvec))
             count += 1
         # Reshape back to 1D array
         gvec = gvec.reshape((x_samples*y_samples*(z_samples+1)))

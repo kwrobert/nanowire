@@ -698,9 +698,9 @@ class Cruncher(Processor):
         # Reshape into an actual 3D matrix. Rows correspond to different y fixed x, columns to fixed
         # y variable x, and each layer in depth is a new z value
         normEsq = np.reshape(normEsq,(z_samples+1,x_samples,y_samples))
-        gvec = np.ones_like(normEsq)
-        height = sim.conf.get_height()
-        dz = height/z_samples
+        gvec = np.zeros_like(normEsq)
+        max_depth = sim.conf['Simulation']['max_depth']
+        dz = max_depth/z_samples
         period = sim.conf['Simulation']['params']['array_period']['value']
         dx = period/x_samples
         dy = period/y_samples
@@ -713,6 +713,7 @@ class Cruncher(Processor):
             # Get boundaries between layers and their starting and ending indices
             layer_t = ldata['params']['thickness']['value']
             self.log.debug('LAYER: %s'%layer)
+            self.log.debug('LAYER T: %f'%layer_t)
             if count == 0:
                 start = 0
                 end = int(layer_t/dz)+1
@@ -726,6 +727,7 @@ class Cruncher(Processor):
             self.log.debug('START: %i'%start)
             self.log.debug('END: %i'%end)
             if 'geometry' in ldata:
+                self.log.debug('HAS GEOMETRY')
                 # This function returns the N,K profile in that layer as a 2D
                 # matrix. Each element contains the product of n and k at that
                 # point, using the NK values for the appropriate material
@@ -733,16 +735,23 @@ class Cruncher(Processor):
                 gvec[start:end,:,:] = fact*nk_mat*normEsq[start:end,:,:]
             else:
                 # Its just a simple slab
+                self.log.debug('NO GEOMETRY')
                 lmat = ldata['base_material']
                 self.log.debug('LAYER MATERIAL: %s'%lmat)
                 self.log.debug('MATERIAL n: %s'%str(nk[lmat][0]))
                 self.log.debug('MATERIAL k: %s'%str(nk[lmat][1]))
-                gvec[start:end,:,:] = fact*nk[lmat][0]*nk[lmat][1]*normEsq[start:end,:,:]
+                region = fact*nk[lmat][0]*nk[lmat][1]*normEsq[start:end,:,:]
+                self.log.debug('REGION SHAPE: %s'%str(region.shape))
+                self.log.debug('REGION: ')
+                self.log.debug(str(region))
+                gvec[start:end,:,:] = region 
             self.log.debug('GEN RATE MATRIX: ')
             self.log.debug(str(gvec))
             count += 1
         # Reshape back to 1D array
         gvec = gvec.reshape((x_samples*y_samples*(z_samples+1)))
+        self.log.debug('GVEC AFTER FLATTENING: ')
+        self.log.debug(str(gvec))
         # This approach is 4 times faster than np.column_stack()
         assert(sim.e_data.shape[0] == len(gvec))
         dat = np.zeros((sim.e_data.shape[0],sim.e_data.shape[1]+1))

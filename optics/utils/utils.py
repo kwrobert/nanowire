@@ -30,7 +30,6 @@ def tempfile(suffix='', dir=None, npz=True):
     finally:
         try:
             if npz:
-                print('REMOVE NPZ FILE: %s'%tf.name+'.npz')
                 os.remove(tf.name)
                 os.remove(tf.name+'.npz')
             else:
@@ -42,36 +41,20 @@ def tempfile(suffix='', dir=None, npz=True):
                 raise
 
 @contextmanager
-def open_atomic(filepath, *args, npz=True, **kwargs):
-    """ Open temporary file object that atomically moves to destination upon
-    exiting.
-
-    Allows reading and writing to and from the same filename.
-
-    The file will not be moved to destination in case of an exception.
+def open_atomic(filepath, npz=True):
+    """Get a temporary file path in the same directory as filepath. The temp
+    file is used as a placeholder for filepath to make atomic write operations
+    possible. The file will not be moved to destination in case of an exception.
 
     Parameters
     ----------
     filepath : string
-        the file path to be opened
-    fsync : bool
-        whether to force write the file to disk
-    *args : mixed
-        Any valid arguments for :code:`open`
-    **kwargs : mixed
-        Any valid keyword arguments for :code:`open`
+        the actual filepath we wish to write to
     """
-    fsync = kwargs.get('fsync', False)
-
     with tempfile(npz=npz, dir=os.path.dirname(os.path.abspath(filepath))) as tmppath:
-        try:
-            yield tmppath
-        finally:
-            if fsync:
-                file.flush()
-                os.fsync(file.fileno())
+        yield tmppath
         if npz:
-            os.rename(tmppath+'.npz', filepath)
+            os.rename(tmppath+'.npz', filepath+'.npz')
         else:
             os.rename(tmppath, filepath)
 

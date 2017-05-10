@@ -4,6 +4,7 @@ import scipy.constants as c
 import scipy.integrate as intg
 import argparse as ap
 import os
+import time
 import copy
 import re
 import glob
@@ -26,7 +27,7 @@ import multiprocessing as mp
 import multiprocessing.dummy as mpd
 
 from utils.config import Config
-from utils.utils import configure_logger,cmp_dicts
+from utils.utils import configure_logger,cmp_dicts, open_atomic
 
 # Configure module level logger if not running as main process
 if not __name__ == '__main__':
@@ -199,7 +200,10 @@ class Simulation(object):
             self.log.info('Available averages: %s'%str(self.avgs.keys()))
 
     def write_data(self):
-        """Writes the data"""
+        """Writes the data. All writes have been wrapped with an atomic context
+        manager than ensures all writes are atomic and do not corrupt data
+        files if they are interrupted for any reason"""
+        start = time.time()
         # Get the current path
         base = self.conf['General']['sim_dir']
         ignore = self.conf['General']['ignore_h']
@@ -213,24 +217,35 @@ class Simulation(object):
         ftype = self.conf['General']['save_as']
         if ftype == 'text':
             epath = epath+'.crnch'
-            np.savetxt(epath,self.e_data,header=','.join(self.e_lookup.keys()))
+            # These make sure all writes are atomic and thus we won't get any
+            # partially written files if processing is interrupted for any
+            # reason (like a keyboard interrupt)
+            with open_atomic(epath,'w',npz=False) as out:
+                np.savetxt(out,self.e_data,header=','.join(self.e_lookup.keys()))
             if not ignore:
                 hpath = hpath+'.crnch'
-                np.savetxt(hpath,self.h_data,header=','.join(self.h_lookup.keys()))
+                with open_atomic(hpath,'w',npz=False) as out:
+                    np.savetxt(out,self.h_data,header=','.join(self.h_lookup.keys()))
             # Save any local averages we have computed
             for avg, mat in self.avgs.items():
                 dpath = os.path.join(base,avg+'.avg.crnch')
-                np.savetxt(dpath,mat)
+                with open_atomic(dpath,'w',npz=False) as out:
+                    np.savetxt(out,mat)
         elif ftype == 'npz':
             # Save the headers and the data
-            np.savez(epath,headers=np.array([self.e_lookup]), data=self.e_data)
+            with open_atomic(epath,'w') as out:
+                np.savez_compressed(out,headers=np.array([self.e_lookup]), data=self.e_data)
             if not ignore:
-                np.savez(hpath,headers=np.array([self.h_lookup]), data=self.h_data)
+                with open_atomic(hpath,'w') as out:
+                    np.savez_compressed(out,headers=np.array([self.h_lookup]), data=self.h_data)
             # Save any local averages we have computed
             dpath = os.path.join(base,'all.avg')
-            np.savez(dpath,**self.avgs)
+            with open_atomic(dpath,'w') as out:
+                np.savez_compressed(out,**self.avgs)
         else:
             raise ValueError('Specified saving in an unsupported file format')
+        end = time.time()
+        self.log.info('Write time: {:.2} seconds'.format(end-start))
 
     def get_scalar_quantity(self,quantity):
         self.log.debug('Retrieving scalar quantity %s',str(quantity))
@@ -888,12 +903,11 @@ class Cruncher(Processor):
         absorbance = 1 - reflectance - transmission
         #absorbance = 1 - reflectance
         tot = reflectance+transmission+absorbance
-        print(tot)
-        print(sim.conf['General']['sim_dir'])
         delta = np.abs(tot-1)
-        print(delta)
         #self.log.info('Total = %f'%tot)
-        # assert(delta < .0001)
+        assert(reflectance > 0)
+        assert(transmission > 0)
+        assert(delta < .0001)
         self.log.debug('Reflectance %f'%reflectance)
         self.log.debug('Transmission %f'%transmission)
         self.log.debug('Absorbance %f'%absorbance)
@@ -1205,17 +1219,25 @@ class Global_Cruncher(Cruncher):
             else:
                 raise ValueError('Invalid file type in config')
 
-    def Jsc(self):
-        """Computes photocurrent density"""
-        Jsc_list = []
+    def fractional_absorbtion(self):
+        """Computes the fraction of the incident spectrum that is absorbed by
+        the device. This is a unitless number, and its interpretation somewhat
+        depends on the units you express the incident power in. If you
+        expressed your incident spectrum in photon number, this can be
+        interpreted as the fraction of incident photons that were absorbed. If
+        you expressed your incident spectrum in terms of power per unit area,
+        then this can be interpreted as the fraction of incident power per unit
+        area that gets absorbed. In summary, its the amount of _whatever you
+        put in_ that is being absorbed by the device."""
+        valuelist = []
         for group in self.sim_groups:
             base = group[0].conf['General']['base_dir']
-            self.log.info('Computing photocurrent density for group at %s'%base)
-            Jsc_vals = np.zeros(len(group))
+            self.log.info('Computing fractional absorbtion for group at %s'%base)
+            vals = np.zeros(len(group))
             freqs = np.zeros(len(group))
             wvlgths = np.zeros(len(group))
             spectra = np.zeros(len(group))
-            # Assuming the leaves contain frequency values, sum over all of them
+            # Assuming the sims have been grouped by frequency, sum over all of them
             for i in range(len(group)):
                 sim = group[i]
                 dpath = os.path.join(sim.conf['General']['sim_dir'],'ref_trans_abs.dat')
@@ -1234,29 +1256,81 @@ class Global_Cruncher(Cruncher):
                                             bounds_error=False,fill_value='extrapolate')
                 sun_pow = p_wv(wvlgth_nm)
                 spectra[i] = sun_pow*wvlgth_nm
-                Jsc_vals[i] = absorb*sun_pow*wvlgth_nm
-            # Use Simpsons rule to perform the integration
+                vals[i] = absorb*sun_pow*wvlgth_nm
+            # Use Trapezoid rule to perform the integration. Note all the
+            # necessary factors of the wavelength have already been included
+            # above
             wvlgths = wvlgths[::-1]
-            Jsc_vals = Jsc_vals[::-1]
+            vals = vals[::-1]
             spectra = spectra[::-1]
-            #plt.figure()
-            #plt.plot(wvlgths,Jsc_vals)
-            #plt.show()
             #Jsc = intg.simps(Jsc_vals,x=wvlgths,even='avg')
-            Jsc = intg.trapz(Jsc_vals,x=wvlgths*1e9)
+            integrated_absorbtion = intg.trapz(vals,x=wvlgths*1e9)
             power = intg.trapz(spectra,x=wvlgths*1e9)
             # factor of 1/10 to convert A*m^-2 to mA*cm^-2
             #wv_fact = c.e/(c.c*c.h*10)
             #wv_fact = .1
             #Jsc = (Jsc*wv_fact)/power
-            Jsc = Jsc/power
+            frac_absorb = integrated_absorbtion/power
+            outf = os.path.join(base,'fractional_absorbtion.dat')
+            with open(outf,'w') as out:
+                out.write('%f\n'%frac_absorb)
+            self.log.info('Fractional Absorbtion = %f'%frac_absorb)
+            valuelist.append(frac_absorb)
+        return valuelist
+
+    def Jsc(self):
+        """Computes photocurrent density. This is just the integrated
+        absorbtion scaled by a unitful factor. Assuming perfect carrier
+        collection, meaning every incident photon gets converted to 1 collected
+        electron, this factor is q/(hbar*c) which converts to a current per
+        unit area"""
+        valuelist = []
+        for group in self.sim_groups:
+            base = group[0].conf['General']['base_dir']
+            self.log.info('Computing fractional absorbtion for group at %s'%base)
+            vals = np.zeros(len(group))
+            freqs = np.zeros(len(group))
+            wvlgths = np.zeros(len(group))
+            spectra = np.zeros(len(group))
+            # Assuming the sims have been grouped by frequency, sum over all of them
+            for i in range(len(group)):
+                sim = group[i]
+                dpath = os.path.join(sim.conf['General']['sim_dir'],'ref_trans_abs.dat')
+                with open(dpath,'r') as f:
+                    ref,trans,absorb = list(map(float,f.readlines()[1].split(',')))
+                freq = sim.conf['Simulation']['params']['frequency']['value']
+                wvlgth = c.c/freq
+                wvlgth_nm = wvlgth*1e9
+                freqs[i] = freq
+                wvlgths[i] = wvlgth
+                # Get solar power from chosen spectrum
+                path = sim.conf['Simulation']['input_power_wv']
+                wv_vec,p_vec = np.loadtxt(path,skiprows=2,usecols=(0,2),unpack=True,delimiter=',')
+                # Get p at wvlength by interpolation
+                p_wv = interpolate.interp1d(wv_vec,p_vec,kind='linear',
+                                            bounds_error=False,fill_value='extrapolate')
+                sun_pow = p_wv(wvlgth_nm)
+                spectra[i] = sun_pow*wvlgth_nm
+                vals[i] = absorb*sun_pow*wvlgth_nm
+            # Use Trapezoid rule to perform the integration. Note all the
+            # necessary factors of the wavelength have already been included
+            # above
+            wvlgths = wvlgths[::-1]
+            vals = vals[::-1]
+            spectra = spectra[::-1]
+            #Jsc = intg.simps(Jsc_vals,x=wvlgths,even='avg')
+            integrated_absorbtion = intg.trapz(vals,x=wvlgths)
+            # integrated_absorbtion = intg.trapz(vals,x=wvlgths*1e9)
+            # factor of 1/10 to convert A*m^-2 to mA*cm^-2
+            wv_fact = c.e/(c.c*c.h*10)
+            Jsc = wv_fact*integrated_absorbtion
             outf = os.path.join(base,'jsc.dat')
             with open(outf,'w') as out:
                 out.write('%f\n'%Jsc)
-            print('Jsc = %f'%Jsc)
-            Jsc_list.append(Jsc)
-        return Jsc_list
-
+            self.log.info('Jsc = %f'%Jsc)
+            valuelist.append(Jsc)
+        return valuelist    
+    
     def weighted_transmissionData(self):
         """Computes spectrally weighted absorption,transmission, and reflection"""
         for group in self.sim_groups:
@@ -1402,9 +1476,7 @@ class Plotter(Processor):
                     end = int(layer_t/dz)+1
                     boundaries.append((layer_t,start,end,layer))
                 else:
-                    print(boundaries)
                     prev_tup = boundaries[count-1]
-                    print(prev_tup)
                     dist = prev_tup[0]+layer_t
                     start = prev_tup[2]
                     end = int(dist/dz) + 1

@@ -855,11 +855,10 @@ class Cruncher(Processor):
         # the key directly like so
         first_name = first_layer[0]
         last_layer = sorted_layers.popitem()
-        # Port on top of substrate
-        # last_name = last_layer[0]
-        # Port on bottom of substrate
-        last_name = last_layer[0]+'_bottom'
-        print('LAST LAYER NAME: {}'.format(last_name))
+        # Port at top of substrate
+        last_name = last_layer[0]
+        # Port at bottom of substrate
+        # last_name = last_layer[0]+'_bottom'
         # self.log.info('LAST LAYER: %s'%str(last_layer))
         # p_inc = data[first_name][0]
         # p_ref = np.abs(data[first_name][1])

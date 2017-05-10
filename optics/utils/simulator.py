@@ -134,7 +134,7 @@ class Simulator():
             self.log.info('Layer Order %i'%ldata['order'])
             base_mat = ldata['base_material']
             layer_t = ldata['params']['thickness']['value']
-            self.s4.AddLayer(Name=layer,Thickness=layer_t,Material=base_mat)
+            self.s4.AddLayer(Name=layer,Thickness=layer_t,S4_Material=base_mat)
             if 'geometry' in ldata:
                 self.log.info('Building geometry in layer: {}'.format(layer))
                 for shape,sdata in sorted(ldata['geometry'].items(),key=lambda tup: tup[1]['order']):
@@ -145,7 +145,7 @@ class Simulator():
                         rad = sdata['radius']
                         cent = sdata['center']
                         coord = (cent['x'],cent['y'])
-                        self.s4.SetRegionCircle(Layer=layer,Material=shape_mat,Center=coord,
+                        self.s4.SetRegionCircle(S4_Layer=layer,S4_Material=shape_mat,Center=coord,
                                                 Radius=rad)
                     else:
                         raise NotImplementedError('Shape %s is not yet implemented'%sdata['type'])
@@ -175,7 +175,7 @@ class Simulator():
         fundamental efficiency of the RCWA solver"""
         for layer,ldata in self.conf['Layers'].items():
             thickness = ldata['params']['thickness']['value']
-            self.s4.SetLayerThickness(Layer=layer,Thickness=thickness)
+            self.s4.SetLayerThickness(S4_Layer=layer,Thickness=thickness)
 
     #  @ph.timecall
     def get_field(self):
@@ -285,11 +285,11 @@ class Simulator():
         for layer,ldata in self.conf['Layers'].items():
             self.log.info('Computing fluxes through layer: %s'%layer)
             # This gets flux at top of layer
-            forw,back = self.s4.GetPowerFlux(Layer=layer)
+            forw,back = self.s4.GetPowerFlux(S4_Layer=layer)
             flux_dict[layer] = (forw,back)
             # This gets flux at the bottom
             offset = ldata['params']['thickness']['value']
-            forw,back = self.s4.GetPowerFlux(Layer=layer,zOffset=offset)
+            forw,back = self.s4.GetPowerFlux(S4_Layer=layer,zOffset=offset)
             key = layer+'_bottom'
             flux_dict[key] = (forw,back)
         self.log.info('Finished computing fluxes!')

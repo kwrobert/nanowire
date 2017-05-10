@@ -11,10 +11,10 @@ import logging
 from collections import OrderedDict
 import matplotlib
 # Enables saving plots over ssh
-#try:
-#    os.environ['DISPLAY']
-#except KeyError:
-#    matplotlib.use('GTKAgg')
+try:
+    os.environ['DISPLAY']
+except KeyError:
+    matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.cm as cmx
@@ -855,12 +855,15 @@ class Cruncher(Processor):
         # the key directly like so
         first_name = first_layer[0]
         last_layer = sorted_layers.popitem()
-        #  last_name = last_layer[0]
+        # Port on top of substrate
+        # last_name = last_layer[0]
+        # Port on bottom of substrate
         last_name = last_layer[0]+'_bottom'
+        print('LAST LAYER NAME: {}'.format(last_name))
         # self.log.info('LAST LAYER: %s'%str(last_layer))
-        #p_inc = data[first_layer.keys()[0]][0]
-        #p_ref = np.abs(data[first_layer.keys()[0]][1])
-        #p_trans = data[last_layer.keys()[0]][0]
+        # p_inc = data[first_name][0]
+        # p_ref = np.abs(data[first_name][1])
+        # p_trans = data[last_name][0]
         p_inc = np.sqrt(data[first_name][0]**2+data[first_name][2]**2)
         p_ref = np.sqrt(data[first_name][1]**2+data[first_name][3]**2)
         p_trans = np.sqrt(data[last_name][0]**2+data[last_name][2]**2)
@@ -1231,10 +1234,10 @@ class Global_Cruncher(Cruncher):
             #wv_fact = .1
             #Jsc = (Jsc*wv_fact)/power
             Jsc = Jsc/power
-            #outf = os.path.join(base,'jsc.dat')
-            #with open(outf,'w') as out:
-            #    out.write('%f\n'%Jsc)
-            #print('Jsc = %f'%Jsc)
+            outf = os.path.join(base,'jsc.dat')
+            with open(outf,'w') as out:
+                out.write('%f\n'%Jsc)
+            print('Jsc = %f'%Jsc)
             Jsc_list.append(Jsc)
         return Jsc_list
 
@@ -1351,7 +1354,10 @@ class Plotter(Processor):
         period = sim.conf['Simulation']['params']['array_period']['value']
         cent = sim.conf['Layers']['NW_AlShell']['geometry']['core']['center']
         core_rad = sim.conf['Layers']['NW_AlShell']['geometry']['core']['radius']
-        shell_rad = sim.conf['Layers']['NW_AlShell']['geometry']['shell']['radius']
+        try:
+            shell_rad = sim.conf['Layers']['NW_AlShell']['geometry']['shell']['radius']
+        except KeyError:
+            shell_rad = False
         dx = period/sim.conf['Simulation']['x_samples']
         dy = period/sim.conf['Simulation']['y_samples']
         max_depth = sim.conf['Simulation']['max_depth']
@@ -1364,9 +1370,10 @@ class Plotter(Processor):
         if plane[-1] == 'z':
             self.log.info('draw nanowire circle')
             core = mpatches.Circle((cent['x'],cent['y']),radius=core_rad,fill=False)
-            shell = mpatches.Circle((cent['x'],cent['y']),radius=shell_rad,fill=False)
             ax_hand.add_artist(core)
-            ax_hand.add_artist(shell)
+            if shell_rad:
+                shell = mpatches.Circle((cent['x'],cent['y']),radius=shell_rad,fill=False)
+                ax_hand.add_artist(shell)
         elif plane[-1] == 'y' or plane[-1] == 'x':
             boundaries = []
             count = 0
@@ -1379,7 +1386,9 @@ class Plotter(Processor):
                     end = int(layer_t/dz)+1
                     boundaries.append((layer_t,start,end,layer))
                 else:
+                    print(boundaries)
                     prev_tup = boundaries[count-1]
+                    print(prev_tup)
                     dist = prev_tup[0]+layer_t
                     start = prev_tup[2]
                     end = int(dist/dz) + 1
@@ -1394,7 +1403,11 @@ class Plotter(Processor):
                     ax_hand.add_line(line)
                     count += 1
                 if layer == 'NW_AlShell':
-                    for rad in (core_rad,shell_rad):
+                    if shell_rad:
+                        rads = (core_rad, shell_rad)
+                    else:
+                        rads = (core_rad,)
+                    for rad in rads:
                         for x in (cent['x']-rad,cent['x']+rad):
                             # Need two locations w/ same x values
                             xv = [x,x]
@@ -1869,8 +1882,8 @@ def main():
     if not args.no_crunch:
         crunchr = Cruncher(conf,sims,sim_groups,failed_sims)
         crunchr.process_all()
-        #for sim in crunchr.sims:
-        #    crunchr.transmissionData(sim)
+        # for sim in crunchr.sims:
+        #     crunchr.transmissionData(sim)
     if not args.no_gcrunch:
         gcrunchr = Global_Cruncher(conf,sims,sim_groups,failed_sims)
         gcrunchr.process_all()

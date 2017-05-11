@@ -88,10 +88,12 @@ def get_combos(conf,keysets):
     for keyset in keysets:
         par = '.'.join(keyset)
         pdict = conf[keyset]
+        # Force to float in case we did some interpolation in the config
+        start, end, step = map(float,[pdict['start'],pdict['end'],pdict['step']])
         if pdict['itertype'] == 'numsteps':
-            values = np.linspace(pdict['start'],pdict['end'],pdict['step'])
+            values = np.linspace(start,end,step)
         elif pdict['itertype'] == 'stepsize':
-            values = np.arange(pdict['start'],pdict['end']+pdict['step'],pdict['step'])
+            values = np.arange(start,end+step,step)
         else:
             raise ValueError('Invalid itertype specified at {}'.format(str(keyset)))
         optionValues[par] = values

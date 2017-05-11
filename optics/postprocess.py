@@ -353,7 +353,7 @@ class Processor(object):
         assert(len(self.sims) >= 1)
         return self.sims,self.sim_groups
 
-    def group_against(self,key,sort_key=None):
+    def group_against(self, key, variable_params, sort_key=None):
         """Groups simulations by against particular parameter. Within each
         group, the parameter specified will vary, and all other
         parameters will remain fixed. Populates the sim_groups attribute and
@@ -398,14 +398,31 @@ class Processor(object):
             if not match:
                 sim.conf[key] = val1
                 sim_groups.append([sim])
-        # Sort the individual sims within a group in increasing order of the
-        # parameter we are grouping against
+        # Get the params that will define the path in the results dir for each
+        # group that will be stored
+        ag_key = tuple(key[0:-1])
+        result_pars = [var for var in variable_params if var != ag_key]
         for group in sim_groups:
+            # Sort the individual sims within a group in increasing order of
+            # the parameter we are grouping against a
             group.sort(key=lambda sim: sim.conf[key])
+            path = '{}/grouped_against_{}'.format(group[0].conf['General']['treebase'],
+                                                  ag_key[-1])
+            for par in result_pars:
+                full_key = par+('value',)
+                # All sims in the group will have the same values for
+                # result_pars so we can just use the first sim in the group
+                path = os.path.join(path, '{}_{:.4E}/'.format(par[-1],
+                                    group[0].conf[full_key]))
+                try:
+                    os.makedirs(path)
+                except OSError:
+                    pass
+            for sim in group:
+                sim.conf['General']['results_dir'] = path
         # Sort the groups in increasing order of the provided sort key
         if sort_key:
             sim_groups.sort(key=lambda group: group[0].conf[key])
-
         self.sim_groups = sim_groups
         return sim_groups
 
@@ -1049,7 +1066,8 @@ class Global_Cruncher(Cruncher):
                 start = 0
                 end = None
                 excluded = ''
-            base = group[0].conf['General']['base_dir']
+            # base = group[0].conf['General']['base_dir']
+            base = group[0].conf['General']['results_dir']
             errpath = os.path.join(base,'localerror_%s%s.dat'%(field,excluded))
             with open(errpath,'w') as errfile:
                 self.log.info('Computing local error for sweep %s',base)
@@ -1102,7 +1120,8 @@ class Global_Cruncher(Cruncher):
                 start = 0
                 end = None
                 excluded = ''
-            base = group[0].conf['General']['base_dir']
+            # base = group[0].conf['General']['base_dir']
+            base = group[0].conf['General']['results_dir']
             errpath = os.path.join(base,'globalerror_%s%s.dat'%(field,excluded))
             with open(errpath,'w') as errfile:
                 self.log.info('Computing global error for sweep %s',base)
@@ -1153,7 +1172,8 @@ class Global_Cruncher(Cruncher):
                 start = 0
                 end = None
                 excluded = ''
-            base = group[0].conf['General']['base_dir']
+            # base = group[0].conf['General']['base_dir']
+            base = group[0].conf['General']['results_dirs']
             errpath = os.path.join(base,'adjacenterror_%s%s.dat'%(field,excluded))
             with open(errpath,'w') as errfile:
                 self.log.info('Computing adjacent error for sweep %s',base)
@@ -1193,7 +1213,8 @@ class Global_Cruncher(Cruncher):
         avg=False then a direct sum is computed, otherwise an average is
         computed"""
         for group in self.sim_groups:
-            base = group[0].conf['General']['base_dir']
+            # base = group[0].conf['General']['base_dir']
+            base = group[0].conf['General']['results_dir']
             self.log.info('Performing scalar reduction for group at %s'%base)
             group[0].get_data()
             group_comb = group[0].get_scalar_quantity(quantity)
@@ -1232,6 +1253,7 @@ class Global_Cruncher(Cruncher):
         valuelist = []
         for group in self.sim_groups:
             base = group[0].conf['General']['base_dir']
+            base = group[0].conf['General']['results_dir']
             self.log.info('Computing fractional absorbtion for group at %s'%base)
             vals = np.zeros(len(group))
             freqs = np.zeros(len(group))
@@ -1286,7 +1308,8 @@ class Global_Cruncher(Cruncher):
         unit area"""
         valuelist = []
         for group in self.sim_groups:
-            base = group[0].conf['General']['base_dir']
+            # base = group[0].conf['General']['base_dir']
+            base = group[0].conf['General']['results_dir']
             self.log.info('Computing fractional absorbtion for group at %s'%base)
             vals = np.zeros(len(group))
             freqs = np.zeros(len(group))
@@ -1334,7 +1357,8 @@ class Global_Cruncher(Cruncher):
     def weighted_transmissionData(self):
         """Computes spectrally weighted absorption,transmission, and reflection"""
         for group in self.sim_groups:
-            base = group[0].conf['General']['base_dir']
+            # base = group[0].conf['General']['base_dir']
+            base = group[0].conf['General']['results_dir']
             self.log.info('Computing spectrally weighted transmission data for group at %s'%base)
             abs_vals = np.zeros(len(group))
             ref_vals = np.zeros(len(group))
@@ -1868,7 +1892,8 @@ class Global_Plotter(Plotter):
     def transmission_data(self,absorbance,reflectance,transmission):
         """Plot transmissions, absorption, and reflectance assuming leaves are frequency"""
         for group in self.sim_groups:
-            base = group[0].conf['General']['base_dir']
+            # base = group[0].conf['General']['base_dir']
+            base = group[0].conf['General']['results_dir']
             self.log.info('Plotting transmission data for group at %s'%base)
             # Assuming the leaves contain frequency values, sum over all of them
             freqs = np.zeros(len(group))
@@ -1953,10 +1978,24 @@ def main():
     # Collect the sims once up here and reuse them later
     proc = Processor(conf)
     sims, failed_sims = proc.collect_sims()
+    # First we need to group against if specified. Grouping against corresponds
+    # to "leaves" in the tree
+    if args.group_against:
+        sim_groups = proc.group_against(group_ag, conf.variable)
+    # Next we group by. This corresponds to building the parent nodes for each
+    # set of leaf groups
     if args.group_by:
         sim_groups = proc.group_by(group_by)
-    else:
-        sim_groups = proc.group_against(group_ag)
+    # print(len(sim_groups))
+    # print(group_ag)
+    # print(conf.variable)
+    # for group in proc.sim_groups:
+    #     sim = group[0]
+    #     try:
+    #         os.makedirs(sim.conf['General']['results_dir'])
+    #     except OSError:
+    #         pass
+    # quit()
     # Filter if specified
     if args.filter_by:
         filt_dict = {}

@@ -78,7 +78,8 @@ class StreamToLogger(object):
         # to work properly for me.
         self.level(sys.stderr)
 
-def configure_logger(level='info',name=None,console=False,logfile=None,
+
+def configure_logger(level='info', name=None, console=False, logfile=None,
                      propagate=True):
     """Creates a logger providing some arguments to make it more configurable.
        name: Name of logger to be created. Defaults to the root logger

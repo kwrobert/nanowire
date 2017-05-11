@@ -1,11 +1,16 @@
 #import os
 #import pprint
-#import logging
+import logging
 import ruamel.yaml as yaml
 import re
 from collections import MutableMapping,OrderedDict
 from copy import deepcopy
+# from utils import configure_logger
 
+# Configure module level logger if not running as main process
+# if not __name__ == '__main__':
+#     logger = configure_logger(level='DEBUG',name='config',
+#                               console=True,logfile='logs/config.log')
 
 class Config(MutableMapping):
     """An object to represent the simulation config that behaves like a dict.
@@ -13,6 +18,8 @@ class Config(MutableMapping):
     with the usual dict but has some extra convenience methods"""
 
     def __init__(self,path=None,data=None):
+        # self.log = logging.getLogger(name='config')
+        # self.log.debug('CONFIG INIT')
         if path:
             self.data = self._parse_file(path)
         else:
@@ -23,7 +30,7 @@ class Config(MutableMapping):
 
     def _parse_file(self,path):
         """Parse the YAML file provided at the command line"""
-
+        # self.log.info('Parsing YAML file')
         with open(path,'r') as cfile:
             text = cfile.read()
         conf = yaml.load(text,Loader=yaml.Loader)
@@ -113,10 +120,11 @@ class Config(MutableMapping):
     def interpolate(self):
         """Scans the config for any reference strings and resolves them to
         their actual values by retrieving them from elsewhere in the config"""
+        # self.log.debug('Interpolating replacement strings')
         self.build_dependencies()
         config_resolved = False
         while not config_resolved:
-            #print('CONFIG NOT RESOLVED, MAKING PASS')
+            # self.log.debug('CONFIG NOT RESOLVED, MAKING PASS')
             # Now we can actually perform any resolution
             for ref,ref_data in self.dep_graph.items():
                 # If the actual location of this references doesn't itself refer to
@@ -128,11 +136,11 @@ class Config(MutableMapping):
                     is_resolved = False
                 if not is_resolved:
                     if 'ref_to' not in ref_data:
-                        #print('NO REFERENCES, RESOLVING')
+                        # self.log.debug('NO REFERENCES, RESOLVING')
                         self._resolve(ref)
                         self.dep_graph[ref]['resolved'] = True
                     else:
-                        #print('CHECKING REFERENCES')
+                        # self.log.debug('CHECKING REFERENCES')
                         # If all the locations this reference points to are resolved, then we
                         # can go ahead and resolve this one
                         if self._check_resolved(ref_data['ref_to']):
@@ -141,6 +149,7 @@ class Config(MutableMapping):
             config_resolved = self._check_resolved(self.dep_graph.keys())
 
     def evaluate(self,in_table=None,old_key=None):
+        # self.log.info('Evaluating params')
         # Evaluates any expressions surrounded in back ticks `like_so+blah`
         if in_table:
             t = in_table
@@ -163,6 +172,7 @@ class Config(MutableMapping):
                     self[key_seq] = result
 
     def _update_params(self):
+        # self.log.info('Updating params')
         self.fixed = []
         self.variable = []
         self.variable_thickness = []
@@ -199,6 +209,7 @@ class Config(MutableMapping):
     def __getitem__(self, key):
         """This setup allows us to get a value using a sequence with the usual
         [] operator"""
+        # self.log.debug('Getting key: {}'.format(key))
         if isinstance(key,tuple):
             return self.getfromseq(key)
         elif isinstance(key,list):
@@ -276,7 +287,7 @@ class Config(MutableMapping):
         for layer,ldata in self['Layers'].items():
             layer_t = ldata['params']['thickness']['value']
             height += layer_t
-        #self.log.debug('TOTAL HEIGHT = %f'%height)
+        # self.log.debug('TOTAL HEIGHT = %f'%height)
         return height
 
     def sorted_dict(self,adict,reverse=False):

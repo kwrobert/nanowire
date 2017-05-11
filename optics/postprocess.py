@@ -17,6 +17,7 @@ try:
 except KeyError:
     matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+plt.style.use(['ggplot', 'paper'])
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.cm as cmx
 import matplotlib.lines as mlines
@@ -408,16 +409,26 @@ class Processor(object):
             group.sort(key=lambda sim: sim.conf[key])
             path = '{}/grouped_against_{}'.format(group[0].conf['General']['treebase'],
                                                   ag_key[-1])
-            for par in result_pars:
-                full_key = par+('value',)
-                # All sims in the group will have the same values for
-                # result_pars so we can just use the first sim in the group
-                path = os.path.join(path, '{}_{:.4E}/'.format(par[-1],
-                                    group[0].conf[full_key]))
+            # If the only variable param is the one we grouped against, make
+            # the top dir
+            if not result_pars:
                 try:
                     os.makedirs(path)
                 except OSError:
                     pass
+            # Otherwise make the top dir and all the subdirs
+            else:
+                for par in result_pars:
+                    full_key = par+('value',)
+                    # All sims in the group will have the same values for
+                    # result_pars so we can just use the first sim in the group
+                    path = os.path.join(path, '{}_{:.4E}/'.format(par[-1],
+                                        group[0].conf[full_key]))
+                    self.log.info('RESULTS DIR: {}'.format(path))
+                    try:
+                        os.makedirs(path)
+                    except OSError:
+                        pass
             for sim in group:
                 sim.conf['General']['results_dir'] = path
         # Sort the groups in increasing order of the provided sort key
@@ -1917,13 +1928,13 @@ class Global_Plotter(Plotter):
             plt.figure()
             if absorbance:
                 self.log.info('Plotting absorbance')
-                plt.plot(freqs,absorb_l,label='Absorption')
+                plt.plot(freqs, absorb_l, '-o', label='Absorption')
             if reflectance:
-                plt.plot(freqs,refl_l,label='Reflectance')
+                plt.plot(freqs, refl_l, '-o', label='Reflectance')
             if transmission:
-                plt.plot(freqs,trans_l,label='Transmission')
+                plt.plot(freqs, trans_l, '-o', label='Transmission')
             plt.legend(loc='best')
-            figp = os.path.join(base,'transmission_plots.pdf')
+            figp = os.path.join(base, 'transmission_plots.pdf')
             plt.xlabel('Wavelength (nm)')
             #plt.ylim((0,.5))
             plt.savefig(figp)

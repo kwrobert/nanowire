@@ -68,7 +68,8 @@ class Simulator():
                            bounds_error=False,fill_value='extrapolate')
         # We need to reduce total incident power depending on incident polar
         # angle
-        E = np.sqrt(constants.c*constants.mu_0*f_p(freq))*np.cos(polar_angle)
+        # E = np.sqrt(constants.c*constants.mu_0*f_p(freq))*np.cos(polar_angle)
+        E = np.sqrt(constants.c*constants.mu_0*f_p(freq))
         return E
 
     def set_excitation(self):

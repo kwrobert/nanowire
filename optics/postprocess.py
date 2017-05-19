@@ -17,7 +17,7 @@ try:
 except KeyError:
     matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-plt.style.use(['ggplot', 'paper'])
+# plt.style.use(['ggplot', 'paper'])
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.cm as cmx
 import matplotlib.lines as mlines
@@ -935,6 +935,7 @@ class Cruncher(Processor):
         #self.log.info('Total = %f'%tot)
         assert(reflectance > 0)
         assert(transmission > 0)
+        assert(absorbance > 0)
         assert(delta < .0001)
         self.log.debug('Reflectance %f'%reflectance)
         self.log.debug('Transmission %f'%transmission)
@@ -1254,12 +1255,12 @@ class Global_Cruncher(Cruncher):
     def fractional_absorbtion(self):
         """Computes the fraction of the incident spectrum that is absorbed by
         the device. This is a unitless number, and its interpretation somewhat
-        depends on the units you express the incident power in. If you
+        depends on the units you express the incident spectrum in. If you
         expressed your incident spectrum in photon number, this can be
         interpreted as the fraction of incident photons that were absorbed. If
         you expressed your incident spectrum in terms of power per unit area,
         then this can be interpreted as the fraction of incident power per unit
-        area that gets absorbed. In summary, its the amount of _whatever you
+        area that gets absorbed. In summary, its the fraction of _whatever you
         put in_ that is being absorbed by the device."""
         valuelist = []
         for group in self.sim_groups:
@@ -1839,7 +1840,7 @@ class Global_Plotter(Plotter):
         """Plot the result of a particular scalar reduction for each group"""
         for group in self.sim_groups:
             sim = group[0]
-            base = sim.conf['General']['base_dir']
+            base = sim.conf['General']['results_dir']
             self.log.info('Plotting scalar reduction of %s for quantity'
                           ' %s'%(base,quantity))
             cm = plt.get_cmap('jet')
@@ -1848,14 +1849,14 @@ class Global_Plotter(Plotter):
             xs = int(float(xs))
             ys = sim.conf['Simulation']['y_samples']
             ys = int(float(ys))
-            height = sim.conf.get_height()
+            max_depth = sim.conf['Simulation']['max_depth']
             period = sim.conf['Simulation']['params']['array_period']['value']
             dx = period/xs
             dy = period/ys
-            dz = height/zs
+            dz = max_depth/zs
             x = np.arange(0,period,dx)
             y = np.arange(0,period,dy)
-            z = np.arange(0,height+dz,dz)
+            z = np.arange(0,max_depth+dz,dz)
             if sim.conf['General']['save_as'] == 'npz':
                 globstr = os.path.join(base,'scalar_reduce*_%s.npy'%quantity)
                 files = glob.glob(globstr)
@@ -1877,7 +1878,7 @@ class Global_Plotter(Plotter):
                     labels = ('y [um]','z [um]', quantity,title)
                     if sim.conf['General']['save_plots']:
                         fname = 'scalar_reduce_%s_plane_2d_x.pdf'%quantity
-                        p = os.path.join(sim.conf['General']['base_dir'],fname)
+                        p = os.path.join(base, fname)
                     else:
                         p = False
                     show = sim.conf['General']['show_plots']
@@ -1886,7 +1887,7 @@ class Global_Plotter(Plotter):
                     labels = ('x [um]','z [um]', quantity,title)
                     if sim.conf['General']['save_plots']:
                         fname = 'scalar_reduce_%s_plane_2d_y.pdf'%quantity
-                        p = os.path.join(sim.conf['General']['base_dir'],fname)
+                        p = os.path.join(base, fname)
                     else:
                         p = False
                     show = sim.conf['General']['show_plots']
@@ -1895,7 +1896,7 @@ class Global_Plotter(Plotter):
                     labels = ('y [um]','x [um]', quantity,title)
                     if sim.conf['General']['save_plots']:
                         fname = 'scalar_reduce_%s_plane_2d_z.pdf'%quantity
-                        p = os.path.join(sim.conf['General']['base_dir'],fname)
+                        p = os.path.join(base, fname)
                     else:
                         p = False
                     self.heatmap2d(sim,x,y,cs,labels,plane,save_path=p,show=show,draw=draw,fixed=fixed)

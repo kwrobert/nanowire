@@ -2,15 +2,22 @@ import numpy as np
 import matplotlib.pyplot as plt
 import argparse as ap
 import scipy.constants as c
+import scipy.integrate as intg
 import os
 
 def freq_to_wvlgth(path,plot,outf):
     """Converts a frequency spectrum to a wavelength spectrum"""
-    freqs,int_f = np.loadtxt(path,delimiter=',',unpack=True,usecols=(0,2))
+    # freqs,int_f = np.loadtxt(path,delimiter=',',unpack=True,usecols=(0,2))
+    freqs,int_f = np.loadtxt(path,unpack=True,delimiter=',')
+    # raw_integ = intg.trapz(int_f,x=freqs)
+    raw_integ = intg.trapz(int_f)
+    print('Raw Integral: %f'%raw_integ)
     wvlgths = (c.c/freqs)*1e9
-    int_w = int_f*c.c/wvlgths**2
+    int_w = int_f*c.c*1e9/wvlgths**2
     wvlgths = wvlgths[::-1]
     int_w = int_w[::-1]
+    integ = intg.trapz(int_w,x=wvlgths)
+    print('Integral: %f'%raw_integ)
     if plot:
         fig,(ax1,ax2) = plt.subplots(1,2)
         ax1.plot(freqs,int_f)
@@ -28,12 +35,16 @@ def freq_to_wvlgth(path,plot,outf):
     return wvlgths, int_w
 
 def wvlgth_to_freq(path,plot,outf):
-    """Converts a frequency spectrum to a wavelength spectrum"""
-    wvlgths,int_w = np.loadtxt(path,delimiter=',',unpack=True,usecols=(0,2))
+    """Converts a wavelength spectrum to a frequency spectrum"""
+    wvlgths,int_w = np.loadtxt(path,delimiter=',',unpack=True,usecols=(0,3))
+    raw_integ = intg.trapz(int_w,x=wvlgths)
+    print('Raw Integral: %f'%raw_integ)
     freqs = c.c/(wvlgths*1e-9)
-    int_f = int_w*c.c/freqs**2
+    int_f = int_w*(c.c*1e9)/freqs**2
     freqs = freqs[::-1]
     int_f = int_f[::-1]
+    integ = intg.trapz(int_f, x=freqs)
+    print('Integral: %f'%integ)
     if plot:
         fig,(ax1,ax2) = plt.subplots(1,2)
         ax2.plot(freqs,int_f)

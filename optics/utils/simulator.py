@@ -2,6 +2,7 @@ from __future__ import print_function
 import os
 import numpy as np
 import scipy.interpolate as spi
+import scipy.integrate as intg
 import scipy.constants as constants
 import S4
 #  import profilehooks as ph
@@ -66,23 +67,20 @@ class Simulator():
         bin_size = self.conf['Simulation']['params']['frequency']['bin_size']
         # Get data
         freq_vec, p_vec = np.loadtxt(path, unpack=True, delimiter=',')
-        # Depending on whether or not we decided to average power values within
-        # each frequency bin in the config do the following:
+        # Get all available power values within this bin
+        left = freq - bin_size / 2.0
+        right = freq + bin_size / 2.0
+        power_inds = np.where((left < freq_vec) & (freq_vec < right))
+        freqs = freq_vec[power_inds]
+        power_values = p_vec[power_inds[0]]
+        # Calculate the average irradiance of this bin and multiply by the bin
+        # width to get a power value. This tends to give a smoother result than
+        # directly integrating
         if avg:
-            # Get all available power values within this bin
-            left = freq - bin_size / 2.0
-            right = freq + bin_size / 2.0
-            power_inds = np.where((left < freq_vec) & (freq_vec < right))
-            power_values = p_vec[power_inds[0]]
-            # Average them to get an average power value within this bin
-            # Multiply by the bin size to get an actual value in W/m^2 instead
-            # of W/(m^2*nm)
             power = np.average(power_values) * bin_size
+        # Integrate the spectrum within this bin to get a power value
         else:
-            # Get p at freq by interpolation
-            f_p = spi.interp1d(freq_vec, p_vec, kind='nearest',
-                               bounds_error=False, fill_value='extrapolate')
-            power = f_p(freq) * bin_size
+            power = intg.trapz(power_values, x=freqs)
         # We need to reduce total incident power depending on incident polar
         # angle
         # E = np.sqrt(constants.c*constants.mu_0*f_p(freq))*np.cos(polar_angle)

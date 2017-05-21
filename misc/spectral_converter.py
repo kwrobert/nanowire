@@ -37,6 +37,7 @@ def freq_to_wvlgth(path,plot,outf):
 def wvlgth_to_freq(path,plot,outf):
     """Converts a wavelength spectrum to a frequency spectrum"""
     wvlgths,int_w = np.loadtxt(path,delimiter=',',unpack=True,usecols=(0,3))
+    print(int_w)
     raw_integ = intg.trapz(int_w,x=wvlgths)
     print('Raw Integral: %f'%raw_integ)
     freqs = c.c/(wvlgths*1e-9)

@@ -104,7 +104,7 @@ def configure_logger(level='info', name=None, console=False, logfile=None,
         logger.propagate = False
     logger.setLevel(numeric_level)
     if logfile:
-        log_dir,logfile = os.path.split(logfile)
+        log_dir, logfile = os.path.split(os.path.expandvars(logfile))
         # Set up file handler
         try:
             os.makedirs(log_dir)

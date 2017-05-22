@@ -530,6 +530,9 @@ def main():
 
     if os.path.isfile(args.config_file):
         global_conf = Config(path=os.path.abspath(args.config_file))
+        # Expand all the environment variables in the global config but
+        # otherwise don't modify anything
+        global_conf.expand_vars()
     else:
         print("\n The file you specified does not exist! \n")
         quit()

@@ -37,7 +37,7 @@ def main():
         print("\n The file you specified does not exist! \n")
         quit()
 
-    freq_bins = list(range(60, 150, 10))
+    freq_bins = list(range(60, 230, 10))
     fracs = []
     study_base = global_conf['General']['base_dir']
     for num_bins in freq_bins:
@@ -45,7 +45,7 @@ def main():
         sweep_dir = os.path.join(study_base, subdir)
         global_conf['General']['base_dir'] = sweep_dir
         global_conf['General']['treebase'] = sweep_dir
-        global_conf['Simulation.params.frequency.step'] = num_bins
+        global_conf[('Simulation','params','frequency','step')] = num_bins
         print('Running with {} bins under {}'.format(num_bins, sweep_dir))
         sw.run(global_conf, args.log_level)
         print('Computing fractional absorption ...')

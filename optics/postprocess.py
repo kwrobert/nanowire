@@ -933,9 +933,9 @@ class Cruncher(Processor):
         tot = reflectance+transmission+absorbance
         delta = np.abs(tot-1)
         #self.log.info('Total = %f'%tot)
-        assert(reflectance > 0)
-        assert(transmission > 0)
-        assert(absorbance > 0)
+        assert(reflectance >= 0)
+        assert(transmission >= 0)
+        assert(absorbance >= 0)
         assert(delta < .0001)
         self.log.debug('Reflectance %f'%reflectance)
         self.log.debug('Transmission %f'%transmission)

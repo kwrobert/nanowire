@@ -81,6 +81,7 @@ class Simulator():
         # Integrate the spectrum within this bin to get a power value
         else:
             power = intg.trapz(power_values, x=freqs)
+        self.log.info('Incident Power: {}'.format(power))
         # We need to reduce total incident power depending on incident polar
         # angle
         # E = np.sqrt(constants.c*constants.mu_0*f_p(freq))*np.cos(polar_angle)

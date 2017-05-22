@@ -125,7 +125,6 @@ def make_confs(global_conf):
     log = logging.getLogger()
     log.info('Constructing simulator objects ...')
     locs, combos, bin_size = get_combos(global_conf, global_conf.variable)
-    print(bin_size)
     confs = []
     for combo in combos:
         # Make a copy of the global config for this parameter combos. This copy

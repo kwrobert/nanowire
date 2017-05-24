@@ -465,23 +465,24 @@ def main():
     else:
         print("\n The file you specified does not exist! \n")
         sys.exit(1)
+    # Instantiate the simulator using this config object
+    sim = Simulator(conf)
     # If we're using gc3 for execution, we need to change the sim_dir to
     # reflect whatever random directory gc3 is running this simulation in so
     # all the output files end up in the correct location
     if conf['General']['execution'] == 'gc3':
         pwd = os.getcwd()
         print('CURRENT DIR: {}'.format(pwd))
-        conf['General']['sim_dir'] = pwd
-        conf['General']['base_dir'] = pwd
-        conf['General']['treebase'] = pwd
-    # Instantiate the simulator using this config object
-    sim = Simulator(conf)
-    
+        sim.conf['General']['sim_dir'] = pwd
+        sim.conf['General']['base_dir'] = pwd
+        sim.conf['General']['treebase'] = pwd
     try:
         print('Making dir')
         os.makedirs(sim.dir)
     except OSError:
-        raise
+        print('exception raised')
+        pass
+
     if not sim.conf.variable_thickness:
         sim.log.info('Executing sim %s' % sim.id[0:10])
         print('No thicknesses, executing')

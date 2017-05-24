@@ -52,6 +52,7 @@ def get_combos(conf, keysets):
 class Simulator():
 
     def __init__(self, conf, log_level='info'):
+        print(conf['General']['base_dir'])
         conf.interpolate()
         conf.evaluate()
         self.conf = conf
@@ -465,17 +466,18 @@ def main():
     else:
         print("\n The file you specified does not exist! \n")
         sys.exit(1)
-    # Instantiate the simulator using this config object
-    sim = Simulator(conf)
     # If we're using gc3 for execution, we need to change the sim_dir to
     # reflect whatever random directory gc3 is running this simulation in so
     # all the output files end up in the correct location
     if conf['General']['execution'] == 'gc3':
         pwd = os.getcwd()
         print('CURRENT DIR: {}'.format(pwd))
-        sim.conf['General']['sim_dir'] = pwd
-        sim.conf['General']['base_dir'] = pwd
-        sim.conf['General']['treebase'] = pwd
+        conf['General']['base_dir'] = pwd
+        conf['General']['treebase'] = pwd
+        print('CONF DIR: %s'%conf['General']['sim_dir'])
+    # Instantiate the simulator using this config object
+    sim = Simulator(conf)
+    print('SIM DIR: %s'%sim.dir)
     try:
         print('Making dir')
         os.makedirs(sim.dir)

@@ -4,7 +4,7 @@ import gc3libs
 from gc3libs import Application
 from gc3libs.cmdline import SessionBasedScript
 
-MODULE_PATH = os.path.expandvars('$HOME/software/nanowire')
+MODULE_PATH = '$HOME/software/nanowire'
 
 
 class RCWA_App(Application):
@@ -12,12 +12,14 @@ class RCWA_App(Application):
 
     def __init__(self, conf):
         sim_dir = os.path.basename(conf['General']['sim_dir'])
-        print('SIM_DIR: %s'%sim_dir)
+        print('SIM_DIR: %s' % sim_dir)
         conf_file = os.path.join(sim_dir, 'sim_conf.yml')
         script = os.path.join(MODULE_PATH, 'optics/utils/simulator.py')
         python = find_executable('python2')
         args = [python, script, 'sim_conf.yml']
         mem = gc3libs.quantity.Memory('600 MB')
+        outs = [('{}/{}'.format(sim_dir, outfile), outfile) for outfile in
+                ('field_data.E.npz', 'sim.log', 'time.dat', 'fluxes.dat')]
         if conf.variable_thickness:
             # Allocate a minute for each thickness we need to simulate
             num_minutes = len(conf.variable_thickness)
@@ -33,8 +35,8 @@ class RCWA_App(Application):
                                        # remote location relative to execution
                                        # directory
                                        inputs=[(conf_file, 'sim_conf.yml')],
-                                       outputs=gc3libs.ANY_OUTPUT,
-                                       # outputs=[('field_data.E.npz', conf['General']['sim_dir'])],
+                                       # outputs=gc3libs.ANY_OUTPUT,
+                                       outputs=outs,
                                        # The local directory we want the
                                        # results to end up in
                                        output_dir=sim_dir,

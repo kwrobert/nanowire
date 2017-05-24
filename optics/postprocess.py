@@ -1969,6 +1969,7 @@ def main():
     args = parser.parse_args()
     if os.path.isfile(args.config_file):
         conf = Config(path=os.path.abspath(args.config_file))
+        conf.expand_vars()
     else:
         raise ValueError("The file you specified does not exist!")
 

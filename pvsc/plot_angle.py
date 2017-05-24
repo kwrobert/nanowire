@@ -7,6 +7,14 @@ plt.style.use('ggplot')
 import glob
 import argparse as ap
 import numpy as np
+import re
+
+def extract_float(string):
+    match = re.search('[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?',string)
+    float_str = match.group(0)
+    print('INSIDE EXTRACT')
+    print(float_str)
+    return float(float_str)
 
 def get_value(path):
     with open(path,'r') as f:
@@ -17,7 +25,7 @@ def plot_planar_jsc(path):
     jsc_files = glob.glob(os.path.join(path,'**/fractional_absorbtion.dat'),recursive=True)
     jsc_files = sorted(jsc_files)
     jsc_vals = [get_value(path) for path in jsc_files]
-    angles = np.arange(0,90,5)
+    angles = np.arange(40,51,1)
     print(len(jsc_vals))
     print(len(angles))
     plt.figure()
@@ -32,12 +40,16 @@ def plot_planar_jsc(path):
     return angles, jsc_vals
 
 def plot_nanowire_jsc(path):
+    print('NW')
     jsc_files = glob.glob(os.path.join(path,'**/fractional_absorbtion.dat'),recursive=True)
-    jsc_files = sorted(jsc_files)
+    jsc_files = sorted(jsc_files,key=extract_float)
     jsc_vals = [get_value(path) for path in jsc_files]
-    angles = np.arange(0,90,5)
+    angles = list(range(0,40,5))+list(range(40,50,1))+list(range(50,90,5))
     print(len(jsc_vals))
     print(len(angles))
+    for i,f in enumerate(jsc_files):
+        print('File: %s'%f)
+        print('Angle: %f'%angles[i])
     plt.figure()
     plt.title('NW Solar Cell Fractional Absorption')
     plt.xlabel('Angle (degrees)')
@@ -76,8 +88,9 @@ def main():
 
     plt.style.use('ggplot')
 
-    if not os.path.isdir(args.planar_path) or not os.path.isdir(args.nw_path):
-        raise ValueError('One of the paths you specified does not exist')
+    if args.planar_path and args.nw_path:
+        if not os.path.isdir(args.planar_path) or not os.path.isdir(args.nw_path):
+            raise ValueError('One of the paths you specified does not exist')
 
     if args.planar_path:
         angles, planar = plot_planar_jsc(args.planar_path)

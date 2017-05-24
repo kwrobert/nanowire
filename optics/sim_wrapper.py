@@ -442,6 +442,7 @@ def run_optimization(conf):
         guess[i] = par_data['guess']
     # Max iterations and tolerance
     tol = conf['General']['opt_tol']
+    ftol = conf['General']['func_opt_tol']
     max_iter = conf['General']['opt_max_iter']
     os.makedirs(os.path.join(conf['General']['base_dir'], 'opt_dir'))
     # Run the simplex optimizer
@@ -449,7 +450,8 @@ def run_optimization(conf):
                             guess,
                             args=(conf,),
                             method='Nelder-Mead',
-                            options={'maxiter': max_iter, 'xatol': tol, 'disp': True})
+                            options={'maxiter': max_iter, 'xatol': tol,
+                                     'fatol': ftol, 'disp': True})
     log.info(opt_val.message)
     log.info('Optimal values')
     log.info(conf.optimized)

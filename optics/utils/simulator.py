@@ -427,6 +427,8 @@ class Simulator():
         """Gets all the data for this similation by calling the relevant class
         methods. Basically just a convenient wrapper to execute all the
         functions defined above"""
+        print('inside get_data')
+        print(os.path.join(self.dir, 'sim_conf.yml'))
         self.conf.write(os.path.join(self.dir, 'sim_conf.yml'))
         start = time.time()
         if not update:
@@ -470,16 +472,22 @@ def main():
         pwd = os.getcwd()
         print('CURRENT DIR: {}'.format(pwd))
         conf['General']['sim_dir'] = pwd
+        conf['General']['base_dir'] = pwd
+        conf['General']['treebase'] = pwd
     # Instantiate the simulator using this config object
     sim = Simulator(conf)
+    
     try:
+        print('Making dir')
         os.makedirs(sim.dir)
     except OSError:
-        pass
+        raise
     if not sim.conf.variable_thickness:
         sim.log.info('Executing sim %s' % sim.id[0:10])
+        print('No thicknesses, executing')
         sim.get_data()
     else:
+        print('Thicknesses')
         sim.log.info('Computing a thickness sweep at %s' % sim.id[0:10])
         orig_id = sim.id[0:10]
         # Get all combinations of layer thicknesses

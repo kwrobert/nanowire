@@ -210,7 +210,6 @@ def run_sim(conf):
     except OSError:
         pass
     if not sim.conf.variable_thickness:
-<<<<<<< HEAD
         log.info('Executing sim %s'%sim.id[0:10])
         # _get_data(sim)
         sim.get_data()

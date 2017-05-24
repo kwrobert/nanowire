@@ -1528,11 +1528,7 @@ class Plotter(Processor):
                     count += 1
                 if layer == 'NW_AlShell':
                     if shell_rad:
-<<<<<<< HEAD
-                        rads = (core_rad,shell_rad)
-=======
                         rads = (core_rad, shell_rad)
->>>>>>> develop
                     else:
                         rads = (core_rad,)
                     for rad in rads:

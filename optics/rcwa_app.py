@@ -4,7 +4,7 @@ import gc3libs
 from gc3libs import Application
 from gc3libs.cmdline import SessionBasedScript
 
-MODULE_PATH = '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/'
+MODULE_PATH = os.path.expandvars('$HOME/software/nanowire')
 
 
 class RCWA_App(Application):
@@ -12,6 +12,7 @@ class RCWA_App(Application):
 
     def __init__(self, conf):
         sim_dir = os.path.basename(conf['General']['sim_dir'])
+        print('SIM_DIR: %s'%sim_dir)
         conf_file = os.path.join(sim_dir, 'sim_conf.yml')
         script = os.path.join(MODULE_PATH, 'optics/utils/simulator.py')
         python = find_executable('python2')
@@ -40,7 +41,7 @@ class RCWA_App(Application):
                                        requested_cores=1,
                                        requested_memory=mem,
                                        requested_walltime=wtime,
-                                       stdout='sim.log', stderr='sim.err')
+                                       stdout='sim.out', stderr='sim.err')
 
 
 class SimWrapper(SessionBasedScript):

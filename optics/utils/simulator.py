@@ -1,19 +1,59 @@
 from __future__ import print_function
+import sys
 import os
+import time
 import numpy as np
 import scipy.interpolate as spi
 import scipy.integrate as intg
 import scipy.constants as constants
 import S4
+import argparse as ap
 #  import profilehooks as ph
 
 from itertools import chain, product
+from collections import OrderedDict
 from utils import make_hash, configure_logger
+from config import Config
+
+
+def get_combos(conf, keysets):
+    """Given a config object, return two lists. The first list contains the
+    names of all the variable parameters in the config object. The second is a
+    list of lists, where the inner list contains all the unique combinations of
+    this config object's non-fixed parameters. The elements of the inner list
+    of value correspond to the elements of the key list"""
+
+    # log = logging.getLogger()
+    # log.info("Constructing dictionary of options and their values ...")
+    # Get the list of values from all our variable keysets
+    optionValues = OrderedDict()
+    for keyset in keysets:
+        par = '.'.join(keyset)
+        pdict = conf[keyset]
+        if pdict['itertype'] == 'numsteps':
+            values = np.linspace(pdict['start'], pdict['end'], pdict['step'])
+        elif pdict['itertype'] == 'stepsize':
+            values = np.arange(pdict['start'], pdict[
+                               'end'] + pdict['step'], pdict['step'])
+        else:
+            raise ValueError(
+                'Invalid itertype specified at {}'.format(str(keyset)))
+        optionValues[par] = values
+    # log.debug("Option values dict after processing: %s" % str(optionValues))
+    valuelist = list(optionValues.values())
+    keys = list(optionValues.keys())
+    # Consuming a list of lists/tuples where each inner list/tuple contains all
+    # the values for a particular parameter, returns a list of tuples
+    # containing all the unique combos for that set of parameters
+    combos = list(product(*valuelist))
+    # log.debug('The list of parameter combos: %s', str(combos))
+    return keys, combos
 
 
 class Simulator():
 
     def __init__(self, conf, log_level='info'):
+        print(conf['General']['base_dir'])
         conf.interpolate()
         conf.evaluate()
         self.conf = conf
@@ -40,8 +80,9 @@ class Simulator():
         self.s4.SetOptions(**self.conf['Solver'])
 
     def _get_epsilon(self, path):
-        """Returns complex dielectric constant for a material by pulling in nk text file, interpolating,
-        computing nk values at freq, and converting"""
+        """Returns complex dielectric constant for a material by pulling in nk
+        text file, interpolating, computing nk values at freq, and
+        converting"""
         freq = self.conf['Simulation']['params']['frequency']['value']
         # Get data
         freq_vec, n_vec, k_vec = np.loadtxt(path, skiprows=1, unpack=True)
@@ -65,22 +106,38 @@ class Simulator():
         path = self.conf['Simulation']['input_power']
         avg = self.conf['Simulation']['average_bins']
         bin_size = self.conf['Simulation']['params']['frequency']['bin_size']
-        # Get data
+        # Get NREL AM1.5 data
         freq_vec, p_vec = np.loadtxt(path, unpack=True, delimiter=',')
         # Get all available power values within this bin
         left = freq - bin_size / 2.0
         right = freq + bin_size / 2.0
-        power_inds = np.where((left < freq_vec) & (freq_vec < right))
-        freqs = freq_vec[power_inds]
-        power_values = p_vec[power_inds[0]]
-        # Calculate the average irradiance of this bin and multiply by the bin
-        # width to get a power value. This tends to give a smoother result than
-        # directly integrating
-        if avg:
-            power = np.average(power_values) * bin_size
-        # Integrate the spectrum within this bin to get a power value
-        else:
-            power = intg.trapz(power_values, x=freqs)
+        inds = np.where((left < freq_vec) & (freq_vec < right))
+        # Check for edge cases
+        if len(inds) == 0:
+            raise ValueError('Your bins are smaller than NRELs!')
+        if inds[0] == 0:
+            raise ValueError('Your leftmost bin edge lies outside the'
+                             ' range provided by NREL')
+        if inds[-1] == len(freq_vec):
+            raise ValueError('Your rightmost bin edge lies outside the'
+                             ' range provided by NREL')
+        # A simple linear interpolation given two pairs of data points, and the
+        # desired x point
+
+        def lin_interp(x1, x2, y1, y2, x):
+            return ((y2 - y1) / (x2 - x1)) * (x - x2) + y2
+        # If the left or right edge lies between NREL data points, we do a
+        # linear interpolation to get the irradiance values at the bin edges
+        left_power = lin_interp(freq_vec[inds[0] - 1], freq_vec[inds[0]],
+                                p_vec[inds[0] - 1], p_vec[inds[0]], left)
+        right_power = lin_interp(freq_vec[inds[-1]], freq_vec[inds[-1] + 1],
+                                 p_vec[inds[-1]], p_vec[inds[-1] + 1], right)
+        # All the frequency values within the bin and including the bin edges
+        freqs = [left]+list(freq_vec[inds])+[right]
+        # All the power values
+        power_values = [left_power]+list(p_vec[inds])+[right_power]
+        # Just use a trapezoidal method to integrate the spectrum
+        power = intg.trapz(power_values, x=freqs)
         self.log.info('Incident Power: {}'.format(power))
         # We need to reduce total incident power depending on incident polar
         # angle
@@ -146,7 +203,8 @@ class Simulator():
         self.s4.SetMaterial(Name='vacuum', Epsilon=complex(1, 0))
         # We need to properly sort our layers because order DOES matter. Light
         # will be incident upon the first layer specified
-        for layer, ldata in sorted(self.conf['Layers'].items(), key=lambda tup: tup[1]['order']):
+        for layer, ldata in sorted(self.conf['Layers'].items(),
+                                   key=lambda tup: tup[1]['order']):
             self.log.info('Building layer: %s' % layer)
             self.log.info('Layer Order %i' % ldata['order'])
             base_mat = ldata['base_material']
@@ -382,3 +440,109 @@ class Simulator():
         else:
             self.log.info('Converged at {} basis terms'.format(new_basis))
             return field2, new_basis, True
+
+    def get_data(self, update=False):
+        """Gets all the data for this similation by calling the relevant class
+        methods. Basically just a convenient wrapper to execute all the
+        functions defined above"""
+        print('inside get_data')
+        print(os.path.join(self.dir, 'sim_conf.yml'))
+        self.conf.write(os.path.join(self.dir, 'sim_conf.yml'))
+        start = time.time()
+        if not update:
+            self.configure()
+            self.build_device()
+            self.set_excitation()
+        else:
+            self.update_thicknesses()
+        self.save_field()
+        self.save_fluxes()
+        end = time.time()
+        runtime = end - start
+        time_file = os.path.join(self.dir, 'time.dat')
+        with open(time_file, 'w') as out:
+            out.write('{}\n'.format(runtime))
+        self.log.info('Simulation {} completed in {:.2}'
+                      ' seconds!'.format(self.id[0:10], runtime))
+
+
+def main():
+
+    parser = ap.ArgumentParser(description="""Runs a single simulation given
+                               the config file for a single simulation""")
+    parser.add_argument('config_file', type=str, help="""Absolute path to the
+    YAML file specifying the parameters for this simulation""")
+    parser.add_argument('--log_level', type=str, default='info',
+                        choices=['debug', 'info',
+                                 'warning', 'error', 'critical'],
+                        help="""Logging level for the run""")
+    args = parser.parse_args()
+
+    # Load the configuration object
+    if os.path.isfile(args.config_file):
+        conf = Config(path=os.path.abspath(args.config_file))
+    else:
+        print("\n The file you specified does not exist! \n")
+        sys.exit(1)
+    # If we're using gc3 for execution, we need to change the sim_dir to
+    # reflect whatever random directory gc3 is running this simulation in so
+    # all the output files end up in the correct location
+    if conf['General']['execution'] == 'gc3':
+        pwd = os.getcwd()
+        print('CURRENT DIR: {}'.format(pwd))
+        conf['General']['base_dir'] = pwd
+        conf['General']['treebase'] = pwd
+        print('CONF DIR: %s' % conf['General']['sim_dir'])
+    # Instantiate the simulator using this config object
+    sim = Simulator(conf)
+    print('SIM DIR: %s' % sim.dir)
+    try:
+        print('Making dir')
+        os.makedirs(sim.dir)
+    except OSError:
+        print('exception raised')
+        pass
+
+    if not sim.conf.variable_thickness:
+        sim.log.info('Executing sim %s' % sim.id[0:10])
+        print('No thicknesses, executing')
+        sim.get_data()
+    else:
+        print('Thicknesses')
+        sim.log.info('Computing a thickness sweep at %s' % sim.id[0:10])
+        orig_id = sim.id[0:10]
+        # Get all combinations of layer thicknesses
+        keys, combos = get_combos(sim.conf, sim.conf.variable_thickness)
+        # Update base directory to new sub directory
+        sim.conf['General']['base_dir'] = sim.dir
+        # Set things up for the first combo
+        combo = combos.pop()
+        # First update all the thicknesses in the config. We make a copy of the
+        # list because it gets continually updated in the config object
+        var_thickness = sim.conf.variable_thickness
+        for i in range(len(combo)):
+            keyseq = var_thickness[i]
+            sim.conf[keyseq] = {'type': 'fixed', 'value': float(combo[i])}
+        # With all the params updated we can now make the subdir from the
+        # sim id and get the data
+        sim.update_id()
+        os.makedirs(sim.dir)
+        subpath = os.path.join(orig_id, sim.id[0:10])
+        sim.log.info('Computing initial thickness at %s' % subpath)
+        sim.get_data()
+        # Now we can repeat the same exact process, but instead of rebuilding
+        # the device we just update the thicknesses
+        for combo in combos:
+            for i in range(len(combo)):
+                keyseq = var_thickness[i]
+                sim.conf[keyseq] = {'type': 'fixed', 'value': float(combo[i])}
+            sim.update_id()
+            subpath = os.path.join(orig_id, sim.id[0:10])
+            sim.log.info('Computing additional thickness at %s' % subpath)
+            os.makedirs(sim.dir)
+            sim.get_data(update=True)
+    return
+
+
+if __name__ == '__main__':
+    main()

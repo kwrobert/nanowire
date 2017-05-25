@@ -4,6 +4,7 @@ import os
 import time
 import numpy as np
 import scipy.interpolate as spi
+import scipy.integrate as intg
 import scipy.constants as constants
 import S4
 import argparse as ap
@@ -48,10 +49,10 @@ def get_combos(conf, keysets):
     # log.debug('The list of parameter combos: %s', str(combos))
     return keys, combos
 
-
 class Simulator():
 
     def __init__(self, conf, log_level='info'):
+        print(conf['General']['base_dir'])
         conf.interpolate()
         conf.evaluate()
         self.conf = conf
@@ -102,15 +103,29 @@ class Simulator():
         freq = self.conf['Simulation']['params']['frequency']['value']
         polar_angle = self.conf['Simulation']['params']['polar_angle']['value']
         path = self.conf['Simulation']['input_power']
+        avg = self.conf['Simulation']['average_bins']
+        bin_size = self.conf['Simulation']['params']['frequency']['bin_size']
         # Get data
-        freq_vec, p_vec = np.loadtxt(path, skiprows=1, unpack=True)
-        # Get p at freq by interpolation
-        f_p = spi.interp1d(freq_vec, p_vec, kind='nearest',
-                           bounds_error=False, fill_value='extrapolate')
+        freq_vec, p_vec = np.loadtxt(path, unpack=True, delimiter=',')
+        # Get all available power values within this bin
+        left = freq - bin_size / 2.0
+        right = freq + bin_size / 2.0
+        power_inds = np.where((left < freq_vec) & (freq_vec < right))
+        freqs = freq_vec[power_inds]
+        power_values = p_vec[power_inds[0]]
+        # Calculate the average irradiance of this bin and multiply by the bin
+        # width to get a power value. This tends to give a smoother result than
+        # directly integrating
+        if avg:
+            power = np.average(power_values) * bin_size
+        # Integrate the spectrum within this bin to get a power value
+        else:
+            power = intg.trapz(power_values, x=freqs)
+        self.log.info('Incident Power: {}'.format(power))
         # We need to reduce total incident power depending on incident polar
         # angle
-        E = np.sqrt(constants.c * constants.mu_0 *
-                    f_p(freq)) * np.cos(polar_angle)
+        # E = np.sqrt(constants.c*constants.mu_0*f_p(freq))*np.cos(polar_angle)
+        E = np.sqrt(constants.c * constants.mu_0 * power)
         return E
 
     def set_excitation(self):
@@ -177,11 +192,11 @@ class Simulator():
             self.log.info('Layer Order %i' % ldata['order'])
             base_mat = ldata['base_material']
             layer_t = ldata['params']['thickness']['value']
-            self.s4.AddLayer(Name=layer, Thickness=layer_t, Material=base_mat)
+            self.s4.AddLayer(Name=layer, Thickness=layer_t,
+                             S4_Material=base_mat)
             if 'geometry' in ldata:
                 self.log.info('Building geometry in layer: {}'.format(layer))
-                for shape, sdata in sorted(ldata['geometry'].items(),
-                                           key=lambda tup: tup[1]['order']):
+                for shape, sdata in sorted(ldata['geometry'].items(), key=lambda tup: tup[1]['order']):
                     self.log.info('Building object {} of type {} at order'
                                   ' {}'.format(shape, sdata['type'], sdata['order']))
                     shape_mat = sdata['material']
@@ -189,8 +204,8 @@ class Simulator():
                         rad = sdata['radius']
                         cent = sdata['center']
                         coord = (cent['x'], cent['y'])
-                        self.s4.SetRegionCircle(Layer=layer, Material=shape_mat,
-                                                Center=coord, Radius=rad)
+                        self.s4.SetRegionCircle(S4_Layer=layer, S4_Material=shape_mat, Center=coord,
+                                                Radius=rad)
                     else:
                         raise NotImplementedError(
                             'Shape %s is not yet implemented' % sdata['type'])
@@ -220,7 +235,7 @@ class Simulator():
         fundamental efficiency of the RCWA solver"""
         for layer, ldata in self.conf['Layers'].items():
             thickness = ldata['params']['thickness']['value']
-            self.s4.SetLayerThickness(Layer=layer, Thickness=thickness)
+            self.s4.SetLayerThickness(S4_Layer=layer, Thickness=thickness)
 
     #  @ph.timecall
     def get_field(self):
@@ -311,12 +326,12 @@ class Simulator():
             np.savetxt(out, efield, header=','.join(headers))
         elif self.conf['General']['save_as'] == 'npz':
             # Compression adds a small amount of time. The time cost is
-            # nonlinear in the file size, meaning the penalty gets larger as
-            # the field grid gets finer. However, the storage gains are
-            # enormous!  Compression brought the file from 1.1G to 3.9M in a
-            # test case.  I think the compression ratio is so high because npz
-            # is a binary format, and all compression algs benefit from large
-            # sections of repeated characters
+            # nonlinear in the file size, meaning the penalty gets larger as the
+            # field grid gets finer. However, the storage gains are enormous!
+            # Compression brought the file from 1.1G to 3.9M in a test case.
+            # I think the compression ratio is so high because npz is a binary
+            # format, and all compression algs benefit from large sections of
+            # repeated characters
             np.savez_compressed(out, headers=headers, data=efield)
             #  np.savez(out,headers=headers,data=efield)
         else:
@@ -332,11 +347,11 @@ class Simulator():
         for layer, ldata in self.conf['Layers'].items():
             self.log.info('Computing fluxes through layer: %s' % layer)
             # This gets flux at top of layer
-            forw, back = self.s4.GetPowerFlux(Layer=layer)
+            forw, back = self.s4.GetPowerFlux(S4_Layer=layer)
             flux_dict[layer] = (forw, back)
             # This gets flux at the bottom
             offset = ldata['params']['thickness']['value']
-            forw, back = self.s4.GetPowerFlux(Layer=layer, zOffset=offset)
+            forw, back = self.s4.GetPowerFlux(S4_Layer=layer, zOffset=offset)
             key = layer + '_bottom'
             flux_dict[key] = (forw, back)
         self.log.info('Finished computing fluxes!')
@@ -413,6 +428,8 @@ class Simulator():
         """Gets all the data for this similation by calling the relevant class
         methods. Basically just a convenient wrapper to execute all the
         functions defined above"""
+        print('inside get_data')
+        print(os.path.join(self.dir, 'sim_conf.yml'))
         self.conf.write(os.path.join(self.dir, 'sim_conf.yml'))
         start = time.time()
         if not update:
@@ -455,17 +472,25 @@ def main():
     if conf['General']['execution'] == 'gc3':
         pwd = os.getcwd()
         print('CURRENT DIR: {}'.format(pwd))
-        conf['General']['sim_dir'] = pwd
+        conf['General']['base_dir'] = pwd
+        conf['General']['treebase'] = pwd
+        print('CONF DIR: %s'%conf['General']['sim_dir'])
     # Instantiate the simulator using this config object
     sim = Simulator(conf)
+    print('SIM DIR: %s'%sim.dir)
     try:
+        print('Making dir')
         os.makedirs(sim.dir)
     except OSError:
+        print('exception raised')
         pass
+
     if not sim.conf.variable_thickness:
         sim.log.info('Executing sim %s' % sim.id[0:10])
+        print('No thicknesses, executing')
         sim.get_data()
     else:
+        print('Thicknesses')
         sim.log.info('Computing a thickness sweep at %s' % sim.id[0:10])
         orig_id = sim.id[0:10]
         # Get all combinations of layer thicknesses

@@ -4,6 +4,7 @@ import scipy.constants as c
 import scipy.integrate as intg
 import argparse as ap
 import os
+import time
 import copy
 import re
 import glob
@@ -14,8 +15,9 @@ import matplotlib
 try:
     os.environ['DISPLAY']
 except KeyError:
-    matplotlib.use('GTKAgg')
+    matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+# plt.style.use(['ggplot', 'paper'])
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.cm as cmx
 import matplotlib.lines as mlines
@@ -26,7 +28,7 @@ import multiprocessing as mp
 import multiprocessing.dummy as mpd
 
 from utils.config import Config
-from utils.utils import configure_logger,cmp_dicts
+from utils.utils import configure_logger,cmp_dicts, open_atomic
 
 # Configure module level logger if not running as main process
 if not __name__ == '__main__':
@@ -199,7 +201,10 @@ class Simulation(object):
             self.log.info('Available averages: %s'%str(self.avgs.keys()))
 
     def write_data(self):
-        """Writes the data"""
+        """Writes the data. All writes have been wrapped with an atomic context
+        manager than ensures all writes are atomic and do not corrupt data
+        files if they are interrupted for any reason"""
+        start = time.time()
         # Get the current path
         base = self.conf['General']['sim_dir']
         ignore = self.conf['General']['ignore_h']
@@ -213,24 +218,35 @@ class Simulation(object):
         ftype = self.conf['General']['save_as']
         if ftype == 'text':
             epath = epath+'.crnch'
-            np.savetxt(epath,self.e_data,header=','.join(self.e_lookup.keys()))
+            # These make sure all writes are atomic and thus we won't get any
+            # partially written files if processing is interrupted for any
+            # reason (like a keyboard interrupt)
+            with open_atomic(epath,'w',npz=False) as out:
+                np.savetxt(out,self.e_data,header=','.join(self.e_lookup.keys()))
             if not ignore:
                 hpath = hpath+'.crnch'
-                np.savetxt(hpath,self.h_data,header=','.join(self.h_lookup.keys()))
+                with open_atomic(hpath,'w',npz=False) as out:
+                    np.savetxt(out,self.h_data,header=','.join(self.h_lookup.keys()))
             # Save any local averages we have computed
             for avg, mat in self.avgs.items():
                 dpath = os.path.join(base,avg+'.avg.crnch')
-                np.savetxt(dpath,mat)
+                with open_atomic(dpath,'w',npz=False) as out:
+                    np.savetxt(out,mat)
         elif ftype == 'npz':
             # Save the headers and the data
-            np.savez(epath,headers=np.array([self.e_lookup]), data=self.e_data)
+            with open_atomic(epath,'w') as out:
+                np.savez_compressed(out,headers=np.array([self.e_lookup]), data=self.e_data)
             if not ignore:
-                np.savez(hpath,headers=np.array([self.h_lookup]), data=self.h_data)
+                with open_atomic(hpath,'w') as out:
+                    np.savez_compressed(out,headers=np.array([self.h_lookup]), data=self.h_data)
             # Save any local averages we have computed
             dpath = os.path.join(base,'all.avg')
-            np.savez(dpath,**self.avgs)
+            with open_atomic(dpath,'w') as out:
+                np.savez_compressed(out,**self.avgs)
         else:
             raise ValueError('Specified saving in an unsupported file format')
+        end = time.time()
+        self.log.info('Write time: {:.2} seconds'.format(end-start))
 
     def get_scalar_quantity(self,quantity):
         self.log.debug('Retrieving scalar quantity %s',str(quantity))
@@ -338,7 +354,7 @@ class Processor(object):
         assert(len(self.sims) >= 1)
         return self.sims,self.sim_groups
 
-    def group_against(self,key,sort_key=None):
+    def group_against(self, key, variable_params, sort_key=None):
         """Groups simulations by against particular parameter. Within each
         group, the parameter specified will vary, and all other
         parameters will remain fixed. Populates the sim_groups attribute and
@@ -383,14 +399,41 @@ class Processor(object):
             if not match:
                 sim.conf[key] = val1
                 sim_groups.append([sim])
-        # Sort the individual sims within a group in increasing order of the
-        # parameter we are grouping against
+        # Get the params that will define the path in the results dir for each
+        # group that will be stored
+        ag_key = tuple(key[0:-1])
+        result_pars = [var for var in variable_params if var != ag_key]
         for group in sim_groups:
+            # Sort the individual sims within a group in increasing order of
+            # the parameter we are grouping against a
             group.sort(key=lambda sim: sim.conf[key])
+            path = '{}/grouped_against_{}'.format(group[0].conf['General']['treebase'],
+                                                  ag_key[-1])
+            # If the only variable param is the one we grouped against, make
+            # the top dir
+            if not result_pars:
+                try:
+                    os.makedirs(path)
+                except OSError:
+                    pass
+            # Otherwise make the top dir and all the subdirs
+            else:
+                for par in result_pars:
+                    full_key = par+('value',)
+                    # All sims in the group will have the same values for
+                    # result_pars so we can just use the first sim in the group
+                    path = os.path.join(path, '{}_{:.4E}/'.format(par[-1],
+                                        group[0].conf[full_key]))
+                    self.log.info('RESULTS DIR: {}'.format(path))
+                    try:
+                        os.makedirs(path)
+                    except OSError:
+                        pass
+            for sim in group:
+                sim.conf['General']['results_dir'] = path
         # Sort the groups in increasing order of the provided sort key
         if sort_key:
             sim_groups.sort(key=lambda group: group[0].conf[key])
-
         self.sim_groups = sim_groups
         return sim_groups
 
@@ -430,7 +473,8 @@ class Processor(object):
         plane=x and pval=30 would return data on the 30th y,z plane (a plane at
         the given x index). The number of samples (i.e data points) in each
         coordinate direction need not be equal"""
-
+	
+        zsamp = int(zsamp)
         scalar = arr.reshape(zsamp+1,xsamp,ysamp)
         if plane == 'x':
             # z along rows, y along columns
@@ -692,13 +736,14 @@ class Cruncher(Processor):
         z_samples = sim.conf['Simulation']['z_samples']
         x_samples = sim.conf['Simulation']['x_samples']
         y_samples = sim.conf['Simulation']['y_samples']
+        z_samples = int(z_samples)
         samps = (x_samples,y_samples,z_samples)
         # Reshape into an actual 3D matrix. Rows correspond to different y fixed x, columns to fixed
         # y variable x, and each layer in depth is a new z value
         normEsq = np.reshape(normEsq,(z_samples+1,x_samples,y_samples))
-        gvec = np.ones_like(normEsq)
-        height = sim.conf.get_height()
-        dz = height/z_samples
+        gvec = np.zeros_like(normEsq)
+        max_depth = sim.conf['Simulation']['max_depth']
+        dz = max_depth/z_samples
         period = sim.conf['Simulation']['params']['array_period']['value']
         dx = period/x_samples
         dy = period/y_samples
@@ -710,6 +755,8 @@ class Cruncher(Processor):
         for layer,ldata in ordered_layers.items():
             # Get boundaries between layers and their starting and ending indices
             layer_t = ldata['params']['thickness']['value']
+            self.log.debug('LAYER: %s'%layer)
+            self.log.debug('LAYER T: %f'%layer_t)
             if count == 0:
                 start = 0
                 end = int(layer_t/dz)+1
@@ -720,7 +767,10 @@ class Cruncher(Processor):
                 start = prev_tup[2]
                 end = int(dist/dz) + 1
                 boundaries.append((dist,start,end))
+            self.log.debug('START: %i'%start)
+            self.log.debug('END: %i'%end)
             if 'geometry' in ldata:
+                self.log.debug('HAS GEOMETRY')
                 # This function returns the N,K profile in that layer as a 2D
                 # matrix. Each element contains the product of n and k at that
                 # point, using the NK values for the appropriate material
@@ -728,11 +778,23 @@ class Cruncher(Processor):
                 gvec[start:end,:,:] = fact*nk_mat*normEsq[start:end,:,:]
             else:
                 # Its just a simple slab
+                self.log.debug('NO GEOMETRY')
                 lmat = ldata['base_material']
-                gvec[start:end,:,:] = fact*nk[lmat][0]*nk[lmat][1]*normEsq[start:end,:,:]
+                self.log.debug('LAYER MATERIAL: %s'%lmat)
+                self.log.debug('MATERIAL n: %s'%str(nk[lmat][0]))
+                self.log.debug('MATERIAL k: %s'%str(nk[lmat][1]))
+                region = fact*nk[lmat][0]*nk[lmat][1]*normEsq[start:end,:,:]
+                self.log.debug('REGION SHAPE: %s'%str(region.shape))
+                self.log.debug('REGION: ')
+                self.log.debug(str(region))
+                gvec[start:end,:,:] = region 
+            self.log.debug('GEN RATE MATRIX: ')
+            self.log.debug(str(gvec))
             count += 1
         # Reshape back to 1D array
         gvec = gvec.reshape((x_samples*y_samples*(z_samples+1)))
+        self.log.debug('GVEC AFTER FLATTENING: ')
+        self.log.debug(str(gvec))
         # This approach is 4 times faster than np.column_stack()
         assert(sim.e_data.shape[0] == len(gvec))
         dat = np.zeros((sim.e_data.shape[0],sim.e_data.shape[1]+1))
@@ -760,6 +822,7 @@ class Cruncher(Processor):
         z_samples = sim.conf['Simulation']['z_samples']
         x_samples = sim.conf['Simulation']['x_samples']
         y_samples = sim.conf['Simulation']['y_samples']
+        z_samples = int(z_samples)
         rsamp = sim.conf['Simulation']['r_samples']
         thsamp = sim.conf['Simulation']['theta_samples']
         # Reshape into an actual 3D matrix. Rows correspond to different y fixed x, columns to fixed
@@ -852,12 +915,14 @@ class Cruncher(Processor):
         # the key directly like so
         first_name = first_layer[0]
         last_layer = sorted_layers.popitem()
-        #  last_name = last_layer[0]
-        last_name = last_layer[0]+'_bottom'
+        # Port at top of substrate
+        last_name = last_layer[0]
+        # Port at bottom of substrate
+        # last_name = last_layer[0]+'_bottom'
         # self.log.info('LAST LAYER: %s'%str(last_layer))
-        #p_inc = data[first_layer.keys()[0]][0]
-        #p_ref = np.abs(data[first_layer.keys()[0]][1])
-        #p_trans = data[last_layer.keys()[0]][0]
+        # p_inc = data[first_name][0]
+        # p_ref = np.abs(data[first_name][1])
+        # p_trans = data[last_name][0]
         p_inc = np.sqrt(data[first_name][0]**2+data[first_name][2]**2)
         p_ref = np.sqrt(data[first_name][1]**2+data[first_name][3]**2)
         p_trans = np.sqrt(data[last_name][0]**2+data[last_name][2]**2)
@@ -866,15 +931,15 @@ class Cruncher(Processor):
         absorbance = 1 - reflectance - transmission
         #absorbance = 1 - reflectance
         tot = reflectance+transmission+absorbance
-        print(tot)
-        print(sim.conf['General']['sim_dir'])
         delta = np.abs(tot-1)
-        print(delta)
-        #self.log.info('Total = %f'%tot)
-        # assert(delta < .0001)
-        self.log.debug('Reflectance %f'%reflectance)
-        self.log.debug('Transmission %f'%transmission)
-        self.log.debug('Absorbance %f'%absorbance)
+        self.log.info('Reflectance %f'%reflectance)
+        self.log.info('Transmission %f'%transmission)
+        self.log.info('Absorbance %f'%absorbance)
+        self.log.info('Total = %f'%tot)
+        assert(reflectance >= 0)
+        assert(transmission >= 0)
+        # assert(absorbance >= 0)
+        assert(delta < .00001)
         #assert(reflectance >= 0 and transmission >= 0 and absorbance >= 0)
         outpath = os.path.join(base,'ref_trans_abs.dat')
         self.log.info('Writing transmission file')
@@ -1013,7 +1078,8 @@ class Global_Cruncher(Cruncher):
                 start = 0
                 end = None
                 excluded = ''
-            base = group[0].conf['General']['base_dir']
+            # base = group[0].conf['General']['base_dir']
+            base = group[0].conf['General']['results_dir']
             errpath = os.path.join(base,'localerror_%s%s.dat'%(field,excluded))
             with open(errpath,'w') as errfile:
                 self.log.info('Computing local error for sweep %s',base)
@@ -1066,7 +1132,8 @@ class Global_Cruncher(Cruncher):
                 start = 0
                 end = None
                 excluded = ''
-            base = group[0].conf['General']['base_dir']
+            # base = group[0].conf['General']['base_dir']
+            base = group[0].conf['General']['results_dir']
             errpath = os.path.join(base,'globalerror_%s%s.dat'%(field,excluded))
             with open(errpath,'w') as errfile:
                 self.log.info('Computing global error for sweep %s',base)
@@ -1117,7 +1184,8 @@ class Global_Cruncher(Cruncher):
                 start = 0
                 end = None
                 excluded = ''
-            base = group[0].conf['General']['base_dir']
+            # base = group[0].conf['General']['base_dir']
+            base = group[0].conf['General']['results_dirs']
             errpath = os.path.join(base,'adjacenterror_%s%s.dat'%(field,excluded))
             with open(errpath,'w') as errfile:
                 self.log.info('Computing adjacent error for sweep %s',base)
@@ -1157,7 +1225,8 @@ class Global_Cruncher(Cruncher):
         avg=False then a direct sum is computed, otherwise an average is
         computed"""
         for group in self.sim_groups:
-            base = group[0].conf['General']['base_dir']
+            # base = group[0].conf['General']['base_dir']
+            base = group[0].conf['General']['results_dir']
             self.log.info('Performing scalar reduction for group at %s'%base)
             group[0].get_data()
             group_comb = group[0].get_scalar_quantity(quantity)
@@ -1183,17 +1252,26 @@ class Global_Cruncher(Cruncher):
             else:
                 raise ValueError('Invalid file type in config')
 
-    def Jsc(self):
-        """Computes photocurrent density"""
-        Jsc_list = []
+    def fractional_absorbtion(self):
+        """Computes the fraction of the incident spectrum that is absorbed by
+        the device. This is a unitless number, and its interpretation somewhat
+        depends on the units you express the incident spectrum in. If you
+        expressed your incident spectrum in photon number, this can be
+        interpreted as the fraction of incident photons that were absorbed. If
+        you expressed your incident spectrum in terms of power per unit area,
+        then this can be interpreted as the fraction of incident power per unit
+        area that gets absorbed. In summary, its the fraction of _whatever you
+        put in_ that is being absorbed by the device."""
+        valuelist = []
         for group in self.sim_groups:
             base = group[0].conf['General']['base_dir']
-            self.log.info('Computing photocurrent density for group at %s'%base)
-            Jsc_vals = np.zeros(len(group))
+            base = group[0].conf['General']['results_dir']
+            self.log.info('Computing fractional absorbtion for group at %s'%base)
+            vals = np.zeros(len(group))
             freqs = np.zeros(len(group))
             wvlgths = np.zeros(len(group))
             spectra = np.zeros(len(group))
-            # Assuming the leaves contain frequency values, sum over all of them
+            # Assuming the sims have been grouped by frequency, sum over all of them
             for i in range(len(group)):
                 sim = group[i]
                 dpath = os.path.join(sim.conf['General']['sim_dir'],'ref_trans_abs.dat')
@@ -1212,33 +1290,87 @@ class Global_Cruncher(Cruncher):
                                             bounds_error=False,fill_value='extrapolate')
                 sun_pow = p_wv(wvlgth_nm)
                 spectra[i] = sun_pow*wvlgth_nm
-                Jsc_vals[i] = absorb*sun_pow*wvlgth_nm
-            # Use Simpsons rule to perform the integration
+                vals[i] = absorb*sun_pow*wvlgth_nm
+            # Use Trapezoid rule to perform the integration. Note all the
+            # necessary factors of the wavelength have already been included
+            # above
             wvlgths = wvlgths[::-1]
-            Jsc_vals = Jsc_vals[::-1]
+            vals = vals[::-1]
             spectra = spectra[::-1]
-            #plt.figure()
-            #plt.plot(wvlgths,Jsc_vals)
-            #plt.show()
             #Jsc = intg.simps(Jsc_vals,x=wvlgths,even='avg')
-            Jsc = intg.trapz(Jsc_vals,x=wvlgths*1e9)
+            integrated_absorbtion = intg.trapz(vals,x=wvlgths*1e9)
             power = intg.trapz(spectra,x=wvlgths*1e9)
             # factor of 1/10 to convert A*m^-2 to mA*cm^-2
             #wv_fact = c.e/(c.c*c.h*10)
             #wv_fact = .1
             #Jsc = (Jsc*wv_fact)/power
-            Jsc = Jsc/power
-            #outf = os.path.join(base,'jsc.dat')
-            #with open(outf,'w') as out:
-            #    out.write('%f\n'%Jsc)
-            #print('Jsc = %f'%Jsc)
-            Jsc_list.append(Jsc)
-        return Jsc_list
+            frac_absorb = integrated_absorbtion/power
+            outf = os.path.join(base,'fractional_absorbtion.dat')
+            with open(outf,'w') as out:
+                out.write('%f\n'%frac_absorb)
+            self.log.info('Fractional Absorbtion = %f'%frac_absorb)
+            valuelist.append(frac_absorb)
+        return valuelist
 
+    def Jsc(self):
+        """Computes photocurrent density. This is just the integrated
+        absorbtion scaled by a unitful factor. Assuming perfect carrier
+        collection, meaning every incident photon gets converted to 1 collected
+        electron, this factor is q/(hbar*c) which converts to a current per
+        unit area"""
+        valuelist = []
+        for group in self.sim_groups:
+            # base = group[0].conf['General']['base_dir']
+            base = group[0].conf['General']['results_dir']
+            self.log.info('Computing fractional absorbtion for group at %s'%base)
+            vals = np.zeros(len(group))
+            freqs = np.zeros(len(group))
+            wvlgths = np.zeros(len(group))
+            spectra = np.zeros(len(group))
+            # Assuming the sims have been grouped by frequency, sum over all of them
+            for i in range(len(group)):
+                sim = group[i]
+                dpath = os.path.join(sim.conf['General']['sim_dir'],'ref_trans_abs.dat')
+                with open(dpath,'r') as f:
+                    ref,trans,absorb = list(map(float,f.readlines()[1].split(',')))
+                freq = sim.conf['Simulation']['params']['frequency']['value']
+                wvlgth = c.c/freq
+                wvlgth_nm = wvlgth*1e9
+                freqs[i] = freq
+                wvlgths[i] = wvlgth
+                # Get solar power from chosen spectrum
+                path = sim.conf['Simulation']['input_power_wv']
+                wv_vec,p_vec = np.loadtxt(path,skiprows=2,usecols=(0,2),unpack=True,delimiter=',')
+                # Get p at wvlength by interpolation
+                p_wv = interpolate.interp1d(wv_vec,p_vec,kind='linear',
+                                            bounds_error=False,fill_value='extrapolate')
+                sun_pow = p_wv(wvlgth_nm)
+                spectra[i] = sun_pow*wvlgth_nm
+                vals[i] = absorb*sun_pow*wvlgth_nm
+            # Use Trapezoid rule to perform the integration. Note all the
+            # necessary factors of the wavelength have already been included
+            # above
+            wvlgths = wvlgths[::-1]
+            vals = vals[::-1]
+            spectra = spectra[::-1]
+            #Jsc = intg.simps(Jsc_vals,x=wvlgths,even='avg')
+            integrated_absorbtion = intg.trapz(vals,x=wvlgths)
+            # integrated_absorbtion = intg.trapz(vals,x=wvlgths*1e9)
+            # factor of 1/10 to convert A*m^-2 to mA*cm^-2
+            wv_fact = c.e/(c.c*c.h*10)
+            Jsc = wv_fact*integrated_absorbtion
+            outf = os.path.join(base,'jsc.dat')
+            with open(outf,'w') as out:
+                out.write('%f\n'%Jsc)
+            self.log.info('Jsc = %f'%Jsc)
+            valuelist.append(Jsc)
+        return valuelist    
+    
     def weighted_transmissionData(self):
         """Computes spectrally weighted absorption,transmission, and reflection"""
         for group in self.sim_groups:
-            base = group[0].conf['General']['base_dir']
+            # base = group[0].conf['General']['base_dir']
+            base = group[0].conf['General']['results_dir']
             self.log.info('Computing spectrally weighted transmission data for group at %s'%base)
             abs_vals = np.zeros(len(group))
             ref_vals = np.zeros(len(group))
@@ -1396,7 +1528,7 @@ class Plotter(Processor):
                     count += 1
                 if layer == 'NW_AlShell':
                     if shell_rad:
-                        rads = (core_rad,shell_rad)
+                        rads = (core_rad, shell_rad)
                     else:
                         rads = (core_rad,)
                     for rad in rads:
@@ -1708,7 +1840,7 @@ class Global_Plotter(Plotter):
         """Plot the result of a particular scalar reduction for each group"""
         for group in self.sim_groups:
             sim = group[0]
-            base = sim.conf['General']['base_dir']
+            base = sim.conf['General']['results_dir']
             self.log.info('Plotting scalar reduction of %s for quantity'
                           ' %s'%(base,quantity))
             cm = plt.get_cmap('jet')
@@ -1717,14 +1849,14 @@ class Global_Plotter(Plotter):
             xs = int(float(xs))
             ys = sim.conf['Simulation']['y_samples']
             ys = int(float(ys))
-            height = sim.conf.get_height()
+            max_depth = sim.conf['Simulation']['max_depth']
             period = sim.conf['Simulation']['params']['array_period']['value']
             dx = period/xs
             dy = period/ys
-            dz = height/zs
+            dz = max_depth/zs
             x = np.arange(0,period,dx)
             y = np.arange(0,period,dy)
-            z = np.arange(0,height+dz,dz)
+            z = np.arange(0,max_depth+dz,dz)
             if sim.conf['General']['save_as'] == 'npz':
                 globstr = os.path.join(base,'scalar_reduce*_%s.npy'%quantity)
                 files = glob.glob(globstr)
@@ -1746,7 +1878,7 @@ class Global_Plotter(Plotter):
                     labels = ('y [um]','z [um]', quantity,title)
                     if sim.conf['General']['save_plots']:
                         fname = 'scalar_reduce_%s_plane_2d_x.pdf'%quantity
-                        p = os.path.join(sim.conf['General']['base_dir'],fname)
+                        p = os.path.join(base, fname)
                     else:
                         p = False
                     show = sim.conf['General']['show_plots']
@@ -1755,7 +1887,7 @@ class Global_Plotter(Plotter):
                     labels = ('x [um]','z [um]', quantity,title)
                     if sim.conf['General']['save_plots']:
                         fname = 'scalar_reduce_%s_plane_2d_y.pdf'%quantity
-                        p = os.path.join(sim.conf['General']['base_dir'],fname)
+                        p = os.path.join(base, fname)
                     else:
                         p = False
                     show = sim.conf['General']['show_plots']
@@ -1764,7 +1896,7 @@ class Global_Plotter(Plotter):
                     labels = ('y [um]','x [um]', quantity,title)
                     if sim.conf['General']['save_plots']:
                         fname = 'scalar_reduce_%s_plane_2d_z.pdf'%quantity
-                        p = os.path.join(sim.conf['General']['base_dir'],fname)
+                        p = os.path.join(base, fname)
                     else:
                         p = False
                     self.heatmap2d(sim,x,y,cs,labels,plane,save_path=p,show=show,draw=draw,fixed=fixed)
@@ -1772,7 +1904,8 @@ class Global_Plotter(Plotter):
     def transmission_data(self,absorbance,reflectance,transmission):
         """Plot transmissions, absorption, and reflectance assuming leaves are frequency"""
         for group in self.sim_groups:
-            base = group[0].conf['General']['base_dir']
+            # base = group[0].conf['General']['base_dir']
+            base = group[0].conf['General']['results_dir']
             self.log.info('Plotting transmission data for group at %s'%base)
             # Assuming the leaves contain frequency values, sum over all of them
             freqs = np.zeros(len(group))
@@ -1796,13 +1929,13 @@ class Global_Plotter(Plotter):
             plt.figure()
             if absorbance:
                 self.log.info('Plotting absorbance')
-                plt.plot(freqs,absorb_l,label='Absorption')
+                plt.plot(freqs, absorb_l, '-o', label='Absorption')
             if reflectance:
-                plt.plot(freqs,refl_l,label='Reflectance')
+                plt.plot(freqs, refl_l, '-o', label='Reflectance')
             if transmission:
-                plt.plot(freqs,trans_l,label='Transmission')
+                plt.plot(freqs, trans_l, '-o', label='Transmission')
             plt.legend(loc='best')
-            figp = os.path.join(base,'transmission_plots.pdf')
+            figp = os.path.join(base, 'transmission_plots.pdf')
             plt.xlabel('Wavelength (nm)')
             #plt.ylim((0,.5))
             plt.savefig(figp)
@@ -1836,6 +1969,7 @@ def main():
     args = parser.parse_args()
     if os.path.isfile(args.config_file):
         conf = Config(path=os.path.abspath(args.config_file))
+        conf.expand_vars()
     else:
         raise ValueError("The file you specified does not exist!")
 
@@ -1857,10 +1991,24 @@ def main():
     # Collect the sims once up here and reuse them later
     proc = Processor(conf)
     sims, failed_sims = proc.collect_sims()
+    # First we need to group against if specified. Grouping against corresponds
+    # to "leaves" in the tree
+    if args.group_against:
+        sim_groups = proc.group_against(group_ag, conf.variable)
+    # Next we group by. This corresponds to building the parent nodes for each
+    # set of leaf groups
     if args.group_by:
         sim_groups = proc.group_by(group_by)
-    else:
-        sim_groups = proc.group_against(group_ag)
+    # print(len(sim_groups))
+    # print(group_ag)
+    # print(conf.variable)
+    # for group in proc.sim_groups:
+    #     sim = group[0]
+    #     try:
+    #         os.makedirs(sim.conf['General']['results_dir'])
+    #     except OSError:
+    #         pass
+    # quit()
     # Filter if specified
     if args.filter_by:
         filt_dict = {}
@@ -1874,8 +2022,8 @@ def main():
     if not args.no_crunch:
         crunchr = Cruncher(conf,sims,sim_groups,failed_sims)
         crunchr.process_all()
-        #for sim in crunchr.sims:
-        #    crunchr.transmissionData(sim)
+        # for sim in crunchr.sims:
+        #     crunchr.transmissionData(sim)
     if not args.no_gcrunch:
         gcrunchr = Global_Cruncher(conf,sims,sim_groups,failed_sims)
         gcrunchr.process_all()

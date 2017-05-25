@@ -2,8 +2,61 @@ import sys
 import os
 import hashlib
 import logging
+import tempfile as tmp
 
 from collections import OrderedDict
+from contextlib import contextmanager
+
+
+@contextmanager
+def tempfile(suffix='', dir=None, npz=True):
+    """ Context for temporary file.
+
+    Will find a free temporary filename upon entering
+    and will try to delete the file on leaving, even in case of an exception.
+
+    Parameters
+    ----------
+    suffix : string
+        optional file suffix
+    dir : string
+        optional directory to save temporary file in
+    """
+
+    tf = tmp.NamedTemporaryFile(delete=False, suffix=suffix, dir=dir)
+    tf.file.close()
+    try:
+        yield tf.name
+    finally:
+        try:
+            if npz:
+                os.remove(tf.name)
+                os.remove(tf.name+'.npz')
+            else:
+                os.remove(tf.name)
+        except OSError as e:
+            if e.errno == 2:
+                pass
+            else:
+                raise
+
+@contextmanager
+def open_atomic(filepath, npz=True):
+    """Get a temporary file path in the same directory as filepath. The temp
+    file is used as a placeholder for filepath to make atomic write operations
+    possible. The file will not be moved to destination in case of an exception.
+
+    Parameters
+    ----------
+    filepath : string
+        the actual filepath we wish to write to
+    """
+    with tempfile(npz=npz, dir=os.path.dirname(os.path.abspath(filepath))) as tmppath:
+        yield tmppath
+        if npz:
+            os.rename(tmppath+'.npz', filepath+'.npz')
+        else:
+            os.rename(tmppath, filepath)
 
 class StreamToLogger(object):
     """
@@ -25,7 +78,8 @@ class StreamToLogger(object):
         # to work properly for me.
         self.level(sys.stderr)
 
-def configure_logger(level='info',name=None,console=False,logfile=None,
+
+def configure_logger(level='info', name=None, console=False, logfile=None,
                      propagate=True):
     """Creates a logger providing some arguments to make it more configurable.
        name: Name of logger to be created. Defaults to the root logger
@@ -50,7 +104,7 @@ def configure_logger(level='info',name=None,console=False,logfile=None,
         logger.propagate = False
     logger.setLevel(numeric_level)
     if logfile:
-        log_dir,logfile = os.path.split(logfile)
+        log_dir, logfile = os.path.split(os.path.expandvars(logfile))
         # Set up file handler
         try:
             os.makedirs(log_dir)

@@ -278,6 +278,7 @@ def gc3_submit(gconf, sim_confs):
         eng.progress()
         stats = eng.stats()
         while stats['TERMINATED'] < stats['total']:
+            time.sleep(10)
             print('Checking jobs')
             eng.progress()
             stats = eng.stats()

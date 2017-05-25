@@ -49,6 +49,7 @@ def get_combos(conf, keysets):
     # log.debug('The list of parameter combos: %s', str(combos))
     return keys, combos
 
+
 class Simulator():
 
     def __init__(self, conf, log_level='info'):
@@ -105,22 +106,38 @@ class Simulator():
         path = self.conf['Simulation']['input_power']
         avg = self.conf['Simulation']['average_bins']
         bin_size = self.conf['Simulation']['params']['frequency']['bin_size']
-        # Get data
+        # Get NREL AM1.5 data
         freq_vec, p_vec = np.loadtxt(path, unpack=True, delimiter=',')
         # Get all available power values within this bin
         left = freq - bin_size / 2.0
         right = freq + bin_size / 2.0
-        power_inds = np.where((left < freq_vec) & (freq_vec < right))
-        freqs = freq_vec[power_inds]
-        power_values = p_vec[power_inds[0]]
-        # Calculate the average irradiance of this bin and multiply by the bin
-        # width to get a power value. This tends to give a smoother result than
-        # directly integrating
-        if avg:
-            power = np.average(power_values) * bin_size
-        # Integrate the spectrum within this bin to get a power value
-        else:
-            power = intg.trapz(power_values, x=freqs)
+        inds = np.where((left < freq_vec) & (freq_vec < right))
+        # Check for edge cases
+        if len(inds) == 0:
+            raise ValueError('Your bins are smaller than NRELs!')
+        if inds[0] == 0:
+            raise ValueError('Your leftmost bin edge lies outside the'
+                             ' range provided by NREL')
+        if inds[-1] == len(freq_vec):
+            raise ValueError('Your rightmost bin edge lies outside the'
+                             ' range provided by NREL')
+        # A simple linear interpolation given two pairs of data points, and the
+        # desired x point
+
+        def lin_interp(x1, x2, y1, y2, x):
+            return ((y2 - y1) / (x2 - x1)) * (x - x2) + y2
+        # If the left or right edge lies between NREL data points, we do a
+        # linear interpolation to get the irradiance values at the bin edges
+        left_power = lin_interp(freq_vec[inds[0] - 1], freq_vec[inds[0]],
+                                p_vec[inds[0] - 1], p_vec[inds[0]], left)
+        right_power = lin_interp(freq_vec[inds[-1]], freq_vec[inds[-1] + 1],
+                                 p_vec[inds[-1]], p_vec[inds[-1] + 1], right)
+        # All the frequency values within the bin and including the bin edges
+        freqs = [left]+list(freq_vec[inds])+[right]
+        # All the power values
+        power_values = [left_power]+list(p_vec[inds])+[right_power]
+        # Just use a trapezoidal method to integrate the spectrum
+        power = intg.trapz(power_values, x=freqs)
         self.log.info('Incident Power: {}'.format(power))
         # We need to reduce total incident power depending on incident polar
         # angle
@@ -456,7 +473,8 @@ def main():
     parser.add_argument('config_file', type=str, help="""Absolute path to the
     YAML file specifying the parameters for this simulation""")
     parser.add_argument('--log_level', type=str, default='info',
-                        choices=['debug', 'info', 'warning', 'error', 'critical'],
+                        choices=['debug', 'info',
+                                 'warning', 'error', 'critical'],
                         help="""Logging level for the run""")
     args = parser.parse_args()
 
@@ -474,10 +492,10 @@ def main():
         print('CURRENT DIR: {}'.format(pwd))
         conf['General']['base_dir'] = pwd
         conf['General']['treebase'] = pwd
-        print('CONF DIR: %s'%conf['General']['sim_dir'])
+        print('CONF DIR: %s' % conf['General']['sim_dir'])
     # Instantiate the simulator using this config object
     sim = Simulator(conf)
-    print('SIM DIR: %s'%sim.dir)
+    print('SIM DIR: %s' % sim.dir)
     try:
         print('Making dir')
         os.makedirs(sim.dir)

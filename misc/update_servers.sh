@@ -1,5 +1,9 @@
 #!/bin/bash
 currentHost=$(hostname)
+branch=$1
+if [ -z "$branch" ]; then
+    branch='develop'
+fi
 
 if [ "$currentHost" == 'kyle-ThinkStation-P900' ]; then 
     hosts=('planck' 'dell' 'eastcloud')
@@ -13,5 +17,8 @@ else
 fi
 
 for host in ${hosts[@]}; do
-    ssh $host 'cd $HOME/software/nanowire && git pull'
+    echo
+    echo "Updating $branch on host $host"
+    echo
+    ssh $host 'cd $HOME/software/nanowire && git checkout '$branch' && git pull'
 done

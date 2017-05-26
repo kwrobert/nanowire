@@ -473,7 +473,7 @@ class Processor(object):
         plane=x and pval=30 would return data on the 30th y,z plane (a plane at
         the given x index). The number of samples (i.e data points) in each
         coordinate direction need not be equal"""
-	
+
         zsamp = int(zsamp)
         scalar = arr.reshape(zsamp+1,xsamp,ysamp)
         if plane == 'x':
@@ -787,7 +787,7 @@ class Cruncher(Processor):
                 self.log.debug('REGION SHAPE: %s'%str(region.shape))
                 self.log.debug('REGION: ')
                 self.log.debug(str(region))
-                gvec[start:end,:,:] = region 
+                gvec[start:end,:,:] = region
             self.log.debug('GEN RATE MATRIX: ')
             self.log.debug(str(gvec))
             count += 1
@@ -1364,8 +1364,8 @@ class Global_Cruncher(Cruncher):
                 out.write('%f\n'%Jsc)
             self.log.info('Jsc = %f'%Jsc)
             valuelist.append(Jsc)
-        return valuelist    
-    
+        return valuelist
+
     def weighted_transmissionData(self):
         """Computes spectrally weighted absorption,transmission, and reflection"""
         for group in self.sim_groups:
@@ -1819,7 +1819,7 @@ class Global_Plotter(Plotter):
                 fig = plt.figure(figsize=(9,7))
                 plt.ylabel('M.S.E of %s'%quantity)
                 plt.xlabel('Number of Fourier Terms')
-                plt.plot(labels,errors,linestyle='-',marker='o',color='b')
+                plt.plot(labels,errors)
                 plt.yscale(scale)
                 #plt.xticks(x,labels,rotation='vertical')
                 plt.tight_layout()
@@ -1961,10 +1961,10 @@ def main():
     parser.add_argument('--filter_by',nargs='*',help="""List of parameters you wish to filter by,
             specified like: p1:v1,v2,v3 p2:v1,v2,v3""")
     parser.add_argument('-gb','--group_by',help="""The parameter you
-            would like to group simulations by, specified as a dot separated path 
+            would like to group simulations by, specified as a dot separated path
             to the key in the config as: path.to.key.value""")
     parser.add_argument('-ga','--group_against',help="""The parameter
-            you would like to group against, specified as a dot separated path 
+            you would like to group against, specified as a dot separated path
             to the key in the config as: path.to.key.value""")
     args = parser.parse_args()
     if os.path.isfile(args.config_file):
@@ -1974,8 +1974,8 @@ def main():
         raise ValueError("The file you specified does not exist!")
 
     if not (args.group_by or args.group_against):
-        raise ValueError('Need to group sims somehow. A sensible value would be'
-                         ' by/against frequency')
+        raise ValueError('Need to group sims somehow. A sensible value would'
+                         ' be by/against frequency')
     else:
         if args.group_by:
             group_by = args.group_by.split('.')
@@ -1983,11 +1983,14 @@ def main():
             group_ag = args.group_against.split('.')
 
     # Configure logger
-    lfile = os.path.join(conf['General']['base_dir'],'logs/postprocess.log')
-    logger = configure_logger(level=args.log_level,name='postprocess',
-                              console=True,logfile=lfile)
-                                
-
+    lfile = os.path.join(conf['General']['base_dir'], 'logs/postprocess.log')
+    logger = configure_logger(level=args.log_level, name='postprocess',
+                              console=True, logfile=lfile)
+    # Configure plotting style
+    try:
+        plt.style.use(conf['Postprocessing']['style'])
+    except KeyError:
+        plt.style.use('ggplot')
     # Collect the sims once up here and reuse them later
     proc = Processor(conf)
     sims, failed_sims = proc.collect_sims()

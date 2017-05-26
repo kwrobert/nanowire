@@ -13,7 +13,7 @@ def get_value(path):
 
 
 def plot_optimized_jsc(path):
-    jsc_files = glob.glob(os.path.join(path,'**/jsc.dat'),recursive=True)
+    jsc_files = glob.glob(os.path.join(path,'**/fractional_absorbtion.dat'),recursive=True)
     jsc_files = sorted(jsc_files)
     print(jsc_files)
     jsc_vals = [get_value(path) for path in jsc_files]
@@ -23,14 +23,16 @@ def plot_optimized_jsc(path):
     plt.figure()
     plt.title('Reoptimized Passivated Nanowires')
     plt.xlabel('Shell Thickness [nm]')
-    plt.ylabel('Jsc [mA/cm^2]')
+    # plt.ylabel('Jsc [mA/cm^2]')
+    plt.ylabel(r'$\bar A$')
     plt.plot(shell_ts, jsc_vals,'-o')
     plt.savefig('optimized_jsc.pdf')
     # plt.show()
     return shell_ts, jsc_vals
 
 def plot_sweep_jsc(path):
-    jsc_files = glob.glob(os.path.join(path,'**/jsc.dat'),recursive=True)
+    # jsc_files = glob.glob(os.path.join(path,'**/jsc.dat'),recursive=True)
+    jsc_files = glob.glob(os.path.join(path,'**/fractional_absorbtion.dat'),recursive=True)
     jsc_files = sorted(jsc_files)
     print(jsc_files)
     jsc_vals = [get_value(path) for path in jsc_files]
@@ -41,7 +43,8 @@ def plot_sweep_jsc(path):
     plt.figure()
     plt.title('Passivated Nanowires')
     plt.xlabel('Shell Thickness [nm]')
-    plt.ylabel('Jsc [mA/cm^2]')
+    # plt.ylabel('Jsc [mA/cm^2]')
+    plt.ylabel(r'$\bar A$')
     plt.plot(shell_ts, jsc_vals,'-o')
     plt.savefig('sweep_jsc.pdf')
     # plt.show()
@@ -52,7 +55,8 @@ def plot_overlay(opt_ts, opt_jsc, sweep_ts, sweep_jsc):
     plt.figure()
     plt.title('Optimized and Unoptimized Passivated Nanowires')
     plt.xlabel('Shell Thickness [nm]')
-    plt.ylabel('Jsc [mA/cm^2]')
+    # plt.ylabel('Jsc [mA/cm^2]')
+    plt.ylabel(r'$\bar A$')
     plt.plot(opt_ts, opt_jsc, '-o', label="Optimized")
     plt.plot(sweep_ts, sweep_jsc, '-o', label="Unoptimized")
     plt.legend(loc='best')

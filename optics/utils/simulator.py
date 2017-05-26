@@ -53,7 +53,6 @@ def get_combos(conf, keysets):
 class Simulator():
 
     def __init__(self, conf, log_level='info'):
-        print(conf['General']['base_dir'])
         conf.interpolate()
         conf.evaluate()
         self.conf = conf
@@ -104,14 +103,13 @@ class Simulator():
         freq = self.conf['Simulation']['params']['frequency']['value']
         polar_angle = self.conf['Simulation']['params']['polar_angle']['value']
         path = self.conf['Simulation']['input_power']
-        avg = self.conf['Simulation']['average_bins']
         bin_size = self.conf['Simulation']['params']['frequency']['bin_size']
         # Get NREL AM1.5 data
         freq_vec, p_vec = np.loadtxt(path, unpack=True, delimiter=',')
         # Get all available power values within this bin
         left = freq - bin_size / 2.0
         right = freq + bin_size / 2.0
-        inds = np.where((left < freq_vec) & (freq_vec < right))
+        inds = np.where((left < freq_vec) & (freq_vec < right))[0]
         # Check for edge cases
         if len(inds) == 0:
             raise ValueError('Your bins are smaller than NRELs!')
@@ -445,8 +443,6 @@ class Simulator():
         """Gets all the data for this similation by calling the relevant class
         methods. Basically just a convenient wrapper to execute all the
         functions defined above"""
-        print('inside get_data')
-        print(os.path.join(self.dir, 'sim_conf.yml'))
         self.conf.write(os.path.join(self.dir, 'sim_conf.yml'))
         start = time.time()
         if not update:
@@ -489,15 +485,11 @@ def main():
     # all the output files end up in the correct location
     if conf['General']['execution'] == 'gc3':
         pwd = os.getcwd()
-        print('CURRENT DIR: {}'.format(pwd))
         conf['General']['base_dir'] = pwd
         conf['General']['treebase'] = pwd
-        print('CONF DIR: %s' % conf['General']['sim_dir'])
     # Instantiate the simulator using this config object
     sim = Simulator(conf)
-    print('SIM DIR: %s' % sim.dir)
     try:
-        print('Making dir')
         os.makedirs(sim.dir)
     except OSError:
         print('exception raised')
@@ -505,10 +497,8 @@ def main():
 
     if not sim.conf.variable_thickness:
         sim.log.info('Executing sim %s' % sim.id[0:10])
-        print('No thicknesses, executing')
         sim.get_data()
     else:
-        print('Thicknesses')
         sim.log.info('Computing a thickness sweep at %s' % sim.id[0:10])
         orig_id = sim.id[0:10]
         # Get all combinations of layer thicknesses

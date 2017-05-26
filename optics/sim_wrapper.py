@@ -16,8 +16,8 @@ import time
 import argparse as ap
 import ruamel.yaml as yaml
 import logging
-import gc3libs
-from gc3libs.core import Core, Engine
+# import gc3libs
+# from gc3libs.core import Core, Engine
 
 # get our custom config object and the logger function
 #from utils.simulation import *
@@ -25,7 +25,7 @@ from gc3libs.core import Core, Engine
 from utils.simulator import Simulator
 from utils.config import Config
 from utils.utils import configure_logger, make_hash
-from rcwa_app import RCWA_App
+# from rcwa_app import RCWA_App
 from collections import OrderedDict
 #  from functools import wraps
 #  from contextlib import contextmanager
@@ -204,6 +204,7 @@ def run_sim(conf):
     containing the absolute path to the job directory as the first element and
     the configuration object for the job as the second element"""
     log = logging.getLogger()
+    start = time.time()
     sim = Simulator(copy.deepcopy(conf))
     try:
         os.makedirs(sim.dir)
@@ -246,6 +247,10 @@ def run_sim(conf):
             log.info('Computing additional thickness at %s' % subpath)
             os.makedirs(sim.dir)
             sim.get_data(update=True)
+    end = time.time()
+    runtime = end - start
+    log.info('Simulation {} completed in {:.2}'
+             ' seconds!'.format(sim.id[0:10], runtime))
     return
 
 def gc3_submit(gconf, sim_confs):

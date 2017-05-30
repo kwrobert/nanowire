@@ -1554,6 +1554,7 @@ class Plotter(Processor):
         #  ax.pcolor(x, y,
         #          cs,cmap=cm,norm=cNorm,alpha=.5,linewidth=0,edgecolors='none')
         ax.imshow(cs,cmap=cm,norm=cNorm,extent=[x.min(),x.max(),y.min(),y.max()],aspect='auto')
+        ax.grid(False)
         #  ax.matshow(cs,cmap=cm,norm=cNorm)
         scalarMap.set_array(cs)
         cb = fig.colorbar(scalarMap)
@@ -1931,7 +1932,7 @@ class Global_Plotter(Plotter):
                 self.log.info('Plotting absorbance')
                 plt.plot(freqs, absorb_l, '-o', label='Absorption')
             if reflectance:
-                plt.plot(freqs, refl_l, '-o', label='Reflectance')
+                plt.plot(freqs, refl_l, '-o', label='Reflection')
             if transmission:
                 plt.plot(freqs, trans_l, '-o', label='Transmission')
             plt.legend(loc='best')
@@ -2024,9 +2025,9 @@ def main():
     # Now do all the work
     if not args.no_crunch:
         crunchr = Cruncher(conf,sims,sim_groups,failed_sims)
-        crunchr.process_all()
-        # for sim in crunchr.sims:
-        #     crunchr.transmissionData(sim)
+        # crunchr.process_all()
+        for sim in crunchr.sims:
+            crunchr.transmissionData(sim)
     if not args.no_gcrunch:
         gcrunchr = Global_Cruncher(conf,sims,sim_groups,failed_sims)
         gcrunchr.process_all()

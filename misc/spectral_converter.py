@@ -15,7 +15,7 @@ def freq_to_wvlgth(path,plot,outf):
     wvlgths = (c.c/freqs)*1e9
     int_w = int_f*c.c*1e9/wvlgths**2
     wvlgths = wvlgths[::-1]
-    int_w = int_w[::-1]
+    int_w = int_w[::-1] * (wvlgths / (c.h * c.c))
     integ = intg.trapz(int_w,x=wvlgths)
     print('Integral: %f'%raw_integ)
     if plot:
@@ -31,7 +31,7 @@ def freq_to_wvlgth(path,plot,outf):
         plt.show()
         plt.close(fig)
     out_arr = np.column_stack((wvlgths,int_w))
-    np.savetxt(outf,out_arr,header="Wavelength (nm), Power (W m^-2 nm^-1)",delimiter=',')
+    # np.savetxt(outf,out_arr,header="Wavelength (nm), Power (W m^-2 nm^-1)",delimiter=',')
     return wvlgths, int_w
 
 def wvlgth_to_freq(path,plot,outf):

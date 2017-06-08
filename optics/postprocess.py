@@ -302,6 +302,7 @@ class Processor(object):
             if 'sim_conf.yml' in files and datfile in files:
                 self.log.info('Gather sim at %s',root)
                 sim_obj = Simulation(Config(os.path.join(root,'sim_conf.yml')))
+                sim_obj.conf.expand_vars()
                 self.sims.append(sim_obj)
                 # This retrieves the lowest node in the tree, stores that node
                 # as the key and the list of sims beneath that node as values
@@ -1938,7 +1939,7 @@ class Global_Plotter(Plotter):
             plt.legend(loc='best')
             figp = os.path.join(base, 'transmission_plots.pdf')
             plt.xlabel('Wavelength (nm)')
-            #plt.ylim((0,.5))
+            plt.ylim((0,1.0))
             plt.savefig(figp)
             plt.close()
 

@@ -323,6 +323,7 @@ class Config(MutableMapping):
         """Dumps this config object to its YAML representation given a path to a file"""
         with open(path, 'w') as out:
             out.write(yaml.dump(self.data, default_flow_style=False))
+        return
 
     def dump(self):
         """Returns YAML representation of this particular config"""

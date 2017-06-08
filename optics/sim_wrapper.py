@@ -210,6 +210,12 @@ def run_sim(conf):
         os.makedirs(sim.dir)
     except OSError:
         pass
+    period = sim.conf['Simulation']['params']['array_period']['value']
+    shell_rad = sim.conf['Layers']['NW_AlShell']['params']['shell_radius']['value']
+    if shell_rad > period/2.0:
+        log.info('sim %s has shell radius larger than half the period,'
+                 ' returning'%sim.id)
+        return
     if not sim.conf.variable_thickness:
         log.info('Executing sim %s'%sim.id[0:10])
         # _get_data(sim)

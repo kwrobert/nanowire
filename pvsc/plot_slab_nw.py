@@ -53,22 +53,25 @@ def plot(path, title, save_name, plot_all=False):
         plt.plot(wavelengths, trans, label="Transmission")
         plt.legend(loc='best')
     else:
-        plt.plot(wavelengths, absorbs)
-        plt.ylabel("Absorption")
+        # plt.plot(wavelengths, absorbs)
+        # plt.ylabel("Absorption")
+        plt.plot(wavelengths, refs)
+        plt.ylabel("Reflection")
     plt.ylim([0,1])
     plt.savefig(save_name)
     plt.close()
     return wavelengths, absorbs, refs, trans
 
-def plot_overlay(angles, y_vals):
+def plot_overlay(wavelengths, y_vals):
     
     plt.figure()
     # plt.title('Planar Cell and NW Cell Absorption')
     plt.xlabel('Shell Thickness [nm]')
     # plt.ylabel('Jsc [mA/cm^2]')
-    plt.ylabel('Absorption')
+    # plt.ylabel('Absorption')
+    plt.ylabel('Reflection')
     for vals, label in y_vals:
-        plt.plot(angles, vals, '-o', label=label)
+        plt.plot(wavelengths, vals, '-o', label=label)
     plt.ylim([0,1])
     plt.legend(loc='best')
     plt.savefig('overlay_frac_absorb.pdf')
@@ -93,7 +96,7 @@ def main():
             raise ValueError('One of the paths you specified does not exist')
 
     if args.planar_path:
-        angles, planar_abs, planar_trans, planar_refs = plot(args.planar_path,
+        angles, planar_abs, planar_refs, planar_trans = plot(args.planar_path,
                               "Planar Solar Cell Absorption",
                               "planar_frac_absorb.pdf", plot_all=True)
 
@@ -108,11 +111,9 @@ def main():
                           "nw_frac_absorb.pdf", plot_all=True)
 
     if args.planar_path and args.nw_path:
-        plot_overlay(angles, ((planar_abs, "Planar"),
+        plot_overlay(angles, ((planar_refs, "Planar"),
                               # (planar_ito, "Planar w/ ITO"),
-                              (nw_abs, "NW")))
-
-
+                              (nw_refs, "NW")))
 
 if __name__ == '__main__':
     main()

@@ -67,6 +67,17 @@ class Simulator():
                                     logfile=lfile, propagate=False)
         self.s4 = S4.New(Lattice=((period, 0), (0, period)), NumBasis=numbasis)
 
+    def __del__(self):
+        """
+        Need to make sure we close the file descriptor for the log handler
+        attached to each simulator instance so we don't hit the file descriptor
+        limit when running massive job campaigns. For some reason this doesn't
+        happen automagically
+        """
+        for handler in self.log.handlers[:]:
+            handler.close()
+            self.log.removeHandler(handler)
+
     def update_id(self):
         """Update sim id. Used after changes are made to the config"""
         self.id = make_hash(self.conf.data)
@@ -460,7 +471,7 @@ class Simulator():
             out.write('{}\n'.format(runtime))
         self.log.info('Simulation {} completed in {:.2}'
                       ' seconds!'.format(self.id[0:10], runtime))
-
+        return
 
 def main():
 

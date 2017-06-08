@@ -22,6 +22,9 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.cm as cmx
 import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
+from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes
+from mpl_toolkits.axes_grid1.inset_locator import mark_inset
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 # Literally just for the initial data load
 import pandas
 import multiprocessing as mp
@@ -1521,10 +1524,17 @@ class Plotter(Processor):
                 if layer_t > 0:
                     x = [0,period]
                     y = [height-start*dz,height-start*dz]
-                    label_y = y[0] - 0.15
+                    label_y = y[0] - 0.25
                     label_x = x[-1] - .01
-                    plt.text(label_x,label_y,layer,ha='right',family='sans-serif',size=12)
-                    line = mlines.Line2D(x,y,linestyle='solid',linewidth=2.0,color='black')
+                    if layer == 'NW_AlShell':
+                        txt = layer[0:2]
+                        plt.text(label_x,label_y,txt,ha='right',family='sans-serif',size=16,
+                                 color='grey')
+                    else:
+                        plt.text(label_x,label_y,layer,ha='right',family='sans-serif',size=16,
+                                 color='grey')
+                    line = mlines.Line2D(x,y,linestyle='solid',linewidth=2.0,
+                                         color='grey')
                     ax_hand.add_line(line)
                     count += 1
                 if layer == 'NW_AlShell':
@@ -1537,7 +1547,8 @@ class Plotter(Processor):
                             # Need two locations w/ same x values
                             xv = [x,x]
                             yv = [height-start*dz,height-end*dz]
-                            line = mlines.Line2D(xv,yv,linestyle='solid',linewidth=2.0,color='black')
+                            line = mlines.Line2D(xv,yv,linestyle='solid',linewidth=2.0,
+                                                 color='grey')
                             ax_hand.add_line(line)
             return ax_hand
 
@@ -1548,31 +1559,58 @@ class Plotter(Processor):
             cNorm = matplotlib.colors.Normalize(vmin=np.amin(5.0), vmax=np.amax(100.0))
         else:
             cNorm = matplotlib.colors.Normalize(vmin=np.amin(cs), vmax=np.amax(cs))
+            # cNorm = matplotlib.colors.LogNorm(vmin=np.amin(cs)+.001, vmax=np.amax(cs))
+            # cNorm = matplotlib.colors.LogNorm(vmin=1e13, vmax=np.amax(cs))
         scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
-        fig = plt.figure(figsize=(9,7))
+        fig = plt.figure(figsize=(10,8))
         ax = fig.add_subplot(111)
         #  ax.pcolormesh(x, y, cs,cmap=cm,norm=cNorm,alpha=.5,linewidth=0)
         #  ax.pcolor(x, y,
         #          cs,cmap=cm,norm=cNorm,alpha=.5,linewidth=0,edgecolors='none')
-        ax.imshow(cs,cmap=cm,norm=cNorm,extent=[x.min(),x.max(),y.min(),y.max()],aspect='auto')
+        # ax.imshow(cs,cmap=cm,norm=cNorm,extent=[x.min(),x.max(),y.min(),y.max()],aspect='auto')
+        ax.imshow(cs,cmap=cm,norm=cNorm,extent=[x.min(),x.max(),y.min(),y.max()],
+                  aspect=.1)
+        # ax_ins = zoomed_inset_axes(ax, 6, loc=1)
+        # ax_ins.imshow(cs[75:100,:], extent=[x.min(), x.max(), .8, 1.4])
+        # ax_ins.grid(False)
+
+        # ax.matshow(cs,cmap=cm,norm=cNorm, aspect='auto')
         ax.grid(False)
-        #  ax.matshow(cs,cmap=cm,norm=cNorm)
         scalarMap.set_array(cs)
+        # div = make_axes_locatable(ax)
+        # zoom_ax = div.append_axes("right",size='100%', pad=.5)
+        # zoom_ax.imshow(cs[75:100,:], extent=[x.min(), x.max(), .8, 1.4])
+        # zoom_ax.grid(False)
+        # cax = div.append_axes("right",size="100%",pad=.05)
         cb = fig.colorbar(scalarMap)
-        cb.set_label(labels[2])
-        ax.set_xlabel(labels[0])
-        ax.set_ylabel(labels[1])
+        # cb.set_label(labels[2])
+        cb.set_label(r'Generation Rate [$cm^{-3}s^{-1}$]')
+        ax.set_xlabel(r'y [$\mu m$]')
+        # ax.set_xlabel(labels[0])
+        ax.set_ylabel(r'z [$\mu m$]')
+        # ax.set_ylabel(labels[1])
         start, end = ax.get_xlim()
-        ax.xaxis.set_ticks(np.arange(start,end,0.1))
-        start, end = ax.get_ylim()
-        ax.yaxis.set_ticks(np.arange(start,end,0.2))
+        ticks = np.arange(start,end,0.1)
+        ax.xaxis.set_ticks(ticks)
         ax.set_xlim((np.amin(x),np.amax(x)))
         ax.set_ylim((np.amin(y),np.amax(y)))
-        fig.suptitle(labels[3])
+        # ax.set_ylim((np.amax(y),np.amin(y)))
+        start, end = ax.get_ylim()
+        print('START: %f'%start)
+        print('END: %f'%end)
+        ticks = np.arange(end,start-0.2,-0.2)
+        ticks[-1] = 0
+        # ticks = np.arange(start,end,0.2)
+        # ticks = np.arange(start,end,-0.2)
+        print('###### TICKS ######')
+        print(ticks)
+        ax.yaxis.set_ticks(ticks)
+        ax.yaxis.set_ticklabels(list(reversed(ticks)))
+        # fig.suptitle(labels[3])
         if draw:
             ax = self.draw_geometry_2d(sim,ptype,ax)
         if save_path:
-            fig.savefig(save_path)
+            fig.savefig(save_path,bbox_inches='tight')
         if show:
             plt.show()
         plt.close(fig)
@@ -1863,8 +1901,6 @@ class Global_Plotter(Plotter):
                 globstr = os.path.join(base,'scalar_reduce*_%s.npy'%quantity)
                 files = glob.glob(globstr)
             elif sim.conf['General']['save_as'] == 'text':
-                globstr = os.path.join(base,'scalar_reduce*_%s.crnch'%quantity)
-                files = glob.glob(globstr)
             else:
                 raise ValueError('Incorrect file type in config')
             title = 'Reduction of %s'%quantity

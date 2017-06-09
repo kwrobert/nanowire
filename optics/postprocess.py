@@ -9,6 +9,7 @@ import copy
 import re
 import glob
 import logging
+import itertools
 from collections import OrderedDict
 import matplotlib
 # Enables saving plots over ssh
@@ -64,6 +65,20 @@ class Simulation(object):
         self.h_lookup = OrderedDict([('x',0),('y',1),('z',2),('Hx_real',3),('Hy_real',4),('Hz_real',5),
                                      ('Hx_imag',6),('Hy_imag',7),('Hz_imag',8)])
         self.avgs = {}
+        # Compute and store dx, dy, dz at attributes
+        self.z_samples = int(conf['Simulation']['z_samples']) 
+        self.x_samples = int(conf['Simulation']['x_samples'])
+        self.y_samples = int(conf['Simulation']['y_samples'])
+        max_depth = conf['Simulation']['max_depth']
+        if max_depth:
+            self.height = max_depth
+            self.dz = max_depth/self.z_samples
+        else:
+            self.height = sim.conf.get_height()
+            self.dz = height/self.z_samples
+        self.period = conf['Simulation']['params']['array_period']['value']
+        self.dx = self.period/self.x_samples
+        self.dy = self.period/self.y_samples
 
     def load_txt(self,path):
         try:
@@ -96,7 +111,8 @@ class Simulation(object):
             # Get the headers and the data
             with np.load(path) as loaded:
                 data = loaded['data']
-                lookup = loaded['headers'][0]
+                # lookup = {key:i for i, key in enumerate(loaded['headers'])}
+                lookup = loaded['headers'][0] 
                 self.log.debug(str(type(lookup)))
                 self.log.debug(str(lookup))
                 self.log.debug('Here is the E field header lookup: %s',str(lookup))
@@ -477,7 +493,7 @@ class Processor(object):
         plane=x and pval=30 would return data on the 30th y,z plane (a plane at
         the given x index). The number of samples (i.e data points) in each
         coordinate direction need not be equal"""
-
+        
         zsamp = int(zsamp)
         scalar = arr.reshape(zsamp+1,xsamp,ysamp)
         if plane == 'x':
@@ -498,7 +514,7 @@ class Processor(object):
         return all the data along the z-direction at the 5th x,y index. Note
         coordinates c1,c2 must always be specified in (x,y,z) order"""
 
-        scalar = arr.reshape(zsamp+1,xsamp,ysamp)
+        scalar = arr.reshape(zsamp+1, xsamp, ysamp)
         if line_dir == 'x':
             # z along rows, y along columns
             return scalar[c2,:,c1]
@@ -737,21 +753,12 @@ class Cruncher(Processor):
         nk['vacuum'] = (1,0)
         self.log.debug(nk)
         # Get spatial discretization
-        z_samples = sim.conf['Simulation']['z_samples']
-        x_samples = sim.conf['Simulation']['x_samples']
-        y_samples = sim.conf['Simulation']['y_samples']
-        z_samples = int(z_samples)
-        samps = (x_samples,y_samples,z_samples)
+        samps = (sim.x_samples,sim.y_samples,sim.z_samples)
         # Reshape into an actual 3D matrix. Rows correspond to different y fixed x, columns to fixed
         # y variable x, and each layer in depth is a new z value
-        normEsq = np.reshape(normEsq,(z_samples+1,x_samples,y_samples))
+        normEsq = np.reshape(normEsq,(sim.z_samples+1,sim.x_samples,sim.y_samples))
         gvec = np.zeros_like(normEsq)
-        max_depth = sim.conf['Simulation']['max_depth']
-        dz = max_depth/z_samples
-        period = sim.conf['Simulation']['params']['array_period']['value']
-        dx = period/x_samples
-        dy = period/y_samples
-        steps = (dx,dy,dz)
+        steps = (sim.dx,sim.dy,sim.dz)
         # Main loop to compute generation in each layer
         boundaries = []
         count = 0
@@ -763,13 +770,13 @@ class Cruncher(Processor):
             self.log.debug('LAYER T: %f'%layer_t)
             if count == 0:
                 start = 0
-                end = int(layer_t/dz)+1
+                end = int(layer_t/sim.dz)+1
                 boundaries.append((layer_t,start,end))
             else:
                 prev_tup = boundaries[count-1]
                 dist = prev_tup[0]+layer_t
                 start = prev_tup[2]
-                end = int(dist/dz) + 1
+                end = int(dist/sim.dz) + 1
                 boundaries.append((dist,start,end))
             self.log.debug('START: %i'%start)
             self.log.debug('END: %i'%end)
@@ -796,7 +803,7 @@ class Cruncher(Processor):
             self.log.debug(str(gvec))
             count += 1
         # Reshape back to 1D array
-        gvec = gvec.reshape((x_samples*y_samples*(z_samples+1)))
+        gvec = gvec.reshape((sim.x_samples*sim.y_samples*(sim.z_samples+1)))
         self.log.debug('GVEC AFTER FLATTENING: ')
         self.log.debug(str(gvec))
         # This approach is 4 times faster than np.column_stack()
@@ -823,27 +830,21 @@ class Cruncher(Processor):
                 pass
         quant = sim.get_scalar_quantity(quantity)
         # Get spatial discretization
-        z_samples = sim.conf['Simulation']['z_samples']
-        x_samples = sim.conf['Simulation']['x_samples']
-        y_samples = sim.conf['Simulation']['y_samples']
-        z_samples = int(z_samples)
         rsamp = sim.conf['Simulation']['r_samples']
-        thsamp = sim.conf['Simulation']['theta_samples']
+        thsamp = sim.conf['Simulation']['theta_szsamp+1,xsamp,ysamp)amples']
         # Reshape into an actual 3D matrix. Rows correspond to different y fixed x, columns to fixed
         # y variable x, and each layer in depth is a new z value
-        values = np.reshape(quant,(z_samples+1,x_samples,y_samples))
+        values = np.reshape(quant,(sim.z_samples+1,sim.x_samples,sim.y_samples))
         period = sim.conf['Simulation']['params']['array_period']['value']
-        dx = period/x_samples
-        dy = period/y_samples
-        x = np.linspace(0,period,x_samples)
-        y = np.linspace(0,period,y_samples)
+        x = np.linspace(0,period,sim.x_samples)
+        y = np.linspace(0,period,sim.y_samples)
         # Maximum r value such that circle and square unit cell have equal area
         rmax = period/np.sqrt(np.pi)
         # Diff between rmax and unit cell boundary at point of maximum difference
         delta = rmax - period/2.0
         # Extra indices we need to expand layers by
-        x_inds = int(np.ceil(delta/dx))
-        y_inds = int(np.ceil(delta/dy))
+        x_inds = int(np.ceil(delta/sim.dx))
+        y_inds = int(np.ceil(delta/sim.dy))
         # Use periodic BCs to extend the data in the x-y plane
         ext_vals = np.zeros((values.shape[0],values.shape[1]+2*x_inds,values.shape[2]+2*y_inds))
         # Left-Right extensions. This indexing madness extracts the slice we want, flips it along the correct dimension
@@ -865,8 +866,10 @@ class Cruncher(Processor):
         # Now the center
         ext_vals[:,x_inds:-x_inds,y_inds:-y_inds] = values[:,:,:]
         # Extend the points arrays to include these new regions
-        x = np.concatenate((np.array([dx*i for i in range(-x_inds,0)]),x,np.array([x[-1]+dx*i for i in range(1,x_inds+1)])))
-        y = np.concatenate((np.array([dy*i for i in range(-y_inds,0)]),y,np.array([y[-1]+dy*i for i in range(1,y_inds+1)])))
+        x = np.concatenate((np.array([sim.dx*i for i in
+                                      range(-x_inds,0)]),x,np.array([x[-1]+sim.dx*i for i in range(1,x_inds+1)])))
+        y = np.concatenate((np.array([sim.dy*i for i in
+                                      range(-y_inds,0)]),y,np.array([y[-1]+sim.dy*i for i in range(1,y_inds+1)])))
         # The points on which we have data
         points = (x,y)
         # The points corresponding to "rings" in cylindrical coordinates. Note we construct these
@@ -1031,20 +1034,15 @@ class Global_Cruncher(Cruncher):
         #TODO: This function is definitely not general. We need to get a list
         # of layers to exclude from the user. For now, just assume we want to
         # exclude the top and bottom regions
-        x_samples = sim.conf['Simulation']['x_samples']
-        y_samples = sim.conf['Simulation']['y_samples']
-        z_samples = sim.conf['Simulation']['z_samples']
-        total_h = sim.conf.get_height()
-        dz = total_h/z_samples
         # sorted_layers is an OrderedDict, and thus has the popitem method
         sorted_layers = sim.conf.sorted_dict(sim.conf['Layers'])
         first_layer = sorted_layers.popitem(last=False)
         last_layer = sorted_layers.popitem()
         # We can get the starting and ending planes from their heights
-        start_plane = int(round(first_layer['params']['thickness']['value']/dz))
-        start = start_plane*(x_samples*y_samples)
-        end_plane = int(round(last_layer['params']['thickness']['value']/dz))
-        end = end_plane*(x_samples*y_samples)
+        start_plane = int(round(first_layer['params']['thickness']['value']/sim.dz))
+        start = start_plane*(sim.x_samples*sim.y_samples)
+        end_plane = int(round(last_layer['params']['thickness']['value']/sim.dz))
+        end = end_plane*(sim.x_samples*sim.y_samples)
         return start,end
 
     def get_comp_vec(self,sim,field,start,end):
@@ -1488,15 +1486,6 @@ class Plotter(Processor):
             shell_rad = sim.conf['Layers']['NW_AlShell']['geometry']['shell']['radius']
         except KeyError:
             shell_rad = False
-        dx = period/sim.conf['Simulation']['x_samples']
-        dy = period/sim.conf['Simulation']['y_samples']
-        max_depth = sim.conf['Simulation']['max_depth']
-        if max_depth:
-            dz = max_depth/sim.conf['Simulation']['z_samples']
-            height = max_depth
-        else:
-            height = sim.conf.get_height()
-            dz = height/sim.conf['Simulation']['z_samples']
         if plane[-1] == 'z':
             self.log.info('draw nanowire circle')
             core = mpatches.Circle((cent['x'],cent['y']),radius=core_rad,fill=False)
@@ -1513,17 +1502,17 @@ class Plotter(Processor):
                 layer_t = ldata['params']['thickness']['value']
                 if count == 0:
                     start = 0
-                    end = int(layer_t/dz)+1
+                    end = int(layer_t/sim.dz)+1
                     boundaries.append((layer_t,start,end,layer))
                 else:
                     prev_tup = boundaries[count-1]
                     dist = prev_tup[0]+layer_t
                     start = prev_tup[2]
-                    end = int(dist/dz) + 1
+                    end = int(dist/sim.dz) + 1
                     boundaries.append((dist,start,end))
                 if layer_t > 0:
                     x = [0,period]
-                    y = [height-start*dz,height-start*dz]
+                    y = [sim.height-start*sim.dz,sim.height-start*sim.dz]
                     label_y = y[0] - 0.25
                     label_x = x[-1] - .01
                     if layer == 'NW_AlShell':
@@ -1546,7 +1535,7 @@ class Plotter(Processor):
                         for x in (cent['x']-rad,cent['x']+rad):
                             # Need two locations w/ same x values
                             xv = [x,x]
-                            yv = [height-start*dz,height-end*dz]
+                            yv = [sim.height-start*sim.dz,sim.height-end*sim.dz]
                             line = mlines.Line2D(xv,yv,linestyle='solid',linewidth=2.0,
                                                  color='grey')
                             ax_hand.add_line(line)
@@ -1583,27 +1572,23 @@ class Plotter(Processor):
         # zoom_ax.grid(False)
         # cax = div.append_axes("right",size="100%",pad=.05)
         cb = fig.colorbar(scalarMap)
-        # cb.set_label(labels[2])
-        cb.set_label(r'Generation Rate [$cm^{-3}s^{-1}$]')
-        ax.set_xlabel(r'y [$\mu m$]')
-        # ax.set_xlabel(labels[0])
-        ax.set_ylabel(r'z [$\mu m$]')
-        # ax.set_ylabel(labels[1])
+        cb.set_label(labels[2])
+        ax.set_xlabel(labels[0])
+        ax.set_ylabel(labels[1])
         start, end = ax.get_xlim()
         ticks = np.arange(start,end,0.1)
         ax.xaxis.set_ticks(ticks)
         ax.set_xlim((np.amin(x),np.amax(x)))
         ax.set_ylim((np.amin(y),np.amax(y)))
-        # ax.set_ylim((np.amax(y),np.amin(y)))
         start, end = ax.get_ylim()
-        print('START: %f'%start)
-        print('END: %f'%end)
+        # print('START: %f'%start)
+        # print('END: %f'%end)
         ticks = np.arange(end,start-0.2,-0.2)
         ticks[-1] = 0
         # ticks = np.arange(start,end,0.2)
         # ticks = np.arange(start,end,-0.2)
-        print('###### TICKS ######')
-        print(ticks)
+        # print('###### TICKS ######')
+        # print(ticks)
         ax.yaxis.set_ticks(ticks)
         ax.yaxis.set_ticklabels(list(reversed(ticks)))
         # fig.suptitle(labels[3])
@@ -1617,25 +1602,10 @@ class Plotter(Processor):
 
     def plane_2d(self,sim,quantity,plane,pval,draw=False,fixed=None):
         """Plots a heatmap of a fixed 2D plane"""
-        zs = sim.conf['Simulation']['z_samples']
-        xs = sim.conf['Simulation']['x_samples']
-        xs = int(float(xs))
-        ys = sim.conf['Simulation']['y_samples']
-        ys = int(float(ys))
-        max_depth = sim.conf['Simulation']['max_depth']
-        if max_depth:
-            self.log.info('Plotting to max depth of {}'.format(max_depth))
-            height = max_depth
-        else:
-            height = sim.conf.get_height()
         pval = int(pval)
-        period = sim.conf['Simulation']['params']['array_period']['value']
-        dx = period/xs
-        dy = period/ys
-        dz = height/zs
-        x = np.arange(0,period,dx)
-        y = np.arange(0,period,dy)
-        z = np.arange(0,height+dz,dz)
+        x = np.arange(0,sim.period,sim.dx)
+        y = np.arange(0,sim.period,sim.dy)
+        z = np.arange(0,sim.height+sim.dz,sim.dz)
         # Maps planes to an integer for extracting data
         # plane_table = {'x': 0,'y': 1,'z':2}
         # Get the scalar values
@@ -1653,7 +1623,7 @@ class Plotter(Processor):
         title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(freq,wvlgth)
         # Get the plane we wish to plot
         self.log.info('Retrieving plane ...')
-        cs = self.get_plane(scalar,xs,ys,zs,plane,pval)
+        cs = self.get_plane(scalar,sim.x_samples,sim.y_samples,sim.z_samples,plane,pval)
         self.log.info('Plotting plane')
         show = sim.conf['General']['show_plots']
         if plane == 'x':
@@ -1686,10 +1656,13 @@ class Plotter(Processor):
         #fig = plt.figure(figsize=(8,6))
         #ax = fig.add_subplot(111,projection='3d')
         #colors = cm.hsv(E_mag/max(E_mag))
-        #colmap = cm.ScalarMappable(cmap=cm.hsv)
+        #colmap = c.ScalarMappable(cmap=cm.hsv)
         #colmap.set_array(E_mag)
         #yg = ax.scatter(xs, ys, zs, c=colors, marker='o')
         #cb = fig.colorbar(colmap)
+        # print("X SHAPE: %s"%str(x.shape))
+        # print("Y SHAPE: %s"%str(y.shape))
+        # print("Z SHAPE: %s"%str(z.shape))
         cm = plt.get_cmap(colorsMap)
         cNorm = matplotlib.colors.Normalize(vmin=min(cs), vmax=max(cs))
         scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
@@ -1715,38 +1688,61 @@ class Plotter(Processor):
 
     def full_3d(self,sim,quantity):
         """Generates a full 3D plot of a specified scalar quantity"""
-        period = sim.conf['Simulation']['params']['array_period']['value']
-        dx = period/sim.conf['Simulation']['x_samples']
-        dy = period/sim.conf['Simulation']['y_samples']
         # The data just tells you what integer grid point you are on. Not what actual x,y coordinate you
         # are at
-        xpos = sim.pos_inds[:,0]*dx
-        ypos = sim.pos_inds[:,1]*dy
-        zpos = sim.pos_inds[:,2]
+        x = np.arange(0,sim.period,sim.dx)
+        y = np.arange(0,sim.period,sim.dy)
+        z = np.arange(0,sim.height+sim.dz,sim.dz)
+        points = np.array(list(itertools.product(z, x, y)))
         # Get the scalar
         scalar = sim.get_scalar_quantity(quantity)
         labels = ('X [um]','Y [um]','Z [um]',quantity)
         # Now plot!
-        self.scatter3d(sim,xpos,ypos,zpos,scalar,labels,'full_3d')
+        self.scatter3d(sim,points[:,1],points[:,2],points[:,0],scalar,labels,'full_3d')
 
     def planes_3d(self,sim,quantity,xplane,yplane):
         """Plots some scalar quantity in 3D but only along specified x-z and y-z planes"""
-        xplane = int(xplane)
+        xplane = int(xplane) 
         yplane = int(yplane)
-        period = sim.conf['Simulation']['params']['array_period']['value']
-        dx = period/sim.conf['Simulation']['x_samples']
-        dy = period/sim.conf['Simulation']['y_samples']
         # Get the scalar values
         scalar = sim.get_scalar_quantity(quantity)
-        # Filter out any undesired data that isn't on the planes
-        mat = np.column_stack((sim.pos_inds[:,0],sim.pos_inds[:,1],sim.pos_inds[:,2],scalar))
-        planes = np.array([row for row in mat if round(row[0]) == xplane or
-                          round(row[1]) == yplane])
-        planes[:,0] = planes[:,0]*dx
-        planes[:,1] = planes[:,1]*dy
+        x = np.arange(0,sim.period,sim.dx)
+        y = np.arange(0,sim.period,sim.dy)
+        z = np.arange(0,sim.height+sim.dz,sim.dz)
+        # Get the data on the plane with a fixed x value. These means we'll
+        # have changing (y, z) points
+        xdata = self.get_plane(scalar, sim.x_samples, sim.y_samples, sim.z_samples,
+                               'x', xplane) 
+        # plt.figure()
+        # plt.imshow(xdata)
+        # plt.show()
+        # z first cuz we want y to be changing before z to correspond with the
+        # way numpy flattens arrays. Note this means y points will be in the
+        # 2nd column
+        xplanepoints = np.array(list(itertools.product(z, y)))
+        xdata = xdata.flatten()
+        xplanexval = np.array(list(itertools.repeat(x[xplane], len(xdata))))
+        xplanedata = np.zeros((xplanepoints.shape[0],4))
+        xplanedata[:,0] = xplanexval
+        xplanedata[:,1] = xplanepoints[:, 1]
+        xplanedata[:,2] = xplanepoints[:, 0]
+        xplanedata[:,3] = xdata
+        # Same procedure for fixed y plane
+        ydata = self.get_plane(scalar, sim.x_samples, sim.y_samples, sim.z_samples,
+                               'y', yplane) 
+        yplanepoints = np.array(list(itertools.product(z, x)))
+        ydata = ydata.flatten()
+        yplaneyval = np.array(list(itertools.repeat(y[yplane], len(ydata))))
+        yplanedata = np.zeros((yplanepoints.shape[0],4))
+        yplanedata[:,0] = yplanepoints[:,1]
+        yplanedata[:,1] = yplaneyval
+        yplanedata[:,2] = yplanepoints[:,0]
+        yplanedata[:,3] = ydata
         labels = ('X [um]','Y [um]','Z [um]',quantity)
-        # Now plot!
-        self.scatter3d(sim,planes[:,0],planes[:,1],planes[:,2],planes[:,3],labels,'planes_3d')
+        # Now stack them vertically and plot!
+        all_data = np.vstack((xplanedata, yplanedata))
+        self.scatter3d(sim, all_data[:, 0], all_data[:, 1], all_data[:, 2],
+                       all_data[:, 3], labels, 'planes_3d')
 
     def line_plot(self,sim,x,y,ptype,labels):
         """Make a simple line plot"""
@@ -1768,26 +1764,22 @@ class Plotter(Processor):
         coordinates in the plane perpendicular to that direction"""
         coord1 = int(coord1)
         coord2 = int(coord2)
-        period = sim.conf['Simulation']['params']['array_period']['value']
-        xsamp = sim.conf['Simulation']['x_samples']
-        ysamp = sim.conf['Simulation']['y_samples']
-        zsamp = sim.conf['Simulation']['z_samples']
-        dx = period/xsamp
-        dy = period/ysamp
-        dz = period/zsamp
         # Get the scalar values
         scalar = sim.get_scalar_quantity(quantity)
         # Filter out any undesired data that isn't on the planes
-        data = self.get_line(scalar,xsamp,ysamp,zsamp,direction,coord1,coord2)
+        data = self.get_line(scalar,sim.x_samples,sim.y_samples,sim.z_samples,direction,coord1,coord2)
+        x = np.arange(0,sim.period,sim.dx)
+        y = np.arange(0,sim.period,sim.dy)
+        z = np.arange(0,sim.height+sim.dz,sim.dz)
         if direction == 'x':
             # z along rows, y along columns
-            pos_data = np.unique(sim.pos_inds[:,0]) * dx
+            pos_data = x
         elif direction == 'y':
             # x along columns, z along rows
-            pos_data = np.unique(sim.pos_inds[:,1]) * dy
+            pos_data = y
         elif direction == 'z':
             # x along rows, y along columns
-            pos_data = np.unique(sim.pos_inds[:,2]) * dz
+            pos_data = z
         #mat = np.column_stack((sim.pos_inds[:,0],sim.pos_inds[:,1],sim.pos_inds[:,2],scalar))
         #planes = np.array([row for row in mat if row[0] == coord1 and row[1] == coord2])
         #planes[:,0] = planes[:,0]*dx
@@ -1901,6 +1893,8 @@ class Global_Plotter(Plotter):
                 globstr = os.path.join(base,'scalar_reduce*_%s.npy'%quantity)
                 files = glob.glob(globstr)
             elif sim.conf['General']['save_as'] == 'text':
+                globstr = os.path.join(base,'scalar_reduce*_%s.crnch'%quantity)
+                files = glob.glob(globstr)
             else:
                 raise ValueError('Incorrect file type in config')
             title = 'Reduction of %s'%quantity
@@ -2062,9 +2056,9 @@ def main():
     # Now do all the work
     if not args.no_crunch:
         crunchr = Cruncher(conf,sims,sim_groups,failed_sims)
-        # crunchr.process_all()
-        for sim in crunchr.sims:
-            crunchr.transmissionData(sim)
+        crunchr.process_all()
+        # for sim in crunchr.sims:
+        #     crunchr.transmissionData(sim)
     if not args.no_gcrunch:
         gcrunchr = Global_Cruncher(conf,sims,sim_groups,failed_sims)
         gcrunchr.process_all()

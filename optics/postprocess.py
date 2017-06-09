@@ -58,12 +58,11 @@ class Simulation(object):
         self.log = logging.getLogger('postprocess')
         self.e_data = None
         self.h_data = None
-        self.pos_inds = None
         self.failed = False
-        self.e_lookup = OrderedDict([('x',0),('y',1),('z',2),('Ex_real',3),('Ey_real',4),('Ez_real',5),
-                                    ('Ex_imag',6),('Ey_imag',7),('Ez_imag',8)])
-        self.h_lookup = OrderedDict([('x',0),('y',1),('z',2),('Hx_real',3),('Hy_real',4),('Hz_real',5),
-                                     ('Hx_imag',6),('Hy_imag',7),('Hz_imag',8)])
+        self.e_lookup = OrderedDict([('Ex_real',0),('Ey_real',1),('Ez_real',2),
+                                    ('Ex_imag',3),('Ey_imag',4),('Ez_imag',5)])
+        self.h_lookup = OrderedDict([('Hx_real',0),('Hy_real',1),('Hz_real',2),
+                                    ('Hx_imag',3),('Hy_imag',4),('Hz_imag',5)])
         self.avgs = {}
         # Compute and store dx, dy, dz at attributes
         self.z_samples = int(conf['Simulation']['z_samples']) 
@@ -134,35 +133,31 @@ class Simulation(object):
             e_path = os.path.join(sim_path,base_name+'.E')
             e_data, e_lookup = self.load_txt(e_path)
             self.log.debug('E shape after getting: %s',str(e_data.shape))
-            pos_inds = np.zeros((e_data.shape[0],3))
-            pos_inds[:,:] = e_data[:,0:3]
             # Load H field data
             if not ignore:
                 h_path = os.path.join(sim_path,base_name+'.H')
                 h_data, h_lookup = self.load_txt(h_path)
             else:
                 h_data = None
-            self.e_data,self.h_data,self.pos_inds = e_data,h_data,pos_inds
+            self.e_data,self.h_data = e_data,h_data
             self.log.info('Collection complete!')
         elif ftype == 'npz':
             # Load E field data
             e_path = os.path.join(sim_path,base_name+'.E.npz')
             e_data, e_lookup = self.load_npz(e_path)
             self.log.debug('E shape after getting: %s',str(e_data.shape))
-            pos_inds = np.zeros((e_data.shape[0],3))
-            pos_inds[:,:] = e_data[:,0:3]
             # Load H field data
             if not ignore:
                 h_path = os.path.join(sim_path,base_name+'.H.npz')
                 h_data, h_lookup = self.load_npz(h_path)
             else:
                 h_data = None
-            self.e_data,self.h_data,self.pos_inds = e_data,h_data,pos_inds
+            self.e_data,self.h_data, = e_data,h_data
             self.log.info('Collection complete!')
         else:
             raise ValueError('Incorrect file type specified in [General] section of config file')
 
-        return e_data,self.e_lookup,h_data,self.h_lookup,pos_inds
+        return e_data,self.e_lookup,h_data,self.h_lookup
 
     def get_data(self):
         """Returns the already crunched E and H data for this particular sim"""
@@ -194,11 +189,9 @@ class Simulation(object):
                 h_data,h_lookup = None,None
         else:
             raise ValueError('Incorrect file type specified in [General] section of config file')
-        pos_inds = np.zeros((e_data.shape[0],3))
-        pos_inds[:,:] = e_data[:,0:3]
-        self.e_data,self.e_lookup,self.h_data,self.h_lookup,self.pos_inds = e_data,e_lookup,h_data,h_lookup,pos_inds
+        self.e_data,self.e_lookup,self.h_data,self.h_lookup = e_data,e_lookup,h_data,h_lookup
         self.log.info('Collection complete!')
-        return e_data,e_lookup,h_data,h_lookup,pos_inds
+        return e_data,e_lookup,h_data,h_lookup
 
     def get_avgs(self):
         """Load all averages"""
@@ -291,7 +284,6 @@ class Simulation(object):
         """Clears all the data attributes to free up memory"""
         self.e_data = None
         self.h_data = None
-        self.pos_inds = None
         self.avgs = {}
 
 class Processor(object):
@@ -601,7 +593,7 @@ class Cruncher(Processor):
 
         # Get the magnitude of E and add it to our data
         E_mag = np.zeros(sim.e_data.shape[0])
-        for i in range(3,9):
+        for i in range(0,6):
             E_mag += sim.e_data[:,i]*sim.e_data[:,i]
         E_mag = np.sqrt(E_mag)
 
@@ -620,7 +612,7 @@ class Cruncher(Processor):
 
         # Get the magnitude of E and add it to our data
         E_magsq = np.zeros(sim.e_data.shape[0])
-        for i in range(3,9):
+        for i in range(0,6):
             E_magsq += sim.e_data[:,i]*sim.e_data[:,i]
 
         # This approach is 4 times faster than np.column_stack()
@@ -639,7 +631,7 @@ class Cruncher(Processor):
         # imaginary parts and squared it (which is what would happen if you took the complex number
         # for each component and multiplied it by its conjugate).
         H_mag = np.zeros(sim.h_data.shape[0])
-        for i in range(3,9):
+        for i in range(0,6):
             H_mag += sim.h_data[:,i]*sim.h_data[:,i]
         H_mag = np.sqrt(H_mag)
 
@@ -657,7 +649,7 @@ class Cruncher(Processor):
 
         # Get the magnitude of H and add it to our data
         H_magsq = np.zeros(sim.h_data.shape[0])
-        for i in range(3,9):
+        for i in range(0,6):
             H_magsq += sim.h_data[:,i]*sim.h_data[:,i]
         # This approach is 4 times faster than np.column_stack()
         dat = np.zeros((sim.h_data.shape[0],sim.h_data.shape[1]+1))

@@ -281,7 +281,7 @@ class Simulator():
             self.log.info('Computing for entire device')
             height = self.get_height()
             zvec = np.arange(0, height + dz, dz)
-        arr = np.zeros((x_samp * y_samp * len(zvec), 9))
+        arr = np.zeros((x_samp * y_samp * len(zvec), 6))
         count = 0
         for z in zvec:
             E, H = self.s4.GetFieldsOnGrid(
@@ -292,8 +292,7 @@ class Simulator():
                 for yval in xval:
                     fixed = [val for c in yval for val in
                              (c.real, c.imag)]
-                    row = [xcount, ycount, z] + fixed
-                    arr[count, :] = row
+                    arr[count, :] = fixed
                     count += 1
                     ycount += 1
                 xcount += 1

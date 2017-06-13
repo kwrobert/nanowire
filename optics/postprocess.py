@@ -50,10 +50,11 @@ def counted(fn):
 
 
 class Simulation(object):
-    """An object that represents a simulation. It contains the data for the sim, the data file
-    headers, and its configuration object as attributes. This object contains all the information
-    about a simulation, but DOES NOT perform any actions on that data. That job is relegated to the
-    various processor objects"""
+    """An object that represents a simulation. It contains the data for the
+    sim, the data file headers, and its configuration object as attributes.
+    This object contains all the information about a simulation, but DOES NOT
+    perform any actions on that data. That job is relegated to the various
+    processor objects"""
 
     def __init__(self, conf):
         self.conf = conf
@@ -61,10 +62,12 @@ class Simulation(object):
         self.e_data = None
         self.h_data = None
         self.failed = False
-        self.e_lookup = OrderedDict([('Ex_real', 0), ('Ey_real', 1), ('Ez_real', 2),
-                                     ('Ex_imag', 3), ('Ey_imag', 4), ('Ez_imag', 5)])
-        self.h_lookup = OrderedDict([('Hx_real', 0), ('Hy_real', 1), ('Hz_real', 2),
-                                     ('Hx_imag', 3), ('Hy_imag', 4), ('Hz_imag', 5)])
+        # self.e_lookup = OrderedDict([('Ex_real', 0), ('Ex_imag', 1), ('Ey_real', 2),
+        #                              ('Ey_imag', 3), ('Ez_real', 4), ('Ez_imag', 5)])
+        # self.h_lookup = OrderedDict([('Hx_real', 0), ('Hx_imag', 1), ('Hy_real', 2),
+        #                              ('Hy_imag', 3), ('Hz_real', 4), ('Hz_imag', 5)])
+        self.e_lookup = {}
+        self.h_lookup = {}
         self.avgs = {}
         # Compute and store dx, dy, dz at attributes
         self.z_samples = int(conf['Simulation']['z_samples'])
@@ -75,8 +78,8 @@ class Simulation(object):
             self.height = max_depth
             self.dz = max_depth / self.z_samples
         else:
-            self.height = sim.conf.get_height()
-            self.dz = height / self.z_samples
+            self.height = self.conf.get_height()
+            self.dz = self.height / self.z_samples
         self.period = conf['Simulation']['params']['array_period']['value']
         self.dx = self.period / self.x_samples
         self.dy = self.period / self.y_samples
@@ -128,45 +131,45 @@ class Simulation(object):
             data, lookup = None, None
         return data, lookup
 
-    def get_raw_data(self):
-        """Collect raw, unprocessed data spit out by S4 simulations"""
-        self.log.info('Collecting raw data for sim %s',
-                      self.conf['General']['sim_dir'])
-        sim_path = self.conf['General']['sim_dir']
-        base_name = self.conf['General']['base_name']
-        ignore = self.conf['General']['ignore_h']
-        ftype = self.conf['General']['save_as']
-        if ftype == 'text':
-            # Load E field data
-            e_path = os.path.join(sim_path, base_name + '.E')
-            e_data, e_lookup = self.load_txt(e_path)
-            self.log.debug('E shape after getting: %s', str(e_data.shape))
-            # Load H field data
-            if not ignore:
-                h_path = os.path.join(sim_path, base_name + '.H')
-                h_data, h_lookup = self.load_txt(h_path)
-            else:
-                h_data = None
-            self.e_data, self.h_data = e_data, h_data
-            self.log.info('Collection complete!')
-        elif ftype == 'npz':
-            # Load E field data
-            e_path = os.path.join(sim_path, base_name + '.E.npz')
-            e_data, e_lookup = self.load_npz(e_path)
-            self.log.debug('E shape after getting: %s', str(e_data.shape))
-            # Load H field data
-            if not ignore:
-                h_path = os.path.join(sim_path, base_name + '.H.npz')
-                h_data, h_lookup = self.load_npz(h_path)
-            else:
-                h_data = None
-            self.e_data, self.h_data, = e_data, h_data
-            self.log.info('Collection complete!')
-        else:
-            raise ValueError(
-                'Incorrect file type specified in [General] section of config file')
+    # def get_raw_data(self):
+    #     """Collect raw, unprocessed data spit out by S4 simulations"""
+    #     self.log.info('Collecting raw data for sim %s',
+    #                   self.conf['General']['sim_dir'])
+    #     sim_path = self.conf['General']['sim_dir']
+    #     base_name = self.conf['General']['base_name']
+    #     ignore = self.conf['General']['ignore_h']
+    #     ftype = self.conf['General']['save_as']
+    #     if ftype == 'text':
+    #         # Load E field data
+    #         e_path = os.path.join(sim_path, base_name + '.E')
+    #         e_data, e_lookup = self.load_txt(e_path)
+    #         self.log.debug('E shape after getting: %s', str(e_data.shape))
+    #         # Load H field data
+    #         if not ignore:
+    #             h_path = os.path.join(sim_path, base_name + '.H')
+    #             h_data, h_lookup = self.load_txt(h_path)
+    #         else:
+    #             h_data = None
+    #         self.e_data, self.h_data = e_data, h_data
+    #         self.log.info('Collection complete!')
+    #     elif ftype == 'npz':
+    #         # Load E field data
+    #         e_path = os.path.join(sim_path, base_name + '.E.npz')
+    #         e_data, e_lookup = self.load_npz(e_path)
+    #         self.log.debug('E shape after getting: %s', str(e_data.shape))
+    #         # Load H field data
+    #         if not ignore:
+    #             h_path = os.path.join(sim_path, base_name + '.H.npz')
+    #             h_data, h_lookup = self.load_npz(h_path)
+    #         else:
+    #             h_data = None
+    #         self.e_data, self.h_data, = e_data, h_data
+    #         self.log.info('Collection complete!')
+    #     else:
+    #         raise ValueError(
+    #             'Incorrect file type specified in [General] section of config file')
 
-        return e_data, self.e_lookup, h_data, self.h_lookup
+    #     return e_data, self.e_lookup, h_data, self.h_lookup
 
     def get_data(self):
         """Returns the already crunched E and H data for this particular sim"""
@@ -179,24 +182,25 @@ class Simulation(object):
         # If data was saved into text files
         if ftype == 'text':
             # Load E field data
-            e_path = os.path.join(sim_path, base_name + '.E.crnch')
+            e_path = os.path.join(sim_path, base_name + '.E')
             e_data, e_lookup = self.load_txt(e_path)
             # Load H field data
             if not ignore:
-                h_path = os.path.join(sim_path, base_name + '.H.crnch')
+                h_path = os.path.join(sim_path, base_name + '.H')
                 h_data, h_lookup = self.load_txt(h_path)
             else:
-                h_data, h_lookup = None, None
+                h_data, h_lookup = None, {}
         # If data was saved in in npz format
         elif ftype == 'npz':
             # Get the paths
             e_path = os.path.join(sim_path, base_name + '.E.npz')
             e_data, e_lookup = self.load_npz(e_path)
+            self.log.debug('E shape after getting: %s', str(e_data.shape))
             if not ignore:
                 h_path = os.path.join(sim_path, base_name + '.H.npz')
                 h_data, h_lookup = self.load_npz(h_path)
             else:
-                h_data, h_lookup = None, None
+                h_data, h_lookup = None, {}
         else:
             raise ValueError(
                 'Incorrect file type specified in [General] section of config file')
@@ -240,7 +244,7 @@ class Simulation(object):
         self.log.debug('Here are the H matrix headers: %s', str(self.h_lookup))
         ftype = self.conf['General']['save_as']
         if ftype == 'text':
-            epath = epath + '.crnch'
+            epath = epath
             # These make sure all writes are atomic and thus we won't get any
             # partially written files if processing is interrupted for any
             # reason (like a keyboard interrupt)
@@ -302,6 +306,48 @@ class Simulation(object):
         self.e_data = None
         self.h_data = None
         self.avgs = {}
+
+    def extend_data(self, quantity, new_data, field):
+        """Adds a new column of data to the field arrays, or updates it if it
+        already exists"""
+        # TODO: This is NOT foolproof. Need a better way of distinguishing
+        # between E field and H field quantities
+        if field == "H":
+            self.log.info("Inserting an H field quantity")
+            # If this quantity is already in the matrix, just update it.
+            # Otherwise append it as a new column
+            if quantity in self.h_lookup:
+                self.log.debug("Quantity {} exists in matrix, "
+                               "updating".format(quantity))
+                col = self.h_lookup[quantity]
+                self.h_data[:, col] = new_data
+            else:
+                self.log.debug('Matrix shape before extending: %s', str(self.h_data.shape))
+                # This approach is 4 times faster than np.column_stack()
+                dat = np.zeros((self.h_data.shape[0], self.h_data.shape[1] + 1))
+                dat[:, :-1] = self.h_data
+                dat[:, -1] = new_data
+                self.h_data = dat
+                # Now append this quantity and its column the the header dict
+                self.h_lookup[quantity] = dat.shape[1] - 1
+                self.log.debug('Matrix shape after extending: %s', str(self.h_data.shape))
+        else:
+            self.log.info("Inserting an E field quantity")
+            if quantity in self.e_lookup:
+                self.log.debug("Quantity {} exists in matrix, "
+                               "updating".format(quantity))
+                col = self.e_lookup[quantity]
+                self.e_data[:, col] = new_data
+            else:
+                self.log.debug('Matrix shape before extending: %s' % str(self.e_data.shape))
+                # This approach is 4 times faster than np.column_stack()
+                dat = np.zeros((self.e_data.shape[0], self.e_data.shape[1] + 1))
+                dat[:, :-1] = self.e_data
+                dat[:, -1] = new_data
+                self.e_data = dat
+                # Now append this quantity and its column the the header dict
+                self.e_lookup[quantity] = dat.shape[1] - 1
+                self.log.debug('Matrix shape after extending: %s' % str(self.e_data.shape))
 
 
 class Processor(object):
@@ -564,7 +610,7 @@ class Cruncher(Processor):
 
     def calculate(self, quantity, sim, args):
         try:
-            getattr(self, quantity)(sim, *args)
+            result = getattr(self, quantity)(sim, *args)
         except KeyError:
             self.log.error("Unable to calculate the following quantity: %s",
                            quantity, exc_info=True, stack_info=True)
@@ -573,7 +619,7 @@ class Cruncher(Processor):
     def process(self, sim):
         sim_path = os.path.basename(sim.conf['General']['sim_dir'])
         self.log.info('Crunching data for sim %s', sim_path)
-        sim.get_raw_data()
+        sim.get_data()
         self.log.debug('SHAPE BEFORE CALCULATING: %s' % str(sim.e_data.shape))
         if sim.failed:
             self.log.error('Following simulation missing data: %s', sim_path)
@@ -629,15 +675,7 @@ class Cruncher(Processor):
         for i in range(0, 6):
             E_mag += sim.e_data[:, i] * sim.e_data[:, i]
         E_mag = np.sqrt(E_mag)
-
-        # This approach is 4 times faster than np.column_stack()
-        self.log.debug('E mat shape: %s', str(sim.e_data.shape))
-        dat = np.zeros((sim.e_data.shape[0], sim.e_data.shape[1] + 1))
-        dat[:, :-1] = sim.e_data
-        dat[:, -1] = E_mag
-        sim.e_data = dat
-        # Now append this quantity and its column the the header dict
-        sim.e_lookup['normE'] = dat.shape[1] - 1
+        sim.extend_data('normE', E_mag, "E")
         return E_mag
 
     def normEsquared(self, sim):
@@ -647,50 +685,30 @@ class Cruncher(Processor):
         E_magsq = np.zeros(sim.e_data.shape[0])
         for i in range(0, 6):
             E_magsq += sim.e_data[:, i] * sim.e_data[:, i]
-
-        # This approach is 4 times faster than np.column_stack()
-        dat = np.zeros((sim.e_data.shape[0], sim.e_data.shape[1] + 1))
-        dat[:, :-1] = sim.e_data
-        dat[:, -1] = E_magsq
-        sim.e_data = dat
-        # Now append this quantity and its column the the header dict
-        sim.e_lookup['normEsquared'] = dat.shape[1] - 1
+        sim.extend_data('normEsquared', E_magsq, "E")
         return E_magsq
 
     def normH(self, sim):
         """Calculate and returns the norm of H"""
 
-        # Get the magnitude of H and add it to our data. This loops through each components real and
-        # imaginary parts and squared it (which is what would happen if you took the complex number
-        # for each component and multiplied it by its conjugate).
+        # Get the magnitude of H and add it to our data. This loops through
+        # each components real and imaginary parts and squares them (which is
+        # what would happen if you took the complex number for each component
+        # and multiplied it by its conjugate).
         H_mag = np.zeros(sim.h_data.shape[0])
         for i in range(0, 6):
             H_mag += sim.h_data[:, i] * sim.h_data[:, i]
         H_mag = np.sqrt(H_mag)
-
-        # This approach is 4 times faster than np.column_stack()
-        dat = np.zeros((sim.h_data.shape[0], sim.h_data.shape[1] + 1))
-        dat[:, :-1] = sim.h_data
-        dat[:, -1] = H_mag
-        sim.h_data = dat
-        # Now append this quantity and its column the the header dict
-        sim.h_lookup['normH'] = dat.shape[1] - 1
+        sim.extend_data('normH', H_mag, "H")
         return H_mag
 
     def normHsquared(self, sim):
         """Calculates and returns the norm of H squared"""
 
-        # Get the magnitude of H and add it to our data
         H_magsq = np.zeros(sim.h_data.shape[0])
         for i in range(0, 6):
             H_magsq += sim.h_data[:, i] * sim.h_data[:, i]
-        # This approach is 4 times faster than np.column_stack()
-        dat = np.zeros((sim.h_data.shape[0], sim.h_data.shape[1] + 1))
-        dat[:, :-1] = sim.h_data
-        dat[:, -1] = H_magsq
-        sim.h_data = dat
-        # Now append this quantity and its column the the header dict
-        sim.h_lookup['normHsquared'] = dat.shape[1] - 1
+        sim.extend_data('normHsquared', H_magsq, "H")
         return H_magsq
 
     def get_nk(self, path, freq):
@@ -843,12 +861,7 @@ class Cruncher(Processor):
         self.log.debug(str(gvec))
         # This approach is 4 times faster than np.column_stack()
         assert(sim.e_data.shape[0] == len(gvec))
-        dat = np.zeros((sim.e_data.shape[0], sim.e_data.shape[1] + 1))
-        dat[:, :-1] = sim.e_data
-        dat[:, -1] = gvec
-        sim.e_data = dat
-        # Now append this quantity and its column the the header dict
-        sim.e_lookup['genRate'] = dat.shape[1] - 1
+        sim.extend_data('genRate', gvec, "E")
         return gvec
 
     def angularAvg(self, sim, quantity):

@@ -22,6 +22,9 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.cm as cmx
 import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
+from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes
+from mpl_toolkits.axes_grid1.inset_locator import mark_inset
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 # Literally just for the initial data load
 import pandas
 import multiprocessing as mp
@@ -302,6 +305,7 @@ class Processor(object):
             if 'sim_conf.yml' in files and datfile in files:
                 self.log.info('Gather sim at %s',root)
                 sim_obj = Simulation(Config(os.path.join(root,'sim_conf.yml')))
+                sim_obj.conf.expand_vars()
                 self.sims.append(sim_obj)
                 # This retrieves the lowest node in the tree, stores that node
                 # as the key and the list of sims beneath that node as values
@@ -473,7 +477,7 @@ class Processor(object):
         plane=x and pval=30 would return data on the 30th y,z plane (a plane at
         the given x index). The number of samples (i.e data points) in each
         coordinate direction need not be equal"""
-	
+
         zsamp = int(zsamp)
         scalar = arr.reshape(zsamp+1,xsamp,ysamp)
         if plane == 'x':
@@ -787,7 +791,7 @@ class Cruncher(Processor):
                 self.log.debug('REGION SHAPE: %s'%str(region.shape))
                 self.log.debug('REGION: ')
                 self.log.debug(str(region))
-                gvec[start:end,:,:] = region 
+                gvec[start:end,:,:] = region
             self.log.debug('GEN RATE MATRIX: ')
             self.log.debug(str(gvec))
             count += 1
@@ -932,14 +936,14 @@ class Cruncher(Processor):
         #absorbance = 1 - reflectance
         tot = reflectance+transmission+absorbance
         delta = np.abs(tot-1)
-        #self.log.info('Total = %f'%tot)
-        assert(reflectance > 0)
-        assert(transmission > 0)
-        assert(absorbance > 0)
-        assert(delta < .0001)
-        self.log.debug('Reflectance %f'%reflectance)
-        self.log.debug('Transmission %f'%transmission)
-        self.log.debug('Absorbance %f'%absorbance)
+        self.log.info('Reflectance %f'%reflectance)
+        self.log.info('Transmission %f'%transmission)
+        self.log.info('Absorbance %f'%absorbance)
+        self.log.info('Total = %f'%tot)
+        assert(reflectance >= 0)
+        assert(transmission >= 0)
+        # assert(absorbance >= 0)
+        assert(delta < .00001)
         #assert(reflectance >= 0 and transmission >= 0 and absorbance >= 0)
         outpath = os.path.join(base,'ref_trans_abs.dat')
         self.log.info('Writing transmission file')
@@ -1364,8 +1368,8 @@ class Global_Cruncher(Cruncher):
                 out.write('%f\n'%Jsc)
             self.log.info('Jsc = %f'%Jsc)
             valuelist.append(Jsc)
-        return valuelist    
-    
+        return valuelist
+
     def weighted_transmissionData(self):
         """Computes spectrally weighted absorption,transmission, and reflection"""
         for group in self.sim_groups:
@@ -1520,10 +1524,17 @@ class Plotter(Processor):
                 if layer_t > 0:
                     x = [0,period]
                     y = [height-start*dz,height-start*dz]
-                    label_y = y[0] - 0.15
+                    label_y = y[0] - 0.25
                     label_x = x[-1] - .01
-                    plt.text(label_x,label_y,layer,ha='right',family='sans-serif',size=12)
-                    line = mlines.Line2D(x,y,linestyle='solid',linewidth=2.0,color='black')
+                    if layer == 'NW_AlShell':
+                        txt = layer[0:2]
+                        plt.text(label_x,label_y,txt,ha='right',family='sans-serif',size=16,
+                                 color='grey')
+                    else:
+                        plt.text(label_x,label_y,layer,ha='right',family='sans-serif',size=16,
+                                 color='grey')
+                    line = mlines.Line2D(x,y,linestyle='solid',linewidth=2.0,
+                                         color='grey')
                     ax_hand.add_line(line)
                     count += 1
                 if layer == 'NW_AlShell':
@@ -1536,7 +1547,8 @@ class Plotter(Processor):
                             # Need two locations w/ same x values
                             xv = [x,x]
                             yv = [height-start*dz,height-end*dz]
-                            line = mlines.Line2D(xv,yv,linestyle='solid',linewidth=2.0,color='black')
+                            line = mlines.Line2D(xv,yv,linestyle='solid',linewidth=2.0,
+                                                 color='grey')
                             ax_hand.add_line(line)
             return ax_hand
 
@@ -1547,30 +1559,58 @@ class Plotter(Processor):
             cNorm = matplotlib.colors.Normalize(vmin=np.amin(5.0), vmax=np.amax(100.0))
         else:
             cNorm = matplotlib.colors.Normalize(vmin=np.amin(cs), vmax=np.amax(cs))
+            # cNorm = matplotlib.colors.LogNorm(vmin=np.amin(cs)+.001, vmax=np.amax(cs))
+            # cNorm = matplotlib.colors.LogNorm(vmin=1e13, vmax=np.amax(cs))
         scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
-        fig = plt.figure(figsize=(9,7))
+        fig = plt.figure(figsize=(10,8))
         ax = fig.add_subplot(111)
         #  ax.pcolormesh(x, y, cs,cmap=cm,norm=cNorm,alpha=.5,linewidth=0)
         #  ax.pcolor(x, y,
         #          cs,cmap=cm,norm=cNorm,alpha=.5,linewidth=0,edgecolors='none')
-        ax.imshow(cs,cmap=cm,norm=cNorm,extent=[x.min(),x.max(),y.min(),y.max()],aspect='auto')
-        #  ax.matshow(cs,cmap=cm,norm=cNorm)
+        # ax.imshow(cs,cmap=cm,norm=cNorm,extent=[x.min(),x.max(),y.min(),y.max()],aspect='auto')
+        ax.imshow(cs,cmap=cm,norm=cNorm,extent=[x.min(),x.max(),y.min(),y.max()],
+                  aspect=.1)
+        # ax_ins = zoomed_inset_axes(ax, 6, loc=1)
+        # ax_ins.imshow(cs[75:100,:], extent=[x.min(), x.max(), .8, 1.4])
+        # ax_ins.grid(False)
+
+        # ax.matshow(cs,cmap=cm,norm=cNorm, aspect='auto')
+        ax.grid(False)
         scalarMap.set_array(cs)
+        # div = make_axes_locatable(ax)
+        # zoom_ax = div.append_axes("right",size='100%', pad=.5)
+        # zoom_ax.imshow(cs[75:100,:], extent=[x.min(), x.max(), .8, 1.4])
+        # zoom_ax.grid(False)
+        # cax = div.append_axes("right",size="100%",pad=.05)
         cb = fig.colorbar(scalarMap)
-        cb.set_label(labels[2])
-        ax.set_xlabel(labels[0])
-        ax.set_ylabel(labels[1])
+        # cb.set_label(labels[2])
+        cb.set_label(r'Generation Rate [$cm^{-3}s^{-1}$]')
+        ax.set_xlabel(r'y [$\mu m$]')
+        # ax.set_xlabel(labels[0])
+        ax.set_ylabel(r'z [$\mu m$]')
+        # ax.set_ylabel(labels[1])
         start, end = ax.get_xlim()
-        ax.xaxis.set_ticks(np.arange(start,end,0.1))
-        start, end = ax.get_ylim()
-        ax.yaxis.set_ticks(np.arange(start,end,0.2))
+        ticks = np.arange(start,end,0.1)
+        ax.xaxis.set_ticks(ticks)
         ax.set_xlim((np.amin(x),np.amax(x)))
         ax.set_ylim((np.amin(y),np.amax(y)))
-        fig.suptitle(labels[3])
+        # ax.set_ylim((np.amax(y),np.amin(y)))
+        start, end = ax.get_ylim()
+        print('START: %f'%start)
+        print('END: %f'%end)
+        ticks = np.arange(end,start-0.2,-0.2)
+        ticks[-1] = 0
+        # ticks = np.arange(start,end,0.2)
+        # ticks = np.arange(start,end,-0.2)
+        print('###### TICKS ######')
+        print(ticks)
+        ax.yaxis.set_ticks(ticks)
+        ax.yaxis.set_ticklabels(list(reversed(ticks)))
+        # fig.suptitle(labels[3])
         if draw:
             ax = self.draw_geometry_2d(sim,ptype,ax)
         if save_path:
-            fig.savefig(save_path)
+            fig.savefig(save_path,bbox_inches='tight')
         if show:
             plt.show()
         plt.close(fig)
@@ -1819,7 +1859,7 @@ class Global_Plotter(Plotter):
                 fig = plt.figure(figsize=(9,7))
                 plt.ylabel('M.S.E of %s'%quantity)
                 plt.xlabel('Number of Fourier Terms')
-                plt.plot(labels,errors,linestyle='-',marker='o',color='b')
+                plt.plot(labels,errors)
                 plt.yscale(scale)
                 #plt.xticks(x,labels,rotation='vertical')
                 plt.tight_layout()
@@ -1861,8 +1901,6 @@ class Global_Plotter(Plotter):
                 globstr = os.path.join(base,'scalar_reduce*_%s.npy'%quantity)
                 files = glob.glob(globstr)
             elif sim.conf['General']['save_as'] == 'text':
-                globstr = os.path.join(base,'scalar_reduce*_%s.crnch'%quantity)
-                files = glob.glob(globstr)
             else:
                 raise ValueError('Incorrect file type in config')
             title = 'Reduction of %s'%quantity
@@ -1931,13 +1969,13 @@ class Global_Plotter(Plotter):
                 self.log.info('Plotting absorbance')
                 plt.plot(freqs, absorb_l, '-o', label='Absorption')
             if reflectance:
-                plt.plot(freqs, refl_l, '-o', label='Reflectance')
+                plt.plot(freqs, refl_l, '-o', label='Reflection')
             if transmission:
                 plt.plot(freqs, trans_l, '-o', label='Transmission')
             plt.legend(loc='best')
             figp = os.path.join(base, 'transmission_plots.pdf')
             plt.xlabel('Wavelength (nm)')
-            #plt.ylim((0,.5))
+            plt.ylim((0,1.0))
             plt.savefig(figp)
             plt.close()
 
@@ -1961,20 +1999,21 @@ def main():
     parser.add_argument('--filter_by',nargs='*',help="""List of parameters you wish to filter by,
             specified like: p1:v1,v2,v3 p2:v1,v2,v3""")
     parser.add_argument('-gb','--group_by',help="""The parameter you
-            would like to group simulations by, specified as a dot separated path 
+            would like to group simulations by, specified as a dot separated path
             to the key in the config as: path.to.key.value""")
     parser.add_argument('-ga','--group_against',help="""The parameter
-            you would like to group against, specified as a dot separated path 
+            you would like to group against, specified as a dot separated path
             to the key in the config as: path.to.key.value""")
     args = parser.parse_args()
     if os.path.isfile(args.config_file):
         conf = Config(path=os.path.abspath(args.config_file))
+        conf.expand_vars()
     else:
         raise ValueError("The file you specified does not exist!")
 
     if not (args.group_by or args.group_against):
-        raise ValueError('Need to group sims somehow. A sensible value would be'
-                         ' by/against frequency')
+        raise ValueError('Need to group sims somehow. A sensible value would'
+                         ' be by/against frequency')
     else:
         if args.group_by:
             group_by = args.group_by.split('.')
@@ -1982,11 +2021,14 @@ def main():
             group_ag = args.group_against.split('.')
 
     # Configure logger
-    lfile = os.path.join(conf['General']['base_dir'],'logs/postprocess.log')
-    logger = configure_logger(level=args.log_level,name='postprocess',
-                              console=True,logfile=lfile)
-                                
-
+    lfile = os.path.join(conf['General']['base_dir'], 'logs/postprocess.log')
+    logger = configure_logger(level=args.log_level, name='postprocess',
+                              console=True, logfile=lfile)
+    # Configure plotting style
+    try:
+        plt.style.use(conf['Postprocessing']['style'])
+    except KeyError:
+        plt.style.use('ggplot')
     # Collect the sims once up here and reuse them later
     proc = Processor(conf)
     sims, failed_sims = proc.collect_sims()
@@ -2020,9 +2062,9 @@ def main():
     # Now do all the work
     if not args.no_crunch:
         crunchr = Cruncher(conf,sims,sim_groups,failed_sims)
-        crunchr.process_all()
-        # for sim in crunchr.sims:
-        #     crunchr.transmissionData(sim)
+        # crunchr.process_all()
+        for sim in crunchr.sims:
+            crunchr.transmissionData(sim)
     if not args.no_gcrunch:
         gcrunchr = Global_Cruncher(conf,sims,sim_groups,failed_sims)
         gcrunchr.process_all()

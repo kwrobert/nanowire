@@ -4,6 +4,9 @@ __pycache__/
 *.png
 *.swp
 *test*/*
+test/*
+*test/
+*test*
 *numbasis_convergence*
 sims/*
 comsolcompare/*

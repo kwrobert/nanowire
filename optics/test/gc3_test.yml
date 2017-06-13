@@ -1,9 +1,9 @@
 General:
     
     # Base directory under which to run your simulation(s)
-    base_dir: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/optics/test'
+    base_dir: '$HOME/schoolwork/gradschool/nanowire/code/optics/test'
     # Same as above but remains untouched during buildout of directory tree
-    treebase: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/optics/test'
+    treebase: '$HOME/schoolwork/gradschool/nanowire/code/optics/test'
     # The name of the database file that will store simulation state and output
     # data
     db_name: 'test_run.db'
@@ -30,7 +30,7 @@ General:
     opt_keep_intermediates: False
     # The number of cores you would like to use for running simulations in
     # parallel. Only used if execution = 'parallel'
-    num_cores: 6
+    num_cores: 4
     # Would you like to save the plots for each sim?
     save_plots: True
     # Would you like to show the plots during postprocessing in real time?
@@ -77,13 +77,15 @@ Simulation:
     # Linearly Polarized Along Y : lpy
     # NOTE: Now that we can specify incident angles we might need to modify this
     polarization: 'rhcp'
+    average_bins: True
     # Number of output sample in the x, y, and z directions
     # every 2 nm
-    x_samples: 100
-    y_samples: 100
+    x_samples: 10
+    y_samples: 10
     # every 10 nm
     # z_samples: 350
-    z_samples: '`round((%(Layers.Air.params.thickness.value)s+%(Layers.ITO.params.thickness.value)s+%(Layers.NW_AlShell.params.thickness.value)s+3)*50)`'
+    # z_samples: '`round((%(Layers.Air.params.thickness.value)s+%(Layers.ITO.params.thickness.value)s+%(Layers.NW_AlShell.params.thickness.value)s+3)*50)`'
+    z_samples: 10
     r_samples : 150
     theta_samples : 360
     # Maximum depth into the device to collect field data
@@ -91,8 +93,8 @@ Simulation:
     # Base length unit defined relative to a meter (so nm would be 1E-9)
     base_unit: 1.0E-6
     # Path to sun input power file
-    input_power: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/Input_sun_power.txt'
-    input_power_wv: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/ASTMG173.csv'
+    input_power: '$HOME/software/nanowire/am15g_freq.txt'
+    input_power_wv: '$HOME/software/nanowire/ASTMG173.csv'
     # Global simulation parameters that are "sweepable"
     params:
         # The angle of the incident light
@@ -118,10 +120,10 @@ Simulation:
             value: 10
 
 Materials:
-    ITO: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/008_ITO_nk_Hz.txt'
-    Cyclotene: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/007_Cyclotrene_nk_Hz.txt'
-    GaAs: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/006_GaAs_nk_Walker_modified_Hz.txt'
-    AlInP: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/009_AlInP_nk_Hz.txt'
+    ITO: '$HOME/software/nanowire/NK/008_ITO_nk_Hz.txt'
+    Cyclotene: '$HOME/software/nanowire/NK/007_Cyclotrene_nk_Hz.txt'
+    GaAs: '$HOME/software/nanowire/NK/006_GaAs_nk_Walker_modified_Hz.txt'
+    AlInP: '$HOME/software/nanowire/NK/009_AlInP_nk_Hz.txt'
 
 Layers:
     Air:

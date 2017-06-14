@@ -21,7 +21,12 @@ def get_combos(conf, keysets):
     names of all the variable parameters in the config object. The second is a
     list of lists, where the inner list contains all the unique combinations of
     this config object's non-fixed parameters. The elements of the inner list
-    of value correspond to the elements of the key list"""
+    of values correspond to the elements of the key list (i.e order is
+    preserved) for example
+    
+    list1 = [param_name1, param_name2, param_name3
+    list2 = [[val11, val12, val13], [val21, val22, val23], [val31, val32, val33]]
+    """
 
     # log = logging.getLogger()
     # log.info("Constructing dictionary of options and their values ...")

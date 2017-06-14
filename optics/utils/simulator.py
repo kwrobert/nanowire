@@ -21,7 +21,12 @@ def get_combos(conf, keysets):
     names of all the variable parameters in the config object. The second is a
     list of lists, where the inner list contains all the unique combinations of
     this config object's non-fixed parameters. The elements of the inner list
-    of value correspond to the elements of the key list"""
+    of values correspond to the elements of the key list (i.e order is
+    preserved) for example
+    
+    list1 = [param_name1, param_name2, param_name3
+    list2 = [[val11, val12, val13], [val21, val22, val23], [val31, val32, val33]]
+    """
 
     # log = logging.getLogger()
     # log.info("Constructing dictionary of options and their values ...")
@@ -281,7 +286,7 @@ class Simulator():
             self.log.info('Computing for entire device')
             height = self.get_height()
             zvec = np.arange(0, height + dz, dz)
-        arr = np.zeros((x_samp * y_samp * len(zvec), 9))
+        arr = np.zeros((x_samp * y_samp * len(zvec), 6))
         count = 0
         for z in zvec:
             E, H = self.s4.GetFieldsOnGrid(
@@ -292,8 +297,7 @@ class Simulator():
                 for yval in xval:
                     fixed = [val for c in yval for val in
                              (c.real, c.imag)]
-                    row = [xcount, ycount, z] + fixed
-                    arr[count, :] = row
+                    arr[count, :] = fixed
                     count += 1
                     ycount += 1
                 xcount += 1
@@ -347,7 +351,9 @@ class Simulator():
         else:
             efield = self.get_field()
         out = os.path.join(self.dir, self.conf["General"]["base_name"] + '.E')
-        headers = ['x', 'y', 'z', 'Ex', 'Ey', 'Ez']
+        # headers = ['x', 'y', 'z', 'Ex', 'Ey', 'Ez']
+        headers = [OrderedDict([('Ex_real', 0), ('Ex_imag', 1), ('Ey_real', 2),
+                               ('Ey_imag', 3), ('Ez_real', 4), ('Ez_imag', 5)])]
         if self.conf['General']['save_as'] == 'text':
             np.savetxt(out, efield, header=','.join(headers))
         elif self.conf['General']['save_as'] == 'npz':

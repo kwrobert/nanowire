@@ -1,0 +1,54 @@
+utils package
+=============
+
+Submodules
+----------
+
+utils.config module
+-------------------
+
+.. automodule:: utils.config
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+utils.rcwa_app module
+---------------------
+
+.. automodule:: utils.rcwa_app
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+utils.simulation module
+-----------------------
+
+.. automodule:: utils.simulation
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+utils.simulator module
+----------------------
+
+.. automodule:: utils.simulator
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+utils.utils module
+------------------
+
+.. automodule:: utils.utils
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+
+Module contents
+---------------
+
+.. automodule:: utils
+    :members:
+    :undoc-members:
+    :show-inheritance:

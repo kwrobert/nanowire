@@ -1,0 +1,149 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>utils.rcwa_app &#8212; Nanowire .1 documentation</title>
+    
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../',
+        VERSION:     '.1',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true
+      };
+    </script>
+    <script type="text/javascript" src="../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <link rel="top" title="Nanowire .1 documentation" href="../../index.html" />
+    <link rel="up" title="Module code" href="../index.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head>
+  <body role="document">
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for utils.rcwa_app</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">from</span> <span class="nn">distutils.spawn</span> <span class="k">import</span> <span class="n">find_executable</span>
+<span class="kn">import</span> <span class="nn">gc3libs</span>
+<span class="kn">from</span> <span class="nn">gc3libs</span> <span class="k">import</span> <span class="n">Application</span>
+<span class="kn">from</span> <span class="nn">gc3libs.cmdline</span> <span class="k">import</span> <span class="n">SessionBasedScript</span>
+
+<span class="n">MODULE_PATH</span> <span class="o">=</span> <span class="s1">&#39;$HOME/software/nanowire&#39;</span>
+
+
+<div class="viewcode-block" id="RCWA_App"><a class="viewcode-back" href="../../utils.html#utils.rcwa_app.RCWA_App">[docs]</a><span class="k">class</span> <span class="nc">RCWA_App</span><span class="p">(</span><span class="n">Application</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Runs the lua script that interfaces with the S4 RCWA library&quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conf</span><span class="p">):</span>
+        <span class="n">sim_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">conf</span><span class="p">[</span><span class="s1">&#39;General&#39;</span><span class="p">][</span><span class="s1">&#39;sim_dir&#39;</span><span class="p">])</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;SIM_DIR: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">sim_dir</span><span class="p">)</span>
+        <span class="n">conf_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">sim_dir</span><span class="p">,</span> <span class="s1">&#39;sim_conf.yml&#39;</span><span class="p">)</span>
+        <span class="n">script</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">MODULE_PATH</span><span class="p">,</span> <span class="s1">&#39;optics/utils/simulator.py&#39;</span><span class="p">)</span>
+        <span class="n">python</span> <span class="o">=</span> <span class="n">find_executable</span><span class="p">(</span><span class="s1">&#39;python2&#39;</span><span class="p">)</span>
+        <span class="n">args</span> <span class="o">=</span> <span class="p">[</span><span class="n">python</span><span class="p">,</span> <span class="n">script</span><span class="p">,</span> <span class="s1">&#39;sim_conf.yml&#39;</span><span class="p">]</span>
+        <span class="n">mem</span> <span class="o">=</span> <span class="n">gc3libs</span><span class="o">.</span><span class="n">quantity</span><span class="o">.</span><span class="n">Memory</span><span class="p">(</span><span class="s1">&#39;600 MB&#39;</span><span class="p">)</span>
+        <span class="n">outs</span> <span class="o">=</span> <span class="p">[(</span><span class="s1">&#39;</span><span class="si">{}</span><span class="s1">/</span><span class="si">{}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">sim_dir</span><span class="p">,</span> <span class="n">outfile</span><span class="p">),</span> <span class="n">outfile</span><span class="p">)</span> <span class="k">for</span> <span class="n">outfile</span> <span class="ow">in</span>
+                <span class="p">(</span><span class="s1">&#39;field_data.E.npz&#39;</span><span class="p">,</span> <span class="s1">&#39;sim.log&#39;</span><span class="p">,</span> <span class="s1">&#39;time.dat&#39;</span><span class="p">,</span> <span class="s1">&#39;fluxes.dat&#39;</span><span class="p">)]</span>
+        <span class="k">if</span> <span class="n">conf</span><span class="o">.</span><span class="n">variable_thickness</span><span class="p">:</span>
+            <span class="c1"># Allocate a minute for each thickness we need to simulate</span>
+            <span class="n">num_minutes</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">conf</span><span class="o">.</span><span class="n">variable_thickness</span><span class="p">)</span>
+            <span class="n">wtime</span> <span class="o">=</span> <span class="n">gc3libs</span><span class="o">.</span><span class="n">quantity</span><span class="o">.</span><span class="n">Duration</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">{}</span><span class="s1"> minutes&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">num_minutes</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">wtime</span> <span class="o">=</span> <span class="n">gc3libs</span><span class="o">.</span><span class="n">quantity</span><span class="o">.</span><span class="n">Duration</span><span class="p">(</span><span class="s1">&#39;1 minutes&#39;</span><span class="p">)</span>
+        <span class="c1"># ANY_OUTPUT means GC3 will collect anything that ends up in the remote</span>
+        <span class="c1"># execution directory, which is exactly what we want. Any files that</span>
+        <span class="c1"># get written by the simulator.py script are necessary</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;ARGS: </span><span class="si">{}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">args</span><span class="p">))</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">RCWA_App</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">__init__</span><span class="p">(</span><span class="n">arguments</span><span class="o">=</span><span class="n">args</span><span class="p">,</span>
+                                       <span class="c1"># (local_path, remote_copy_location)</span>
+                                       <span class="c1"># remote location relative to execution</span>
+                                       <span class="c1"># directory</span>
+                                       <span class="n">inputs</span><span class="o">=</span><span class="p">[(</span><span class="n">conf_file</span><span class="p">,</span> <span class="s1">&#39;sim_conf.yml&#39;</span><span class="p">)],</span>
+                                       <span class="c1"># outputs=gc3libs.ANY_OUTPUT,</span>
+                                       <span class="n">outputs</span><span class="o">=</span><span class="n">outs</span><span class="p">,</span>
+                                       <span class="c1"># The local directory we want the</span>
+                                       <span class="c1"># results to end up in</span>
+                                       <span class="n">output_dir</span><span class="o">=</span><span class="n">sim_dir</span><span class="p">,</span>
+                                       <span class="n">requested_cores</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+                                       <span class="n">requested_memory</span><span class="o">=</span><span class="n">mem</span><span class="p">,</span>
+                                       <span class="n">requested_walltime</span><span class="o">=</span><span class="n">wtime</span><span class="p">,</span>
+                                       <span class="n">stdout</span><span class="o">=</span><span class="s1">&#39;sim.out&#39;</span><span class="p">,</span> <span class="n">stderr</span><span class="o">=</span><span class="s1">&#39;sim.err&#39;</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="SimWrapper"><a class="viewcode-back" href="../../utils.html#utils.rcwa_app.SimWrapper">[docs]</a><span class="k">class</span> <span class="nc">SimWrapper</span><span class="p">(</span><span class="n">SessionBasedScript</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;The class that wraps around all the individual simulations. It handles all the</span>
+<span class="sd">    directory set up and parameter resolution&quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">SimWrapper</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">__init__</span><span class="p">(</span><span class="n">version</span><span class="o">=</span><span class="s1">&#39;1.0&#39;</span><span class="p">)</span>
+
+<div class="viewcode-block" id="SimWrapper.new_tasks"><a class="viewcode-back" href="../../utils.html#utils.rcwa_app.SimWrapper.new_tasks">[docs]</a>    <span class="k">def</span> <span class="nf">new_tasks</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">extra</span><span class="p">):</span>
+        <span class="n">apps_to_run</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">return</span> <span class="n">apps_to_run</span></div></div>
+
+<span class="k">if</span> <span class="n">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+    <span class="kn">import</span> <span class="nn">rcwa_app</span>
+    <span class="n">rcwa_app</span><span class="o">.</span><span class="n">SimWrapper</span><span class="p">()</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper"><div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../index.html">Documentation overview</a><ul>
+  <li><a href="../index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="../../search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2017, Kyle Robertson.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 1.4.6</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.9</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

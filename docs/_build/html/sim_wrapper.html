@@ -1,0 +1,177 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>sim_wrapper module &#8212; Nanowire .1 documentation</title>
+    
+    <link rel="stylesheet" href="_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '.1',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <link rel="top" title="Nanowire .1 documentation" href="index.html" />
+    <link rel="up" title="optics" href="modules.html" />
+    <link rel="next" title="utils package" href="utils.html" />
+    <link rel="prev" title="postprocess module" href="postprocess.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head>
+  <body role="document">
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <div class="section" id="module-sim_wrapper">
+<span id="sim-wrapper-module"></span><h1>sim_wrapper module<a class="headerlink" href="#module-sim_wrapper" title="Permalink to this headline">¶</a></h1>
+<dl class="function">
+<dt id="sim_wrapper.parse_file">
+<code class="descclassname">sim_wrapper.</code><code class="descname">parse_file</code><span class="sig-paren">(</span><em>path</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sim_wrapper.html#parse_file"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sim_wrapper.parse_file" title="Permalink to this definition">¶</a></dt>
+<dd><p>Super simple utility to parse a yaml file given a path</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="sim_wrapper.make_confs">
+<code class="descclassname">sim_wrapper.</code><code class="descname">make_confs</code><span class="sig-paren">(</span><em>global_conf</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sim_wrapper.html#make_confs"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sim_wrapper.make_confs" title="Permalink to this definition">¶</a></dt>
+<dd><p>Make all the configuration dicts for each parameter combination</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="sim_wrapper.run_sim">
+<code class="descclassname">sim_wrapper.</code><code class="descname">run_sim</code><span class="sig-paren">(</span><em>conf</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sim_wrapper.html#run_sim"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sim_wrapper.run_sim" title="Permalink to this definition">¶</a></dt>
+<dd><p>Actually runs simulation in a given directory using subprocess.call.
+Expects a tuple containing the absolute path to the job directory as the
+first element and the configuration object for the job as the second
+element</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="sim_wrapper.gc3_submit">
+<code class="descclassname">sim_wrapper.</code><code class="descname">gc3_submit</code><span class="sig-paren">(</span><em>gconf</em>, <em>sim_confs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sim_wrapper.html#gc3_submit"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sim_wrapper.gc3_submit" title="Permalink to this definition">¶</a></dt>
+<dd><p>This function runs jobs on a bunch of remote hosts via SSH
+and well as on the local machine using a library called gc3pie. Requires
+gc3pie to be installed and configured. Currently super slow and not really
+worth using.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="sim_wrapper.execute_jobs">
+<code class="descclassname">sim_wrapper.</code><code class="descname">execute_jobs</code><span class="sig-paren">(</span><em>gconf</em>, <em>confs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sim_wrapper.html#execute_jobs"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sim_wrapper.execute_jobs" title="Permalink to this definition">¶</a></dt>
+<dd><p>Given a list of configuration dictionaries, run them either serially or in
+parallel by applying run_sim to each dict. We do this instead of applying
+to an actual Simulator object because the Simulator objects are not
+pickeable and thus cannot be parallelized by the multiprocessing lib</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="sim_wrapper.spectral_wrapper">
+<code class="descclassname">sim_wrapper.</code><code class="descname">spectral_wrapper</code><span class="sig-paren">(</span><em>opt_pars</em>, <em>baseconf</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sim_wrapper.html#spectral_wrapper"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sim_wrapper.spectral_wrapper" title="Permalink to this definition">¶</a></dt>
+<dd><p>A wrapper function to handle spectral sweeps and postprocessing for the scipy minimizer. It
+accepts the initial guess as a vector, the base config file, and the keys that map to the
+initial guesses. It runs a spectral sweep (in parallel if specified), postprocesses the results,
+and returns the spectrally weighted reflection</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="sim_wrapper.run_optimization">
+<code class="descclassname">sim_wrapper.</code><code class="descname">run_optimization</code><span class="sig-paren">(</span><em>conf</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sim_wrapper.html#run_optimization"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sim_wrapper.run_optimization" title="Permalink to this definition">¶</a></dt>
+<dd><p>Runs an optimization on a given set of parameters</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="sim_wrapper.run">
+<code class="descclassname">sim_wrapper.</code><code class="descname">run</code><span class="sig-paren">(</span><em>conf</em>, <em>log</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sim_wrapper.html#run"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sim_wrapper.run" title="Permalink to this definition">¶</a></dt>
+<dd><p>The main run methods that decides what kind of simulation to run based on the
+provided config object</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="sim_wrapper.pre_check">
+<code class="descclassname">sim_wrapper.</code><code class="descname">pre_check</code><span class="sig-paren">(</span><em>conf_path</em>, <em>conf</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/sim_wrapper.html#pre_check"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sim_wrapper.pre_check" title="Permalink to this definition">¶</a></dt>
+<dd><p>Checks conf file for invalid values</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="sim_wrapper.main">
+<code class="descclassname">sim_wrapper.</code><code class="descname">main</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/sim_wrapper.html#main"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#sim_wrapper.main" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper"><div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+  <li><a href="Code.html">Code</a><ul>
+  <li><a href="modules.html">optics</a><ul>
+      <li>Previous: <a href="postprocess.html" title="previous chapter">postprocess module</a></li>
+      <li>Next: <a href="utils.html" title="next chapter">utils package</a></li>
+  </ul></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="_sources/sim_wrapper.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2017, Kyle Robertson.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 1.4.6</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.9</a>
+      
+      |
+      <a href="_sources/sim_wrapper.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

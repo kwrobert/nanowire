@@ -229,7 +229,6 @@ class Simulation(object):
         # TODO: This is NOT foolproof. Need a better way of distinguishing
         # between E field and H field quantities
         if field == "H":
-            self.log.info("Inserting an H field quantity")
             # If this quantity is already in the matrix, just update it.
             # Otherwise append it as a new column
             if quantity in self.h_lookup:
@@ -248,7 +247,6 @@ class Simulation(object):
                 self.h_lookup[quantity] = dat.shape[1] - 1
                 self.log.debug('Matrix shape after extending: %s', str(self.h_data.shape))
         else:
-            self.log.info("Inserting an E field quantity")
             if quantity in self.e_lookup:
                 self.log.debug("Quantity {} exists in matrix, "
                                "updating".format(quantity))

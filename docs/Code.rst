@@ -1,7 +1,4 @@
 Code
 ====
 
-.. automodule:: postprocess
-
-.. autoclass:: Processor
-    :members:
+Code stuff

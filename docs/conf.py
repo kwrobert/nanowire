@@ -37,6 +37,9 @@ extensions = [
     'sphinx.ext.viewcode',
 ]
 
+# Tells auto doc to source things by order in the source file
+autodoc_member_order = 'bysource'
+
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
 

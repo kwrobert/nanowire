@@ -758,9 +758,9 @@ class Cruncher(Processor):
         base_mat = sim.conf['Layers'][lname]['base_material']
         nk_mat = nk[base_mat][0] * nk[base_mat][1] * \
             np.ones((samps[1], samps[0]))
-        # Get the shapes sorted in reverse order
+        # Get the shapes sorted in increasing order
         shapes = sim.conf.sorted_dict(sim.conf['Layers'][lname]['geometry'])
-        # Loop through the layers. We want them in reverse order so the
+        # Loop through the layers. We want them in increasing order so the
         # smallest shape, which is contained within all the other shapes and
         # should override their nk values, goes last
         for shape, sdata in shapes.items():
@@ -790,7 +790,7 @@ class Cruncher(Processor):
                     'normEsquared']['compute'] = False
             except KeyError:
                 pass
-        # Prefactor for generation rate. Not we gotta convert from m^3 to cm^3,
+        # Prefactor for generation rate. Note we gotta convert from m^3 to cm^3,
         # hence 1e6 factor
         fact = c.epsilon_0 / (c.hbar * 1e6)
         # Get the indices of refraction at this frequency

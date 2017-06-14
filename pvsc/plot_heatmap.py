@@ -23,7 +23,8 @@ def extract_floats(string):
 def get_value(path):
     with open(path,'r') as f:
         val = float(f.readline())
-    return val
+    # return val
+    return val*33.37
 
 def make_dict(files):
 
@@ -135,7 +136,7 @@ def make_plot(path):
     # ax.xaxis.set_label_position('top')
     ax.set_ylabel('Array Period [nm]')
     cb = fig.colorbar(mat, ax=ax)
-    cb.set_label("Integrated Absorbance")
+    cb.set_label(r"$J_{ph}$ [mA/cm$^2$]")
     plt.savefig('test_map.pdf')
     # plt.show()
     plt.close(fig)

@@ -303,9 +303,11 @@ class Config(MutableMapping):
         return dict.__str__(self.data)
 
     def getfromseq(self, keyset):
-        """A convenience method to get the section of the config file located at the end
-        of the sequence of keys"""
-        print(keyset)
+        """
+        A convenience method to get the section of the config file located
+        at the end of the sequence of keys
+        """
+
         section = self.data
         for key in keyset:
             section = section[key]

@@ -660,8 +660,19 @@ class Cruncher(Processor):
         sim.avgs[key] = avgs
         return avgs
 
-    def transmissionData(self, sim):
-        """Computes reflection, transmission, and absorbance"""
+    def transmissionData(self, sim, port='Substrate'):
+        """
+        Computes reflection, transmission, and absorbance
+
+        sim: :py:class:`utils.simulation.Simulation`
+        port: string
+            Default: 'substrate'
+            Name of the location at which you would like to place the
+            transmission port (i.e where you would like to compute
+            transmission). This must correspond to one of the keys placed in
+            the fluxes.dat file
+        """
+
         self.log.info('Computing transmission data ...')
         base = sim.conf['General']['sim_dir']
         path = os.path.join(base, 'fluxes.dat')
@@ -680,18 +691,12 @@ class Cruncher(Processor):
         # An ordered dict is actually just a list of tuples so we can access
         # the key directly like so
         first_name = first_layer[0]
-        last_layer = sorted_layers.popitem()
-        # Port at top of substrate
-        last_name = last_layer[0]
-        # Port at bottom of substrate
-        # last_name = last_layer[0]+'_bottom'
-        # self.log.info('LAST LAYER: %s'%str(last_layer))
         # p_inc = data[first_name][0]
         # p_ref = np.abs(data[first_name][1])
         # p_trans = data[last_name][0]
         p_inc = np.sqrt(data[first_name][0]**2 + data[first_name][2]**2)
         p_ref = np.sqrt(data[first_name][1]**2 + data[first_name][3]**2)
-        p_trans = np.sqrt(data[last_name][0]**2 + data[last_name][2]**2)
+        p_trans = np.sqrt(data[port][0]**2 + data[port][2]**2)
         reflectance = p_ref / p_inc
         transmission = p_trans / p_inc
         absorbance = 1 - reflectance - transmission

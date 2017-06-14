@@ -12,54 +12,15 @@ import argparse as ap
 
 from itertools import chain, product
 from collections import OrderedDict
-from utils import make_hash, configure_logger
+from utils import make_hash, configure_logger, get_combos
 from config import Config
-
-
-def get_combos(conf, keysets):
-    """Given a config object, return two lists. The first list contains the
-    names of all the variable parameters in the config object. The second is a
-    list of lists, where the inner list contains all the unique combinations of
-    this config object's non-fixed parameters. The elements of the inner list
-    of values correspond to the elements of the key list (i.e order is
-    preserved) for example
-    
-    list1 = [param_name1, param_name2, param_name3
-    list2 = [[val11, val12, val13], [val21, val22, val23], [val31, val32, val33]]
-    """
-
-    # log = logging.getLogger()
-    # log.info("Constructing dictionary of options and their values ...")
-    # Get the list of values from all our variable keysets
-    optionValues = OrderedDict()
-    for keyset in keysets:
-        par = '.'.join(keyset)
-        pdict = conf[keyset]
-        if pdict['itertype'] == 'numsteps':
-            values = np.linspace(pdict['start'], pdict['end'], pdict['step'])
-        elif pdict['itertype'] == 'stepsize':
-            values = np.arange(pdict['start'], pdict[
-                               'end'] + pdict['step'], pdict['step'])
-        else:
-            raise ValueError(
-                'Invalid itertype specified at {}'.format(str(keyset)))
-        optionValues[par] = values
-    # log.debug("Option values dict after processing: %s" % str(optionValues))
-    valuelist = list(optionValues.values())
-    keys = list(optionValues.keys())
-    # Consuming a list of lists/tuples where each inner list/tuple contains all
-    # the values for a particular parameter, returns a list of tuples
-    # containing all the unique combos for that set of parameters
-    combos = list(product(*valuelist))
-    # log.debug('The list of parameter combos: %s', str(combos))
-    return keys, combos
 
 
 class Simulator():
 
     def __init__(self, conf, log_level='info'):
-        conf.interpolate()
-        conf.evaluate()
+        # conf.interpolate()
+        # conf.evaluate()
         self.conf = conf
         numbasis = self.conf['Simulation']['params']['numbasis']['value']
         period = self.conf['Simulation']['params']['array_period']['value']
@@ -70,6 +31,8 @@ class Simulator():
         lfile = os.path.join(sim_dir, 'sim.log')
         self.log = configure_logger(level=log_level, name=self.id[0:10],
                                     logfile=lfile, propagate=False)
+        print('HERE IS LOGGER')
+        print(self.log)
         self.s4 = S4.New(Lattice=((period, 0), (0, period)), NumBasis=numbasis)
 
     def __del__(self):
@@ -519,7 +482,7 @@ def main():
         sim.log.info('Computing a thickness sweep at %s' % sim.id[0:10])
         orig_id = sim.id[0:10]
         # Get all combinations of layer thicknesses
-        keys, combos = get_combos(sim.conf, sim.conf.variable_thickness)
+        keys, combos, bin_size = get_combos(sim.conf, sim.conf.variable_thickness)
         # Update base directory to new sub directory
         sim.conf['General']['base_dir'] = sim.dir
         # Set things up for the first combo

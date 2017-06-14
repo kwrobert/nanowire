@@ -1056,8 +1056,8 @@ class Global_Cruncher(Cruncher):
         interpreted as the fraction of incident photons that were absorbed. If
         you expressed your incident spectrum in terms of power per unit area,
         then this can be interpreted as the fraction of incident power per unit
-        area that gets absorbed. In summary, its the fraction of _whatever you
-        put in_ that is being absorbed by the device."""
+        area that gets absorbed. In summary, its the fraction of whatever you
+        put in that is being absorbed by the device."""
         valuelist = []
         for group in self.sim_groups:
             base = group[0].conf['General']['base_dir']

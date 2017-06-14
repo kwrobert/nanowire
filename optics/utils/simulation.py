@@ -88,7 +88,9 @@ class Simulation(object):
         return data, lookup
 
     def get_data(self):
-        """Returns the already crunched E and H data for this particular sim"""
+        """Loads the E and H data and E and H column header lookup
+        tables for this particular sim. Populates the {e,h}_{lookup,data}
+        attributes and also returns these four things"""
         self.log.info('Collecting data for sim %s',
                       self.conf['General']['sim_dir'])
         sim_path = self.conf['General']['sim_dir']
@@ -160,7 +162,6 @@ class Simulation(object):
         self.log.debug('Here are the H matrix headers: %s', str(self.h_lookup))
         ftype = self.conf['General']['save_as']
         if ftype == 'text':
-            epath = epath
             # These make sure all writes are atomic and thus we won't get any
             # partially written files if processing is interrupted for any
             # reason (like a keyboard interrupt)
@@ -168,7 +169,6 @@ class Simulation(object):
                 np.savetxt(out, self.e_data, header=','.join(
                     self.e_lookup.keys()))
             if not ignore:
-                hpath = hpath + '.crnch'
                 with open_atomic(hpath, 'w', npz=False) as out:
                     np.savetxt(out, self.h_data, header=','.join(
                         self.h_lookup.keys()))

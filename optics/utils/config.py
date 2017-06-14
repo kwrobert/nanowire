@@ -108,6 +108,12 @@ class Config(MutableMapping):
                             'ref_count': 1, 'ref_by': [new_key]}
 
     def build_dependencies(self):
+        """
+        Build out the dependency graph that determines which other config item a
+        particular config item refers to, and which config items refer to it.
+        We can then use this graph to determine which substitutions we need to
+        perform first when calling interpolate
+        """
         # First we find all the references and the exact location(s) in the config
         # that each reference ocurrs at
         self._find_references()
@@ -192,8 +198,9 @@ class Config(MutableMapping):
             config_resolved = self._check_resolved(self.dep_graph.keys())
 
     def evaluate(self, in_table=None, old_key=None):
-        # self.log.info('Evaluating params')
-        # Evaluates any expressions surrounded in back ticks `like_so+blah`
+        """
+        Evaluates any expressions surrounded in back ticks
+        """
         if in_table:
             t = in_table
         else:
@@ -298,6 +305,7 @@ class Config(MutableMapping):
     def getfromseq(self, keyset):
         """A convenience method to get the section of the config file located at the end
         of the sequence of keys"""
+        print(keyset)
         section = self.data
         for key in keyset:
             section = section[key]

@@ -14,7 +14,6 @@ Contents:
    Introduction.rst
    Tutorial.rst
    Code.rst
-   modules
 
 Indices and tables
 ==================

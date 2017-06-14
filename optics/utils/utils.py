@@ -2,10 +2,63 @@ import sys
 import os
 import hashlib
 import logging
+import itertools
 import tempfile as tmp
+import numpy as np
 
 from collections import OrderedDict
 from contextlib import contextmanager
+
+
+def get_combos(conf, keysets):
+    """Given a config object and an iterable of the parameters you wish to find
+    unique combinations of, return two lists. The first list contains the
+    names of all the variable parameters in the config object. The second is a
+    list of lists, where each inner list contains a unique combination of
+    values of the parameters provided in keysets. Order is preserved such that
+    the names in the first list corresponds to the values in the second list.
+    For example, the returned lists would look like:
+
+    list1 = [param_name1, param_name2, param_name3]
+    list2 = [[val11, val12, val13], [val21, val22, val23], [val31, val32, val33]]
+    """
+
+    # log = logging.getLogger()
+    # log.info("Constructing dictionary of options and their values ...")
+    # Get the list of values from all our variable keysets
+    optionValues = OrderedDict()
+    bin_size = None
+    for keyset in keysets:
+        par = '.'.join(keyset)
+        pdict = conf[keyset]
+        # Force to float in case we did some interpolation in the config
+        start, end, step = map(
+            float, [pdict['start'], pdict['end'], pdict['step']])
+        if pdict['itertype'] == 'numsteps':
+            values = np.linspace(start, end, step)
+            # We need to add the size of the bin to each sim config so we can
+            # use it to average the total power contained within each bin
+            # when computer incident amplitude/power
+            if 'frequency' in keyset:
+                bin_size = values[1] - values[0]
+        elif pdict['itertype'] == 'stepsize':
+            values = np.arange(start, end + step, step)
+            if 'frequency' in keyset:
+                bin_size = float(step)
+        else:
+            raise ValueError(
+                'Invalid itertype specified at {}'.format(str(keyset)))
+        optionValues[par] = values
+    # log.debug("Option values dict after processing: %s" % str(optionValues))
+    valuelist = list(optionValues.values())
+    keys = list(optionValues.keys())
+    # Consuming a list of lists/tuples where each inner list/tuple contains all
+    # the values for a particular parameter, returns a list of tuples
+    # containing all the unique combos for that set of parameters
+    combos = list(itertools.product(*valuelist))
+    # log.debug('The list of parameter combos: %s', str(combos))
+    # Gotta map to float cuz yaml writer doesn't like numpy data types
+    return keys, combos, bin_size
 
 
 @contextmanager
@@ -15,8 +68,6 @@ def tempfile(suffix='', dir=None, npz=True):
     Will find a free temporary filename upon entering
     and will try to delete the file on leaving, even in case of an exception.
 
-    Parameters
-    ----------
     suffix : string
         optional file suffix
     dir : string
@@ -46,8 +97,6 @@ def open_atomic(filepath, npz=True):
     file is used as a placeholder for filepath to make atomic write operations
     possible. The file will not be moved to destination in case of an exception.
 
-    Parameters
-    ----------
     filepath : string
         the actual filepath we wish to write to
     """
@@ -81,14 +130,22 @@ class StreamToLogger(object):
 
 def configure_logger(level='info', name=None, console=False, logfile=None,
                      propagate=True):
-    """Creates a logger providing some arguments to make it more configurable.
-       name: Name of logger to be created. Defaults to the root logger
-       level: The log level of the logger, defaults to INFO
-       console: Add a stream handler to send messages to the console. Generally
-                only necessary for the root logger.
-       logfile: If specified, will create a simple file handler and send
-                messages to the specified file. The parent dirs to the location will
-                be created automatically if they don't already exist. """
+    """
+    Creates a logger providing some arguments to make it more configurable.
+
+    name : string
+        Name of logger to be created. Defaults to the root logger
+    level : string
+        The log level of the logger, defaults to INFO. One of: ['debug', 'info',
+        'warning', 'error', 'critical']
+    console : bool
+        Add a stream handler to send messages to the console. Generally
+        only necessary for the root logger.
+    logfile : string
+        Path to a file. If specified, will create a simple file handler and send
+        messages to the specified file. The parent dirs to the location will
+        be created automatically if they don't already exist.
+    """
     # Get numeric level safely
     numeric_level = getattr(logging, level.upper(), None)
     if not isinstance(numeric_level, int):

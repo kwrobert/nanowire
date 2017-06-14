@@ -6,6 +6,7 @@ SPHINXOPTS    =
 SPHINXBUILD   = sphinx-build
 PAPER         =
 BUILDDIR      = _build
+MODULES       = '../optics/' 
 
 # Internal variables.
 PAPEROPT_a4     = -D latex_paper_size=a4
@@ -50,6 +51,9 @@ clean:
 
 .PHONY: html
 html:
+	@echo "Running autodoc"
+	@echo $(MODULES)
+	$(foreach module,$(MODULES),sphinx-apidoc -f -o ./ $(module);)
 	$(SPHINXBUILD) -b html $(ALLSPHINXOPTS) $(BUILDDIR)/html
 	@echo
 	@echo "Build finished. The HTML pages are in $(BUILDDIR)/html."

@@ -20,11 +20,9 @@ import logging
 # from gc3libs.core import Core, Engine
 
 # get our custom config object and the logger function
-#from utils.simulation import *
-#from utils.config import Config
 from utils.simulator import Simulator
 from utils.config import Config
-from utils.utils import configure_logger, make_hash
+from utils.utils import configure_logger, make_hash, get_combos
 # from rcwa_app import RCWA_App
 from collections import OrderedDict
 #  from functools import wraps
@@ -73,54 +71,11 @@ from collections import OrderedDict
 
 
 def parse_file(path):
+    """Super simple utility to parse a yaml file given a path"""
     with open(path, 'r') as cfile:
         text = cfile.read()
     conf = yaml.load(text, Loader=yaml.Loader)
     return conf
-
-
-def get_combos(conf, keysets):
-    """Given a config object, return two lists. The first list contains the
-    names of all the variable parameters in the config object. The second is a
-    list of lists, where the inner list contains all the unique combinations of
-    this config object's non-fixed parameters. The elements of the inner list
-    of value correspond to the elements of the key list"""
-
-    log = logging.getLogger()
-    log.info("Constructing dictionary of options and their values ...")
-    # Get the list of values from all our variable keysets
-    optionValues = OrderedDict()
-    for keyset in keysets:
-        par = '.'.join(keyset)
-        pdict = conf[keyset]
-        # Force to float in case we did some interpolation in the config
-        start, end, step = map(
-            float, [pdict['start'], pdict['end'], pdict['step']])
-        if pdict['itertype'] == 'numsteps':
-            values = np.linspace(start, end, step)
-            # We need to add the size of the bin to each sim config so we can
-            # use it to average the total power contained within each bin
-            # when computer incident amplitude/power
-            if 'frequency' in keyset:
-                bin_size = values[1] - values[0]
-        elif pdict['itertype'] == 'stepsize':
-            values = np.arange(start, end + step, step)
-            if 'frequency' in keyset:
-                bin_size = step
-        else:
-            raise ValueError(
-                'Invalid itertype specified at {}'.format(str(keyset)))
-        optionValues[par] = values
-    log.debug("Option values dict after processing: %s" % str(optionValues))
-    valuelist = list(optionValues.values())
-    keys = list(optionValues.keys())
-    # Consuming a list of lists/tuples where each inner list/tuple contains all the values
-    # for a particular parameter, returns a list of tuples containing all the unique
-    # combos for that set of parameters
-    combos = list(itertools.product(*valuelist))
-    log.debug('The list of parameter combos: %s', str(combos))
-    # Gotta map to float cuz yaml writer doesn't like numpy data types
-    return keys, combos, float(bin_size)
 
 
 def make_confs(global_conf):
@@ -149,82 +104,40 @@ def make_confs(global_conf):
                     'type': 'fixed', 'value': float(combo[i])}
         confs.append(sim_conf)
     return confs
-#      with session_scope() as sess:
-#          log = logging.getLogger()
-#          log.info("Running single sim")
-#          del sim['Postprocessing']
-#          # Instantiate simulation object
-#          #sim = Simulation(sim_conf)
-#          path = os.path.join(sim['General']['base_dir'],sim.id[0:10])
-#          print(sim.id)
-#          sim['General']['sim_dir'] = path
-#          print(sim.id)
-#          sess.add(sim)
-#          # The dir is already made when the logger is configured but this is a safety measure i guess?
-#          try:
-#              os.makedirs(path)
-#          except OSError:
-#              log.info('Data directory already exists, appending timestamp')
-#              stamp = '{:%Y-%m-%d_%H-%M-%S}'.format(datetime.datetime.now())
-#              path = path+'__{}'.format(stamp)
-#              os.makedirs(path)
-#          # Now write the config file to the data subdir
-#          out = os.path.join(path,'sim_conf.yml')
-#          sim.write(out)
-#          # Copy sim script to sim dir
-#          base_script = sim['General']['sim_script']
-#          script = os.path.join(path,os.path.basename(base_script))
-#          shutil.copy(base_script,script)
-    #  return (path,sim)
-
-
-def _get_data(sim, update=False):
-    log = logging.getLogger()
-    sim.conf.write(os.path.join(sim.dir, 'sim_conf.yml'))
-    start = time.time()
-    if not update:
-        sim.configure()
-        sim.build_device()
-        sim.set_excitation()
-    else:
-        sim.update_thicknesses()
-    sim.save_field()
-    sim.save_fluxes()
-    end = time.time()
-    runtime = end - start
-    time_file = os.path.join(sim.dir, 'time.dat')
-    with open(time_file, 'w') as out:
-        out.write('{}\n'.format(runtime))
-    log.info('Simulation {} completed in {:.2}'
-             ' seconds!'.format(sim.id[0:10], runtime))
 
 
 def run_sim(conf):
-    """Actually runs simulation in a given directory using subprocess.call. Expects a tuple
-    containing the absolute path to the job directory as the first element and
-    the configuration object for the job as the second element"""
+    """
+    Actually runs simulation in a given directory using subprocess.call.
+    Expects a tuple containing the absolute path to the job directory as the
+    first element and the configuration object for the job as the second
+    element
+    """
     log = logging.getLogger()
     start = time.time()
+    print(conf.variable_thickness)
     sim = Simulator(copy.deepcopy(conf))
-    try:
-        os.makedirs(sim.dir)
-    except OSError:
-        pass
-    period = sim.conf['Simulation']['params']['array_period']['value']
-    shell_rad = sim.conf['Layers']['NW_AlShell']['params']['shell_radius']['value']
-    if shell_rad > period/2.0:
-        log.info('sim %s has shell radius larger than half the period,'
-                 ' returning'%sim.id)
-        return
     if not sim.conf.variable_thickness:
+        sim.conf.interpolate()
+        sim.conf.evaluate()
+        sim.update_id()
+        try:
+            os.makedirs(sim.dir)
+        except OSError:
+            pass
+        period = sim.conf['Simulation']['params']['array_period']['value']
+        shell_rad = sim.conf['Layers']['NW_AlShell']['params']['shell_radius']['value']
+        if shell_rad > period/2.0:
+            log.info('sim %s has shell radius larger than half the period,'
+                     ' returning'%sim.id)
+            return
         log.info('Executing sim %s'%sim.id[0:10])
-        # _get_data(sim)
         sim.get_data()
     else:
         log.info('Computing a thickness sweep at %s' % sim.id[0:10])
         orig_id = sim.id[0:10]
         # Get all combinations of layer thicknesses
-        keys, combos = get_combos(sim.conf, sim.conf.variable_thickness)
+        keys, combos, bin_size = get_combos(sim.conf, sim.conf.variable_thickness)
         # Update base directory to new sub directory
         sim.conf['General']['base_dir'] = sim.dir
         # Set things up for the first combo
@@ -235,8 +148,11 @@ def run_sim(conf):
         for i in range(len(combo)):
             keyseq = var_thickness[i]
             sim.conf[keyseq] = {'type': 'fixed', 'value': float(combo[i])}
-        # With all the params updated we can now make the subdir from the
-        # sim id and get the data
+        # With all the params updated we can now run substutions and
+        # evaluations in the config that make have referred to some thickness
+        # data, then make the subdir from the sim id and get the data
+        sim.conf.interpolate()
+        sim.conf.evaluate()
         sim.update_id()
         os.makedirs(sim.dir)
         subpath = os.path.join(orig_id, sim.id[0:10])
@@ -259,7 +175,14 @@ def run_sim(conf):
              ' seconds!'.format(sim.id[0:10], runtime))
     return
 
+
 def gc3_submit(gconf, sim_confs):
+    """
+    This function runs jobs on a bunch of remote hosts via SSH
+    and well as on the local machine using a library called gc3pie. Requires
+    gc3pie to be installed and configured. Currently super slow and not really
+    worth using.
+    """
     log = logging.getLogger()
     log.info('GC3 FUNCTION')
     jobs = []

@@ -115,7 +115,6 @@ def run_sim(conf):
     """
     log = logging.getLogger()
     start = time.time()
-    print(conf.variable_thickness)
     sim = Simulator(copy.deepcopy(conf))
     if not sim.conf.variable_thickness:
         sim.conf.interpolate()
@@ -173,7 +172,7 @@ def run_sim(conf):
     runtime = end - start
     log.info('Simulation {} completed in {:.2}'
              ' seconds!'.format(sim.id[0:10], runtime))
-    return
+    return None 
 
 
 def gc3_submit(gconf, sim_confs):
@@ -250,9 +249,29 @@ def execute_jobs(gconf, confs):
         num_procs = gconf['General']['num_cores']
         log.info('Executing sims in parallel using %s cores ...',str(num_procs))
         pool = mp.Pool(processes=num_procs)
+        total_sims = len(confs)
+        remaining_sims = len(confs)
+        def callback(res):
+            callback.remaining_sims -= 1
+            callback.log.info('%i out of %i simulations remaining'%(callback.remaining_sims,
+                                                            callback.total_sims))
+        callback.remaining_sims = remaining_sims
+        callback.total_sims = total_sims
+        callback.log = log
+        results = []
         try:
-            res = pool.map_async(run_sim, confs)
-            res.get(999999999)
+            # res = pool.map_async(run_sim, confs, callback=callback)
+            # res.get(999999999)
+            # pool.close()
+            for conf in confs:
+                res = pool.apply_async(run_sim, (conf,), callback=callback)
+                results.append(res)
+            for r in results:
+                # We need to add this really long timeout so that subprocesses
+                # receive keyboard interrupts. If our simulations take longer
+                # than this timeout, an exception would be raised but that
+                # should never happen
+                r.wait(99999999)
             pool.close()
         except KeyboardInterrupt:
             pool.terminate()

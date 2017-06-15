@@ -31,8 +31,6 @@ class Simulator():
         lfile = os.path.join(sim_dir, 'sim.log')
         self.log = configure_logger(level=log_level, name=self.id[0:10],
                                     logfile=lfile, propagate=False)
-        print('HERE IS LOGGER')
-        print(self.log)
         self.s4 = S4.New(Lattice=((period, 0), (0, period)), NumBasis=numbasis)
 
     def __del__(self):
@@ -333,10 +331,14 @@ class Simulator():
             raise ValueError('Invalid file type specified in config')
 
     def get_fluxes(self):
-        """Get the fluxes at the top and bottom of each layer. Returns a dict
-        where the keys are the layer name and the values are a length 2 tuple
-        with the forward component first and the backward component second. The
-        components are complex numbers"""
+        """
+        Get the fluxes at the top and bottom of each layer. This is a surface
+        integral of the component of the Poynting flux perpendicular to this
+        x-y plane of the interface, and have forward and backward componenets.
+        Returns a dict where the keys are the layer name and the values are a
+        length 2 tuple with the forward component first and the backward
+        component second. The components are complex numbers
+        """
         self.log.info('Computing fluxes ...')
         flux_dict = {}
         for layer, ldata in self.conf['Layers'].items():
@@ -511,8 +513,6 @@ def main():
             sim.log.info('Computing additional thickness at %s' % subpath)
             os.makedirs(sim.dir)
             sim.get_data(update=True)
-    return
-
 
 if __name__ == '__main__':
     main()

@@ -1,0 +1,330 @@
+General:
+    # Base directory under which to run your simulation(s). The simulations are
+    # going to spit out a bunch of data in subdirectories of this directory.
+    base_dir: '/home/kyle_robertson/schoolwork/gradschool/nanowire/tests/ang_avg_tests'
+    # Same as above but remains untouched during buildout of directory tree
+    # beneath basedir. This is only relevant for an old branch of the code
+    # that organizes parameter sweeps in a nested directory tree. I've sinced
+    # moved from a tree structure to a single layer of subdirectories because
+    # the static nature of directory trees was becoming cumbersome.
+    treebase: '/home/kyle_robertson/schoolwork/gradschool/nanowire/tests/ang_avg_tests'
+    # Output file base name for fields. The E field files will be saved in
+    # $base_dir/somedir/field_data.E.$ext and the hfields as field_data.E.$ext 
+    base_name: 'field_data'
+    # Whether or not to use multiple processes/threads (haven't decided yet)
+    # when postprocessing data to speed up results. This currently doesn't
+    # work yet because of the way my postprocessing code is structured (can't
+    # pickle logger objects). However, I have an idea for how I can fix this
+    # that will be implemented soonish. 
+    post_parallel: False
+    # Tells the sim_wrapper script to either run simulations serially (1 at a
+    # time) or  use multiprocessing to run multiple simulations in parallel.
+    # Each simulation runs a unique combination of parameters you happen to be
+    # sweeping through. 
+    # Options: ['serial', 'parallel']
+    execution: 'parallel'
+    # The number of cores you would like to use when running in parallel. 
+    num_cores : 6
+    # Adaptive convergence. This will run multiple sims (up to max_iter of
+    # them) for each set of params, increasing the number of basis terms by
+    # basis_step until converged within max_diff
+    adaptive_convergence: False
+    max_iter: 5 
+    max_diff: .02
+    basis_step: 20
+    # This bit configures the optimizer. This only matters if you parameters
+    # are of the 'optimized' type.
+    # opt_max_iter: Maximum number of optimization loops to run
+    # opt_tol: The tolerance for the parameters you are optimizing
+    # func_opt_tol: The tolerance for the objective function you are optimizer
+    # over
+    # opt_keep_intermediates: Keep all the intermediate results generation at
+    # each iteration
+    # DANGER!!: Setting opt_keep_intermediates to True has to potentially to
+    # rapidly consume all of your disk space. Be cautious.
+    opt_max_iter: 60
+    opt_tol: 1e-4
+    opt_keep_intermediates: False
+    # Would you like to save the plots for each sim?
+    save_plots: True
+    # Would you like to show the plots during postprocessing in real time?
+    show_plots: False
+    # File type to save any generated arrays as. Choose from (text, npz). 
+    # Text saves in tab delimited text files, npz saves in compressed numpy
+    # binary format
+    save_as: 'npz'
+    # Save timing data for each simulation?
+    save_time: True
+    # Output the in plane geometry for each layer. Helpful for debugging
+    output_pattern: True
+    # If true, don't compute the H fields to save disk space. I think even if
+    # you set this to False at the moment the code still wouldn't compute the H
+    # field lol
+    ignore_h: True
+
+Solver:
+# These options configure the various FMM formulations used within the simulation. See
+# the S4 docs and paper for details 
+
+## These are the defaults
+#Verbosity = 0
+#LatticeTruncation = Circular
+#DiscretizedEpsilon = False
+#DiscretizationResolution = 8
+#PolarizationDecomposition = False
+#PolarizationBasis = Default
+#LanczosSmoothing = False
+#SubpixelSmoothing = False
+#ConserveMemory = False
+    Verbosity: 0
+    LatticeTruncation: 'Circular'
+    [DiscretizedEpsilon](DiscretizedEpsilon): False
+    DiscretizationResolution: 8
+    PolarizationDecomposition: True
+    PolarizationBasis: 'Default'
+    LanczosSmoothing: False
+    SubpixelSmoothing: False
+    ConserveMemory: False
+
+Simulation:
+    # This section handles global simulation parameters that are not specific to any given
+    # layer. For example, the lattice vectors or the angle of incident light
+
+    # The polarization of incident light
+    # Right Hand Circularly Polarized : rhcp
+    # Left Hand Circularly Polarized : lhcp
+    # Linearly Polarized Along X : lpx
+    # Linearly Polarized Along Y : lpy
+    polarization: 'rhcp'
+    # Number of field samples to take in the x, y, and z directions
+    x_samples: 10
+    y_samples: 10
+    z_samples: 20
+    # If computing an angular average of any fields, the number of samples to
+    # use in polar coordinates
+    r_samples : 150
+    theta_samples : 360
+    # Maximum depth from top of device to collect fields. If you have a really
+    # thick, absorbing substrate there probably isn't anything interesting
+    # going on beyond 3 or 4 microns
+    # This is an example of two things: Parameter substitution and parameter
+    # evaluation. I will discuss what those mean elsewhere
+    max_depth: '`%(Layers.Air.params.thickness.value)s+%(Layers.ITO.params.thickness.value)s+%(Layers.NW_AlShell.params.thickness.value)s+3`'
+    # Base length unit defined relative to a meter (so nm would be 1E-9,
+    # micrometers would be 1E-6, etc). This is necessary because S4 requires
+    # you to define all geometric parameters relative to some base reference
+    # unit. Any parameters you enter should be expressed as some multiple of
+    # that base unit. So here, the reference unit is a micrometer, and all
+    # lengths with be specified as some multiple of a micrometer.
+    base_unit: 1.0E-6
+    # Path to input spectrum file. Modify the paths as necessary to point to
+    # the location of the nanowire repo on your machine. These files must
+    # conform to a very specific format, see the files in the repo for an
+    # example. 
+    input_power: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/am15g_freq.txt'
+    input_power_wv: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/ASTMG173.csv' # not actually sure why this one is here. Must fix
+    # Global simulation parameters that are "sweepable"
+    params:
+        # The angle of the incident light
+        polar_angle:
+            type: 'fixed'
+            value: 0
+        azimuthal_angle: 
+            type: 'fixed'
+            value: 0
+        # Periodicity of the square array. With our current units, this would
+        # be 325.5 nm period 
+        # NOTE: Currently this only supports a square
+        # lattice. Support for non-square unit cells may be added in the future
+        array_period:
+            type: 'fixed'
+            value: .3255 
+        # Incident frequencies to simulate
+        frequency:
+            type: 'variable'
+            start: 333102731111111.1
+            end: 856549880000000.0
+            step: 20
+            itertype: 'numsteps'
+        # Number of basis terms to use in the RCWA solver. Increasing this
+        # improves accuracy but increases simulation time as numbasis^2
+        numbasis:
+            type: 'fixed'
+            value: 20
+
+Materials:
+    # Here is where you define all your materials. The key is the name you wish
+    # to assign the material, and the value is an absolute path to a text file
+    # containing the n and k data for the material. These files must be in a
+    # specific format. See the examples in the repo. 
+    # NOTE: A default material called "vacuum" will be created by default. It
+    # has n=1 and k=0 for all frequencies
+    ITO: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/008_ITO_nk_Hz.txt'
+    Cyclotene: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/007_Cyclotrene_nk_Hz.txt'
+    GaAs: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/006_GaAs_nk_Walker_modified_Hz.txt'
+    AlInP: '/home/kyle_robertson/schoolwork/gradschool/nanowire/code/NK/009_AlInP_nk_Hz.txt'
+
+Layers:
+    # Here is where you define the geometry of your device. 
+    #
+    # The top level key here automatically creates a layer whose name is the
+    # key
+    Air:
+        # This specifies where in the stack of layers this layer will reside.  Layers
+        # are sorted by increasing "order" parameter. Light will be incident on
+        # the layer with the lowest value for "order". 
+        order: 1
+        # The background material for the layer, upon which any extra
+        # geometry will be superimposed
+        base_material: 'vacuum'
+        # All the "sweepable" geometric parameters are contained below this key
+        params:
+            # Every layer must have a thickness! This thickness can be zero if
+            # you like
+            thickness:
+                type: 'fixed'
+                value: .5
+    ITO:
+        order: 2
+        base_material: 'ITO' 
+        params:
+            thickness:
+                type: 'fixed'
+                value: .3
+    NW_AlShell: 
+        order: 3 
+        base_material: 'Cyclotene'
+        params:
+            thickness: 
+                type: 'fixed'
+                value: 3.0
+            shell_radius:
+                type: 'fixed'
+                value: '`%(Layers.NW_AlShell.params.core_radius.value)s+.03`'
+            core_radius:
+                type: 'fixed'
+                value: .103
+        # If you want to create a layer that has a nonuniform internal
+        # geometry, add this key 
+        geometry:
+            # You can specify multiple shapes. Same semantics for the order
+            # parameter. The material containined within the last shape created
+            # overwrites the material of any shape with which it overlaps. So
+            # notice, to make a AlInP shell with a GaAs core I set the
+            # core['order'] > shell['order']
+            shell:
+                order: 1
+                type: 'circle'
+                radius: '%(Layers.NW_AlShell.params.shell_radius.value)s'
+                center:
+                    x: '`%(Simulation.params.array_period.value)s/2`'
+                    y: '`%(Simulation.params.array_period.value)s/2`'
+                material: 'AlInP'
+            core:
+                order: 2
+                type: 'circle'
+                radius: '%(Layers.NW_AlShell.params.core_radius.value)s'
+                center:
+                    x: '`%(Simulation.params.array_period.value)s/2`'
+                    y: '`%(Simulation.params.array_period.value)s/2`'
+                material: 'GaAs' 
+    Substrate:
+        order: 4
+        base_material: 'GaAs'
+        params:
+            thickness:
+                type: 'fixed'
+                value: 100
+
+Postprocessing:
+    # This configures the behavior of the postprocessor
+    Cruncher:
+        # The quantities specific to each simulation that you would like to calculate. Specify
+        # compute: False 
+        # to disable the calculation, and True to enable it. Arguments can be passed to each
+        # function below as a list. If you would like to run the function multiple times with multiple
+        # sets of arguments, specify a list of lists like so:
+        # single run: ['arg1',3,'arg2']
+        # multiple runs: [['arg1,3,'arg2'],['arg3',4,'arg4']]
+        # If you want to know what arguments are available, check the source
+        # code
+        normE:
+            compute: True
+            args:
+        normEsquared:
+            compute: True
+            args:
+        normH:
+            compute: False
+            args:
+        normHsquared:
+            compute: False
+            args:
+        genRate:
+            compute: True
+            args:
+        angularAvg:
+            compute: True
+            args: ['genRate']
+        transmissionData:
+            compute: True
+            args:
+    
+    Global_Cruncher:
+        # Compute global quantities that require simulations to be grouped
+        # together in some way. For example, to compute J_ph you need to group
+        # sims with identical geometry but different frequencies together and
+        # use the Global_Cruncher to compute global quantities on each of those
+        # groups
+        local_error:
+            compute: False
+            args: ['E',False]
+        global_error:
+            compute: False
+            args: ['E',False]
+        adjacent_error:
+            compute: False
+            args: ['E',False]
+        scalar_reduce:
+            compute: True
+            args: [['genRate'],['normE']]
+        Jsc:
+            compute: True
+            args:
+        fractional_absorbtion:
+            compute: True
+            args:
+    
+    Plotter:
+        # What plots to generate. Check the source
+        full_3d:
+            compute: False
+            args: ['normE']
+        planes_3d: 
+            compute: False
+            args: ['normE',5,5]
+        plane_2d:
+            # 1) Value to plot
+            # 2) x,y, or z plane?
+            # 3) Which plane value?
+            # 4) Draw nanowire components? (default: False)
+            # 5) Fix colorbar limits? (default: False)
+            compute: True
+            args: [['normE','x',5,True],['normE','z',5,True],['genRate','x',5,True]]
+        fixed_line:
+            compute: False
+            args: ['normE','z',5,5]
+    
+    Global_Plotter:
+        # Plot quantities for some group of simulations. Example would be an
+        # absorption spectra of the device
+        convergence:
+            compute: False
+            args: [['E','global','log'],['E','local','log'],['E','adjacent','log']]
+        scalar_reduce: 
+            compute: True
+            args: [['genRate','x',5],['normE','x',5]]
+        transmission_data:
+            # Absorbtion, Reflectance, Transmission (pass false to disable one) 
+            compute: True
+            args: [True,True,True]

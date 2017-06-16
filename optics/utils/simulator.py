@@ -18,7 +18,7 @@ from config import Config
 
 class Simulator():
 
-    def __init__(self, conf, log_level='info'):
+    def __init__(self, conf):
         # conf.interpolate()
         # conf.evaluate()
         self.conf = conf
@@ -28,9 +28,6 @@ class Simulator():
         sim_dir = os.path.join(self.conf['General']['base_dir'], self.id[0:10])
         self.conf['General']['sim_dir'] = sim_dir
         self.dir = sim_dir
-        lfile = os.path.join(sim_dir, 'sim.log')
-        self.log = configure_logger(level=log_level, name=self.id[0:10],
-                                    logfile=lfile, propagate=False)
         self.s4 = S4.New(Lattice=((period, 0), (0, period)), NumBasis=numbasis)
 
     def __del__(self):
@@ -50,6 +47,12 @@ class Simulator():
         sim_dir = os.path.join(self.conf['General']['base_dir'], self.id[0:10])
         self.conf['General']['sim_dir'] = sim_dir
         self.dir = sim_dir
+
+    def make_logger(self, log_level='info'):
+        """Makes the logger for this simulation"""
+        lfile = os.path.join(self.dir, 'sim.log')
+        self.log = configure_logger(level=log_level, name=self.id[0:10],
+                                    logfile=lfile, propagate=False)
 
     def configure(self):
         """Configure options for the RCWA solver"""
@@ -420,6 +423,22 @@ class Simulator():
         else:
             self.log.info('Converged at {} basis terms'.format(new_basis))
             return field2, new_basis, True
+
+    def mode_solve(self, update=False):
+        """Find modes of the system. Supposedly you can get the resonant modes
+        of the system from the poles of the S matrix determinant, but I
+        currently can't really make any sense of this output"""
+        if not update:
+            self.configure()
+            self.build_device()
+        else:
+            self.update_thicknesses()
+        mant, base, expo = self.s4.GetSMatrixDeterminant()
+        self.log.info('Matissa: %s'%str(mant))
+        self.log.info('Base: %s'%str(base))
+        self.log.info('Exponent: %s'%str(expo))
+        res = mant*base**expo
+        self.log.info('Result: %s'%str(res))
 
     def get_data(self, update=False):
         """Gets all the data for this similation by calling the relevant class

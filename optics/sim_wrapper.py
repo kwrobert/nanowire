@@ -108,10 +108,9 @@ def make_confs(global_conf):
 
 def run_sim(conf):
     """
-    Actually runs simulation in a given directory using subprocess.call.
-    Expects a tuple containing the absolute path to the job directory as the
-    first element and the configuration object for the job as the second
-    element
+    Actually runs simulation in a given directory.  Expects a tuple containing
+    the absolute path to the job directory as the first element and the
+    configuration object for the job as the second element. 
     """
     log = logging.getLogger()
     start = time.time()
@@ -120,6 +119,7 @@ def run_sim(conf):
         sim.conf.interpolate()
         sim.conf.evaluate()
         sim.update_id()
+        sim.make_logger()
         try:
             os.makedirs(sim.dir)
         except OSError:
@@ -131,7 +131,9 @@ def run_sim(conf):
                      ' returning'%sim.id)
             return
         log.info('Executing sim %s'%sim.id[0:10])
+
         sim.get_data()
+        # sim.mode_solve()
     else:
         log.info('Computing a thickness sweep at %s' % sim.id[0:10])
         orig_id = sim.id[0:10]

@@ -125,13 +125,16 @@ def run_sim(conf):
         except OSError:
             pass
         period = sim.conf['Simulation']['params']['array_period']['value']
-        shell_rad = sim.conf['Layers']['NW_AlShell']['params']['shell_radius']['value']
-        if shell_rad > period/2.0:
+        try:
+            rad = sim.conf['Layers']['NW_AlShell']['params']['shell_radius']['value']
+        except KeyError:
+            rad = sim.conf['Layers']['NW_AlShell']['params']['core_radius']['value']
+
+        if rad > period/2.0:
             log.info('sim %s has shell radius larger than half the period,'
                      ' returning'%sim.id)
             return
         log.info('Executing sim %s'%sim.id[0:10])
-
         sim.get_data()
         # sim.mode_solve()
     else:

@@ -178,7 +178,17 @@ def configure_logger(level='info', name=None, console=False, logfile=None,
         ch.setLevel(numeric_level)
         ch.setFormatter(formatter)
         logger.addHandler(ch)
+   
+    # This will log any uncaught exceptions
+    def handle_exception(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+
+        logger.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+    sys.excepthook = handle_exception
     return logger
+
 
 def make_hash(o):
     """Makes a hash from the dict representing the Simulation config. It is

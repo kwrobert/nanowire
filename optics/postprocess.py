@@ -414,7 +414,7 @@ class Cruncher(Processor):
         """Returns functions to compute index of refraction components n and k at a given
         frequency"""
         # Get data
-        freq_vec, n_vec, k_vec = np.loadtxt(path, skiprows=1, unpack=True)
+        freq_vec, n_vec, k_vec = np.loadtxt(path, unpack=True)
         # Get n and k at specified frequency via interpolation
         f_n = interpolate.interp1d(freq_vec, n_vec, kind='linear',
                                    bounds_error=False, fill_value='extrapolate')
@@ -1089,8 +1089,8 @@ class Global_Cruncher(Cruncher):
                 wvlgths[i] = wvlgth
                 # Get solar power from chosen spectrum
                 path = sim.conf['Simulation']['input_power_wv']
-                wv_vec, p_vec = np.loadtxt(path, skiprows=2, usecols=(
-                    0, 2), unpack=True, delimiter=',')
+                wv_vec, p_vec = np.loadtxt(path, usecols=(0, 2),
+                                           unpack=True, delimiter=',')
                 # Get p at wvlength by interpolation
                 p_wv = interpolate.interp1d(wv_vec, p_vec, kind='linear',
                                             bounds_error=False, fill_value='extrapolate')
@@ -1148,8 +1148,8 @@ class Global_Cruncher(Cruncher):
                 wvlgths[i] = wvlgth
                 # Get solar power from chosen spectrum
                 path = sim.conf['Simulation']['input_power_wv']
-                wv_vec, p_vec = np.loadtxt(path, skiprows=2, usecols=(
-                    0, 2), unpack=True, delimiter=',')
+                wv_vec, p_vec = np.loadtxt(path, usecols=(0, 2),
+                                           unpack=True, delimiter=',')
                 # Get p at wvlength by interpolation
                 p_wv = interpolate.interp1d(wv_vec, p_vec, kind='linear',
                                             bounds_error=False, fill_value='extrapolate')
@@ -1189,8 +1189,8 @@ class Global_Cruncher(Cruncher):
             spectra = np.zeros(len(group))
             # Get solar power from chosen spectrum
             path = group[0].conf['Simulation']['input_power_wv']
-            wv_vec, p_vec = np.loadtxt(path, skiprows=2, usecols=(
-                0, 2), unpack=True, delimiter=',')
+            wv_vec, p_vec = np.loadtxt(path, usecols=(0, 2),
+                                       unpack=True, delimiter=',')
             # Get interpolating function for power
             p_wv = interpolate.interp1d(wv_vec, p_vec, kind='linear',
                                         bounds_error=False, fill_value='extrapolate')

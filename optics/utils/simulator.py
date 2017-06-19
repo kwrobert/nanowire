@@ -64,7 +64,7 @@ class Simulator():
         converting"""
         freq = self.conf['Simulation']['params']['frequency']['value']
         # Get data
-        freq_vec, n_vec, k_vec = np.loadtxt(path, skiprows=1, unpack=True)
+        freq_vec, n_vec, k_vec = np.loadtxt(path, unpack=True)
         # Get n and k at specified frequency via interpolation
         f_n = spi.interp1d(freq_vec, n_vec, kind='nearest',
                            bounds_error=False, fill_value='extrapolate')

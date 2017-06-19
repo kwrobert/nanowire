@@ -180,13 +180,13 @@ def configure_logger(level='info', name=None, console=False, logfile=None,
         logger.addHandler(ch)
    
     # This will log any uncaught exceptions
-    def handle_exception(exc_type, exc_value, exc_traceback):
-        if issubclass(exc_type, KeyboardInterrupt):
-            sys.__excepthook__(exc_type, exc_value, exc_traceback)
-            return
+    # def handle_exception(exc_type, exc_value, exc_traceback):
+    #     if issubclass(exc_type, KeyboardInterrupt):
+    #         sys.__excepthook__(exc_type, exc_value, exc_traceback)
+    #         return
 
-        logger.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
-    sys.excepthook = handle_exception
+    #     logger.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+    # sys.excepthook = handle_exception
     return logger
 
 

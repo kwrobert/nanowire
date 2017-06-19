@@ -124,16 +124,16 @@ def run_sim(conf):
             os.makedirs(sim.dir)
         except OSError:
             pass
-        period = sim.conf['Simulation']['params']['array_period']['value']
-        try:
-            rad = sim.conf['Layers']['NW_AlShell']['params']['shell_radius']['value']
-        except KeyError:
-            rad = sim.conf['Layers']['NW_AlShell']['params']['core_radius']['value']
+        # period = sim.conf['Simulation']['params']['array_period']['value']
+        # try:
+        #     rad = sim.conf['Layers']['NW_AlShell']['params']['shell_radius']['value']
+        # except KeyError:
+        #     rad = sim.conf['Layers']['NW_AlShell']['params']['core_radius']['value']
 
-        if rad > period/2.0:
-            log.info('sim %s has shell radius larger than half the period,'
-                     ' returning'%sim.id)
-            return
+        # if rad > period/2.0:
+        #     log.info('sim %s has shell radius larger than half the period,'
+        #              ' returning'%sim.id)
+        #     return
         log.info('Executing sim %s'%sim.id[0:10])
         sim.get_data()
         # sim.mode_solve()

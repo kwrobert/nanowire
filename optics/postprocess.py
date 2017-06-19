@@ -1418,7 +1418,8 @@ class Plotter(Processor):
         ax.yaxis.set_ticklabels(list(reversed(ticks)))
         # fig.suptitle(labels[3])
         if draw:
-            ax = self.draw_geometry_2d(sim, ptype, ax)
+            self.log.info('Currently skipping geometry drawing')
+            # ax = self.draw_geometry_2d(sim, ptype, ax)
         if save_path:
             fig.savefig(save_path, bbox_inches='tight')
         if show:

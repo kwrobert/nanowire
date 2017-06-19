@@ -1,0 +1,537 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>utils package &#8212; Nanowire .1 documentation</title>
+    
+    <link rel="stylesheet" href="_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '.1',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head>
+  <body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <div class="section" id="utils-package">
+<h1>utils package<a class="headerlink" href="#utils-package" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="submodules">
+<h2>Submodules<a class="headerlink" href="#submodules" title="Permalink to this headline">¶</a></h2>
+</div>
+<div class="section" id="module-utils.config">
+<span id="utils-config-module"></span><h2>utils.config module<a class="headerlink" href="#module-utils.config" title="Permalink to this headline">¶</a></h2>
+<dl class="function">
+<dt id="utils.config.get_env_variable">
+<code class="descclassname">utils.config.</code><code class="descname">get_env_variable</code><span class="sig-paren">(</span><em>match</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/config.html#get_env_variable"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.config.get_env_variable" title="Permalink to this definition">¶</a></dt>
+<dd><p>Given re module match object, return environment variable matching the
+string that was matched</p>
+</dd></dl>
+
+<dl class="class">
+<dt id="utils.config.Config">
+<em class="property">class </em><code class="descclassname">utils.config.</code><code class="descname">Config</code><span class="sig-paren">(</span><em>path=None</em>, <em>data=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/config.html#Config"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.config.Config" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal"><span class="pre">_abcoll.MutableMapping</span></code></p>
+<p>An object to represent the simulation config that behaves like a dict.
+It can be initialized with a path, or an actual python data structure as
+with the usual dict but has some extra convenience methods</p>
+<dl class="method">
+<dt id="utils.config.Config.expand_vars">
+<code class="descname">expand_vars</code><span class="sig-paren">(</span><em>in_table=None</em>, <em>old_key=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/config.html#Config.expand_vars"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.config.Config.expand_vars" title="Permalink to this definition">¶</a></dt>
+<dd><p>Expand environment variables in the config and update it in place
+without changing anything else</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.config.Config.build_dependencies">
+<code class="descname">build_dependencies</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/config.html#Config.build_dependencies"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.config.Config.build_dependencies" title="Permalink to this definition">¶</a></dt>
+<dd><p>Build out the dependency graph that determines which other config item a
+particular config item refers to, and which config items refer to it.
+We can then use this graph to determine which substitutions we need to
+perform first when calling interpolate</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.config.Config.interpolate">
+<code class="descname">interpolate</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/config.html#Config.interpolate"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.config.Config.interpolate" title="Permalink to this definition">¶</a></dt>
+<dd><p>Scans the config for any reference strings and resolves them to
+their actual values by retrieving them from elsewhere in the config</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.config.Config.evaluate">
+<code class="descname">evaluate</code><span class="sig-paren">(</span><em>in_table=None</em>, <em>old_key=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/config.html#Config.evaluate"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.config.Config.evaluate" title="Permalink to this definition">¶</a></dt>
+<dd><p>Evaluates any expressions surrounded in back ticks</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.config.Config.getfromseq">
+<code class="descname">getfromseq</code><span class="sig-paren">(</span><em>keyset</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/config.html#Config.getfromseq"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.config.Config.getfromseq" title="Permalink to this definition">¶</a></dt>
+<dd><p>A convenience method to get the section of the config file located
+at the end of the sequence of keys</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.config.Config.setfromseq">
+<code class="descname">setfromseq</code><span class="sig-paren">(</span><em>keyset</em>, <em>value</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/config.html#Config.setfromseq"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.config.Config.setfromseq" title="Permalink to this definition">¶</a></dt>
+<dd><p>A convenience method to set the a value in the config given a sequence of keys</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.config.Config.delfromseq">
+<code class="descname">delfromseq</code><span class="sig-paren">(</span><em>keyset</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/config.html#Config.delfromseq"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.config.Config.delfromseq" title="Permalink to this definition">¶</a></dt>
+<dd><p>Deletes the section of the config located at the end of a sequence
+of keys</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.config.Config.copy">
+<code class="descname">copy</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/config.html#Config.copy"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.config.Config.copy" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns a copy of the current config object</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.config.Config.write">
+<code class="descname">write</code><span class="sig-paren">(</span><em>path</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/config.html#Config.write"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.config.Config.write" title="Permalink to this definition">¶</a></dt>
+<dd><p>Dumps this config object to its YAML representation given a path to a file</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.config.Config.dump">
+<code class="descname">dump</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/config.html#Config.dump"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.config.Config.dump" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns YAML representation of this particular config</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.config.Config.get_height">
+<code class="descname">get_height</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/config.html#Config.get_height"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.config.Config.get_height" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the total height of the device</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.config.Config.sorted_dict">
+<code class="descname">sorted_dict</code><span class="sig-paren">(</span><em>adict</em>, <em>reverse=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/config.html#Config.sorted_dict"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.config.Config.sorted_dict" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns a sorted version of a dictionary sorted by the ‘order’ key.
+Used to sort layers, geometric shapes into their proper physical order.
+Can pass in a kwarg to reverse the order if desired</p>
+</dd></dl>
+
+</dd></dl>
+
+</div>
+<div class="section" id="module-utils.rcwa_app">
+<span id="utils-rcwa-app-module"></span><h2>utils.rcwa_app module<a class="headerlink" href="#module-utils.rcwa_app" title="Permalink to this headline">¶</a></h2>
+<dl class="class">
+<dt id="utils.rcwa_app.RCWA_App">
+<em class="property">class </em><code class="descclassname">utils.rcwa_app.</code><code class="descname">RCWA_App</code><span class="sig-paren">(</span><em>conf</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/rcwa_app.html#RCWA_App"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.rcwa_app.RCWA_App" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal"><span class="pre">gc3libs.Application</span></code></p>
+<p>Runs the lua script that interfaces with the S4 RCWA library</p>
+</dd></dl>
+
+<dl class="class">
+<dt id="utils.rcwa_app.SimWrapper">
+<em class="property">class </em><code class="descclassname">utils.rcwa_app.</code><code class="descname">SimWrapper</code><a class="reference internal" href="_modules/utils/rcwa_app.html#SimWrapper"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.rcwa_app.SimWrapper" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal"><span class="pre">gc3libs.cmdline.SessionBasedScript</span></code></p>
+<p>The class that wraps around all the individual simulations. It handles all the
+directory set up and parameter resolution</p>
+<dl class="method">
+<dt id="utils.rcwa_app.SimWrapper.new_tasks">
+<code class="descname">new_tasks</code><span class="sig-paren">(</span><em>extra</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/rcwa_app.html#SimWrapper.new_tasks"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.rcwa_app.SimWrapper.new_tasks" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+</div>
+<div class="section" id="module-utils.simulation">
+<span id="utils-simulation-module"></span><h2>utils.simulation module<a class="headerlink" href="#module-utils.simulation" title="Permalink to this headline">¶</a></h2>
+<dl class="class">
+<dt id="utils.simulation.Simulation">
+<em class="property">class </em><code class="descclassname">utils.simulation.</code><code class="descname">Simulation</code><span class="sig-paren">(</span><em>conf</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal"><span class="pre">object</span></code></p>
+<p>An object that represents a simulation. It contains the data for the
+sim, the data file headers, and its configuration object as attributes.
+This object contains all the information about a simulation, but DOES NOT
+perform any actions on that data. That job is relegated to the various
+processor objects</p>
+<dl class="method">
+<dt id="utils.simulation.Simulation.load_txt">
+<code class="descname">load_txt</code><span class="sig-paren">(</span><em>path</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.load_txt"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.load_txt" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.load_npz">
+<code class="descname">load_npz</code><span class="sig-paren">(</span><em>path</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.load_npz"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.load_npz" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.get_data">
+<code class="descname">get_data</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.get_data"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.get_data" title="Permalink to this definition">¶</a></dt>
+<dd><p>Loads the E and H data and E and H column header lookup
+tables for this particular sim. Populates the {e,h}_{lookup,data}
+attributes and also returns these four things</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.get_avgs">
+<code class="descname">get_avgs</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.get_avgs"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.get_avgs" title="Permalink to this definition">¶</a></dt>
+<dd><p>Load all averages</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.write_data">
+<code class="descname">write_data</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.write_data"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.write_data" title="Permalink to this definition">¶</a></dt>
+<dd><p>Writes the data. All writes have been wrapped with an atomic context
+manager than ensures all writes are atomic and do not corrupt data
+files if they are interrupted for any reason</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.get_scalar_quantity">
+<code class="descname">get_scalar_quantity</code><span class="sig-paren">(</span><em>quantity</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.get_scalar_quantity"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.get_scalar_quantity" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.clear_data">
+<code class="descname">clear_data</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.clear_data"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.clear_data" title="Permalink to this definition">¶</a></dt>
+<dd><p>Clears all the data attributes to free up memory</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.extend_data">
+<code class="descname">extend_data</code><span class="sig-paren">(</span><em>quantity</em>, <em>new_data</em>, <em>field</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.extend_data"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.extend_data" title="Permalink to this definition">¶</a></dt>
+<dd><p>Adds a new column of data to the field arrays, or updates it if it
+already exists</p>
+</dd></dl>
+
+</dd></dl>
+
+</div>
+<div class="section" id="module-utils.simulator">
+<span id="utils-simulator-module"></span><h2>utils.simulator module<a class="headerlink" href="#module-utils.simulator" title="Permalink to this headline">¶</a></h2>
+<dl class="class">
+<dt id="utils.simulator.Simulator">
+<em class="property">class </em><code class="descclassname">utils.simulator.</code><code class="descname">Simulator</code><span class="sig-paren">(</span><em>conf</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="method">
+<dt id="utils.simulator.Simulator.update_id">
+<code class="descname">update_id</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.update_id"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.update_id" title="Permalink to this definition">¶</a></dt>
+<dd><p>Update sim id. Used after changes are made to the config</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulator.Simulator.make_logger">
+<code class="descname">make_logger</code><span class="sig-paren">(</span><em>log_level=’info’</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.make_logger"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.make_logger" title="Permalink to this definition">¶</a></dt>
+<dd><p>Makes the logger for this simulation</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulator.Simulator.configure">
+<code class="descname">configure</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.configure"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.configure" title="Permalink to this definition">¶</a></dt>
+<dd><p>Configure options for the RCWA solver</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulator.Simulator.set_excitation">
+<code class="descname">set_excitation</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.set_excitation"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.set_excitation" title="Permalink to this definition">¶</a></dt>
+<dd><p>Sets the exciting plane wave for the simulation</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulator.Simulator.build_device">
+<code class="descname">build_device</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.build_device"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.build_device" title="Permalink to this definition">¶</a></dt>
+<dd><p>Build the device geometry</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulator.Simulator.get_height">
+<code class="descname">get_height</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.get_height"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.get_height" title="Permalink to this definition">¶</a></dt>
+<dd><p>Get the total height of the device</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulator.Simulator.set_lattice">
+<code class="descname">set_lattice</code><span class="sig-paren">(</span><em>period</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.set_lattice"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.set_lattice" title="Permalink to this definition">¶</a></dt>
+<dd><p>Updates the S4 simulation object with a new array period</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulator.Simulator.set_basis">
+<code class="descname">set_basis</code><span class="sig-paren">(</span><em>numbasis</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.set_basis"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.set_basis" title="Permalink to this definition">¶</a></dt>
+<dd><p>Updates the S4 simulation object with a new set of basis terms</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulator.Simulator.update_thicknesses">
+<code class="descname">update_thicknesses</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.update_thicknesses"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.update_thicknesses" title="Permalink to this definition">¶</a></dt>
+<dd><p>Updates all layer thicknesses without rebuilding the device. This
+allows reuse of any layer eigenmodes already computed and utilizes a
+fundamental efficiency of the RCWA solver</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulator.Simulator.get_field">
+<code class="descname">get_field</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.get_field"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.get_field" title="Permalink to this definition">¶</a></dt>
+<dd><p>Constructs and returns a 2D numpy array of the vector electric
+field. The field components are complex numbers</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulator.Simulator.row_iter">
+<code class="descname">row_iter</code><span class="sig-paren">(</span><em>data</em>, <em>xsamp</em>, <em>ysamp</em>, <em>z</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.row_iter"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.row_iter" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="utils.simulator.Simulator.get_field2">
+<code class="descname">get_field2</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.get_field2"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.get_field2" title="Permalink to this definition">¶</a></dt>
+<dd><p>Constructs and returns a 2D numpy array of the vector electric
+field. The field components are complex numbers. This is about 1-2
+seconds slower than the current get_field method, but I’m keeping it
+around because the implementation feels nice</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulator.Simulator.save_field">
+<code class="descname">save_field</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.save_field"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.save_field" title="Permalink to this definition">¶</a></dt>
+<dd><p>Saves the fields throughout the device to an npz file</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulator.Simulator.get_fluxes">
+<code class="descname">get_fluxes</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.get_fluxes"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.get_fluxes" title="Permalink to this definition">¶</a></dt>
+<dd><p>Get the fluxes at the top and bottom of each layer. This is a surface
+integral of the component of the Poynting flux perpendicular to this
+x-y plane of the interface, and have forward and backward componenets.
+Returns a dict where the keys are the layer name and the values are a
+length 2 tuple with the forward component first and the backward
+component second. The components are complex numbers</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulator.Simulator.save_fluxes">
+<code class="descname">save_fluxes</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.save_fluxes"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.save_fluxes" title="Permalink to this definition">¶</a></dt>
+<dd><p>Saves the fluxes at layer interfaces to a file</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulator.Simulator.calc_diff">
+<code class="descname">calc_diff</code><span class="sig-paren">(</span><em>d1</em>, <em>d2</em>, <em>exclude=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.calc_diff"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.calc_diff" title="Permalink to this definition">¶</a></dt>
+<dd><p>Calculate the percent difference between two vector fields</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulator.Simulator.adaptive_convergence">
+<code class="descname">adaptive_convergence</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.adaptive_convergence"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.adaptive_convergence" title="Permalink to this definition">¶</a></dt>
+<dd><p>Performs adaptive convergence by checking the error between vector
+fields for simulations with two different numbers of basis terms.
+Returns the field array, last number of basis terms simulated, and a
+boolean representing whether or not the simulation is converged</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulator.Simulator.mode_solve">
+<code class="descname">mode_solve</code><span class="sig-paren">(</span><em>update=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.mode_solve"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.mode_solve" title="Permalink to this definition">¶</a></dt>
+<dd><p>Find modes of the system. Supposedly you can get the resonant modes
+of the system from the poles of the S matrix determinant, but I
+currently can’t really make any sense of this output</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulator.Simulator.get_data">
+<code class="descname">get_data</code><span class="sig-paren">(</span><em>update=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.get_data"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.get_data" title="Permalink to this definition">¶</a></dt>
+<dd><p>Gets all the data for this similation by calling the relevant class
+methods. Basically just a convenient wrapper to execute all the
+functions defined above</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="function">
+<dt id="utils.simulator.main">
+<code class="descclassname">utils.simulator.</code><code class="descname">main</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#main"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.main" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="module-utils.utils">
+<span id="utils-utils-module"></span><h2>utils.utils module<a class="headerlink" href="#module-utils.utils" title="Permalink to this headline">¶</a></h2>
+<dl class="function">
+<dt id="utils.utils.get_combos">
+<code class="descclassname">utils.utils.</code><code class="descname">get_combos</code><span class="sig-paren">(</span><em>conf</em>, <em>keysets</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/utils.html#get_combos"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.utils.get_combos" title="Permalink to this definition">¶</a></dt>
+<dd><p>Given a config object and an iterable of the parameters you wish to find
+unique combinations of, return two lists. The first list contains the
+names of all the variable parameters in the config object. The second is a
+list of lists, where each inner list contains a unique combination of
+values of the parameters provided in keysets. Order is preserved such that
+the names in the first list corresponds to the values in the second list.
+For example, the returned lists would look like:</p>
+<p>list1 = [param_name1, param_name2, param_name3]
+list2 = [[val11, val12, val13], [val21, val22, val23], [val31, val32, val33]]</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="utils.utils.tempfile">
+<code class="descclassname">utils.utils.</code><code class="descname">tempfile</code><span class="sig-paren">(</span><em>*args</em>, <em>**kwds</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/utils.html#tempfile"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.utils.tempfile" title="Permalink to this definition">¶</a></dt>
+<dd><p>Context for temporary file.</p>
+<p>Will find a free temporary filename upon entering
+and will try to delete the file on leaving, even in case of an exception.</p>
+<dl class="docutils">
+<dt>suffix <span class="classifier-delimiter">:</span> <span class="classifier">string</span></dt>
+<dd>optional file suffix</dd>
+<dt>dir <span class="classifier-delimiter">:</span> <span class="classifier">string</span></dt>
+<dd>optional directory to save temporary file in</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="utils.utils.open_atomic">
+<code class="descclassname">utils.utils.</code><code class="descname">open_atomic</code><span class="sig-paren">(</span><em>*args</em>, <em>**kwds</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/utils.html#open_atomic"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.utils.open_atomic" title="Permalink to this definition">¶</a></dt>
+<dd><p>Get a temporary file path in the same directory as filepath. The temp
+file is used as a placeholder for filepath to make atomic write operations
+possible. The file will not be moved to destination in case of an exception.</p>
+<dl class="docutils">
+<dt>filepath <span class="classifier-delimiter">:</span> <span class="classifier">string</span></dt>
+<dd>the actual filepath we wish to write to</dd>
+</dl>
+</dd></dl>
+
+<dl class="class">
+<dt id="utils.utils.StreamToLogger">
+<em class="property">class </em><code class="descclassname">utils.utils.</code><code class="descname">StreamToLogger</code><span class="sig-paren">(</span><em>logger</em>, <em>log_level=20</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/utils.html#StreamToLogger"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.utils.StreamToLogger" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal"><span class="pre">object</span></code></p>
+<p>Fake file-like stream object that redirects writes to a logger instance.</p>
+<dl class="method">
+<dt id="utils.utils.StreamToLogger.write">
+<code class="descname">write</code><span class="sig-paren">(</span><em>buf</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/utils.html#StreamToLogger.write"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.utils.StreamToLogger.write" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="utils.utils.StreamToLogger.flush">
+<code class="descname">flush</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/utils.html#StreamToLogger.flush"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.utils.StreamToLogger.flush" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="function">
+<dt id="utils.utils.configure_logger">
+<code class="descclassname">utils.utils.</code><code class="descname">configure_logger</code><span class="sig-paren">(</span><em>level=’info’</em>, <em>name=None</em>, <em>console=False</em>, <em>logfile=None</em>, <em>propagate=True</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/utils.html#configure_logger"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.utils.configure_logger" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a logger providing some arguments to make it more configurable.</p>
+<dl class="docutils">
+<dt>name <span class="classifier-delimiter">:</span> <span class="classifier">string</span></dt>
+<dd>Name of logger to be created. Defaults to the root logger</dd>
+<dt>level <span class="classifier-delimiter">:</span> <span class="classifier">string</span></dt>
+<dd>The log level of the logger, defaults to INFO. One of: [‘debug’, ‘info’,
+‘warning’, ‘error’, ‘critical’]</dd>
+<dt>console <span class="classifier-delimiter">:</span> <span class="classifier">bool</span></dt>
+<dd>Add a stream handler to send messages to the console. Generally
+only necessary for the root logger.</dd>
+<dt>logfile <span class="classifier-delimiter">:</span> <span class="classifier">string</span></dt>
+<dd>Path to a file. If specified, will create a simple file handler and send
+messages to the specified file. The parent dirs to the location will
+be created automatically if they don’t already exist.</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="utils.utils.make_hash">
+<code class="descclassname">utils.utils.</code><code class="descname">make_hash</code><span class="sig-paren">(</span><em>o</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/utils.html#make_hash"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.utils.make_hash" title="Permalink to this definition">¶</a></dt>
+<dd><p>Makes a hash from the dict representing the Simulation config. It is
+consistent across runs and handles arbitrary nesting. Right now it ignores
+any settings in the General section because those aren’t really important
+when it comes to differentiating simulations</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="utils.utils.cmp_dicts">
+<code class="descclassname">utils.utils.</code><code class="descname">cmp_dicts</code><span class="sig-paren">(</span><em>d1</em>, <em>d2</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/utils.html#cmp_dicts"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.utils.cmp_dicts" title="Permalink to this definition">¶</a></dt>
+<dd><p>Recursively compares two dictionaries</p>
+</dd></dl>
+
+</div>
+<div class="section" id="module-utils">
+<span id="module-contents"></span><h2>Module contents<a class="headerlink" href="#module-utils" title="Permalink to this headline">¶</a></h2>
+</div>
+</div>
+
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+  <h3><a href="index.html">Table Of Contents</a></h3>
+  <ul>
+<li class="toctree-l1"><a class="reference internal" href="Introduction.html">Introduction</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Code.html">Code</a></li>
+</ul>
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+  </ul></li>
+</ul>
+</div>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="_sources/utils.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2017, Kyle Robertson.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 1.6.2</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.10</a>
+      
+      |
+      <a href="_sources/utils.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -336,8 +336,8 @@ class Simulator():
     def get_fluxes(self):
         """
         Get the fluxes at the top and bottom of each layer. This is a surface
-        integral of the component of the Poynting flux perpendicular to this
-        x-y plane of the interface, and have forward and backward componenets.
+        integral of the component of the Poynting flux perpendicular to the
+        x-y plane at the specified depth, and has forward and backward componenets.
         Returns a dict where the keys are the layer name and the values are a
         length 2 tuple with the forward component first and the backward
         component second. The components are complex numbers

@@ -686,7 +686,6 @@ class Cruncher(Processor):
         # sorted_layers is an OrderedDict, and thus has the popitem method
         sorted_layers = sim.conf.sorted_dict(sim.conf['Layers'])
         self.log.info('SORTED LAYERS: %s' % str(sorted_layers))
-        ito_p_trans = np.sqrt(data['NW_AlShell'][0]**2 + data['NW_AlShell'][2]**2)
         first_layer = sorted_layers.popitem(last=False)
         # self.log.info('FIRST LAYER: %s'%str(first_layer))
         # An ordered dict is actually just a list of tuples so we can access
@@ -700,17 +699,13 @@ class Cruncher(Processor):
         p_trans = np.sqrt(data[port][0]**2 + data[port][2]**2)
         reflectance = p_ref / p_inc
         transmission = p_trans / p_inc
-        ito_trans = ito_p_trans / p_inc
-        ito_absorb = 1 - reflectance - ito_trans
         absorbance = 1 - reflectance - transmission
-        reduced_absorbance = absorbance - ito_absorb
+        #absorbance = 1 - reflectance
         tot = reflectance + transmission + absorbance
         delta = np.abs(tot - 1)
         self.log.info('Reflectance %f' % reflectance)
         self.log.info('Transmission %f' % transmission)
         self.log.info('Absorbance %f' % absorbance)
-        self.log.info('ITO Absorbance %f' % ito_absorb)
-        self.log.info('Reduced Absorbance %f' % reduced_absorbance)
         self.log.info('Total = %f' % tot)
         assert(reflectance >= 0)
         assert(transmission >= 0)
@@ -722,10 +717,6 @@ class Cruncher(Processor):
         with open(outpath, 'w') as out:
             out.write('# Reflectance,Transmission,Absorbance\n')
             out.write('%f,%f,%f' % (reflectance, transmission, absorbance))
-        outpath = os.path.join(base, 'reduced_absorbance.dat')
-        self.log.info('Writing reduced absorbance file')
-        with open(outpath, 'w') as out:
-            out.write('%f\n' % reduced_absorbance)
         return reflectance, transmission, absorbance
 
     def integrated_absorbtion(self, sim):
@@ -1079,7 +1070,6 @@ class Global_Cruncher(Cruncher):
             self.log.info(
                 'Computing fractional absorbtion for group at %s' % base)
             vals = np.zeros(len(group))
-            reduced_vals = np.zeros(len(group))
             freqs = np.zeros(len(group))
             wvlgths = np.zeros(len(group))
             spectra = np.zeros(len(group))
@@ -1092,10 +1082,6 @@ class Global_Cruncher(Cruncher):
                 with open(dpath, 'r') as f:
                     ref, trans, absorb = list(
                         map(float, f.readlines()[1].split(',')))
-                dpath = os.path.join(sim.conf['General'][
-                                     'sim_dir'], 'reduced_absorbance.dat')
-                with open(dpath, 'r') as f:
-                    reduced_absorb = float(f.readlines()[0])
                 freq = sim.conf['Simulation']['params']['frequency']['value']
                 wvlgth = c.c / freq
                 wvlgth_nm = wvlgth * 1e9
@@ -1111,32 +1097,24 @@ class Global_Cruncher(Cruncher):
                 sun_pow = p_wv(wvlgth_nm)
                 spectra[i] = sun_pow * wvlgth_nm
                 vals[i] = absorb * sun_pow * wvlgth_nm
-                reduced_vals[i] = reduced_absorb * sun_pow * wvlgth_nm
             # Use Trapezoid rule to perform the integration. Note all the
             # necessary factors of the wavelength have already been included
             # above
             wvlgths = wvlgths[::-1]
             vals = vals[::-1]
-            reduced_vals = reduced_vals[::-1]
             spectra = spectra[::-1]
             #Jsc = intg.simps(Jsc_vals,x=wvlgths,even='avg')
             integrated_absorbtion = intg.trapz(vals, x=wvlgths * 1e9)
-            reduced_integrated_absorbtion = intg.trapz(reduced_vals, x=wvlgths * 1e9)
             power = intg.trapz(spectra, x=wvlgths * 1e9)
             # factor of 1/10 to convert A*m^-2 to mA*cm^-2
             #wv_fact = c.e/(c.c*c.h*10)
             #wv_fact = .1
             #Jsc = (Jsc*wv_fact)/power
             frac_absorb = integrated_absorbtion / power
-            reduced_frac_absorb = reduced_integrated_absorbtion / power
             outf = os.path.join(base, 'fractional_absorbtion.dat')
             with open(outf, 'w') as out:
                 out.write('%f\n' % frac_absorb)
-            outf = os.path.join(base, 'reduced_fractional_absorbtion.dat')
-            with open(outf, 'w') as out:
-                out.write('%f\n' % reduced_frac_absorb)
             self.log.info('Fractional Absorbtion = %f' % frac_absorb)
-            self.log.info('Reduced Fractional Absorbtion = %f' % reduced_frac_absorb)
             valuelist.append(frac_absorb)
         return valuelist
 
@@ -1152,7 +1130,6 @@ class Global_Cruncher(Cruncher):
             self.log.info(
                 'Computing photocurrent density for group at %s' % base)
             vals = np.zeros(len(group))
-            reduced_vals = np.zeros(len(group))
             freqs = np.zeros(len(group))
             wvlgths = np.zeros(len(group))
             spectra = np.zeros(len(group))
@@ -1164,10 +1141,6 @@ class Global_Cruncher(Cruncher):
                 with open(dpath, 'r') as f:
                     ref, trans, absorb = list(
                         map(float, f.readlines()[1].split(',')))
-                dpath = os.path.join(sim.conf['General'][
-                                     'sim_dir'], 'reduced_absorbance.dat')
-                with open(dpath, 'r') as f:
-                    reduced_absorb = float(f.readlines()[0])
                 freq = sim.conf['Simulation']['params']['frequency']['value']
                 wvlgth = c.c / freq
                 wvlgth_nm = wvlgth * 1e9
@@ -1184,28 +1157,20 @@ class Global_Cruncher(Cruncher):
                 spectra[i] = sun_pow * wvlgth_nm
                 # This is our integrand
                 vals[i] = absorb * sun_pow * wvlgth_nm
-                reduced_vals[i] = reduced_absorb * sun_pow * wvlgth_nm
             # Use Trapezoid rule to perform the integration. Note all the
             # necessary factors of the wavelength have already been included
             # above
             wvlgths = wvlgths[::-1]
             vals = vals[::-1]
-            reduced_vals = reduced_vals[::-1]
             spectra = spectra[::-1]
             integrated_absorbtion = intg.trapz(vals, x=wvlgths)
-            reduced_integrated_absorbtion = intg.trapz(reduced_vals, x=wvlgths)
             # factor of 1/10 to convert A*m^-2 to mA*cm^-2
             wv_fact = c.e / (c.c * c.h * 10)
             Jsc = wv_fact * integrated_absorbtion
-            reduced_Jsc = wv_fact * reduced_integrated_absorbtion
             outf = os.path.join(base, 'jsc.dat')
             with open(outf, 'w') as out:
                 out.write('%f\n' % Jsc)
             self.log.info('Jsc = %f' % Jsc)
-            outf = os.path.join(base, 'reduced_jsc.dat')
-            with open(outf, 'w') as out:
-                out.write('%f\n' % reduced_Jsc)
-            self.log.info('Reduced Jsc = %f' % reduced_Jsc)
             valuelist.append(Jsc)
         return valuelist
 
@@ -1938,9 +1903,9 @@ def main():
     # Now do all the work
     if not args.no_crunch:
         crunchr = Cruncher(conf, sims, sim_groups, failed_sims)
-        # crunchr.process_all()
-        for sim in crunchr.sims:
-            crunchr.transmissionData(sim)
+        crunchr.process_all()
+        # for sim in crunchr.sims:
+        #     crunchr.transmissionData(sim)
     if not args.no_gcrunch:
         gcrunchr = Global_Cruncher(conf, sims, sim_groups, failed_sims)
         gcrunchr.process_all()

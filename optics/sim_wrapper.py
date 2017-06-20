@@ -158,7 +158,11 @@ def run_sim(conf):
         sim.conf.interpolate()
         sim.conf.evaluate()
         sim.update_id()
-        os.makedirs(sim.dir)
+        sim.make_logger()
+        try:
+            os.makedirs(sim.dir)
+        except OSError:
+            pass
         subpath = os.path.join(orig_id, sim.id[0:10])
         log.info('Computing initial thickness at %s' % subpath)
         sim.get_data()

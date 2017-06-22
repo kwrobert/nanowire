@@ -72,7 +72,8 @@ class Processor(object):
             datfile = self.gconf['General']['base_name'] + '.E'
         else:
             datfile = self.gconf['General']['base_name'] + '.E.npz'
-
+        print('Inside collect')
+        print(self.gconf['General']['base_dir'])
         group_dict = {}
         for root, dirs, files in os.walk(self.gconf['General']['base_dir']):
             if 'sim_conf.yml' in files and datfile in files:
@@ -715,9 +716,13 @@ class Cruncher(Processor):
         #assert(reflectance >= 0 and transmission >= 0 and absorbance >= 0)
         outpath = os.path.join(base, 'ref_trans_abs.dat')
         self.log.info('Writing transmission file')
-        with open(outpath, 'w') as out:
-            out.write('# Reflectance,Transmission,Absorbance\n')
-            out.write('%f,%f,%f\n' % (reflectance, transmission, absorbance))
+        if os.path.isfile(outpath):
+            with open(outpath, 'a') as out:
+                out.write('%s,%f,%f,%f\n' % (port, reflectance, transmission, absorbance))
+        else:
+            with open(outpath, 'w') as out:
+                out.write('# Port, Reflectance,Transmission,Absorbance\n')
+                out.write('%s,%f,%f,%f\n' % (port, reflectance, transmission, absorbance))
         return reflectance, transmission, absorbance
 
     def integrated_absorbtion(self, sim):
@@ -1054,7 +1059,7 @@ class Global_Cruncher(Cruncher):
             else:
                 raise ValueError('Invalid file type in config')
 
-    def fractional_absorbtion(self):
+    def fractional_absorbtion(self, port='Substrate'):
         """Computes the fraction of the incident spectrum that is absorbed by
         the device. This is a unitless number, and its interpretation somewhat
         depends on the units you express the incident spectrum in. If you
@@ -1068,8 +1073,7 @@ class Global_Cruncher(Cruncher):
         for group in self.sim_groups:
             base = group[0].conf['General']['base_dir']
             base = group[0].conf['General']['results_dir']
-            self.log.info(
-                'Computing fractional absorbtion for group at %s' % base)
+            self.log.info('Computing fractional absorbtion for group at %s' % base)
             vals = np.zeros(len(group))
             freqs = np.zeros(len(group))
             wvlgths = np.zeros(len(group))
@@ -1080,9 +1084,20 @@ class Global_Cruncher(Cruncher):
                 sim = group[i]
                 dpath = os.path.join(sim.conf['General'][
                                      'sim_dir'], 'ref_trans_abs.dat')
+                # If we computed absorbtion for multiple regions, we have to
+                # handle them properly here
+                d = {}
                 with open(dpath, 'r') as f:
-                    ref, trans, absorb = list(
-                        map(float, f.readlines()[1].split(',')))
+                    lines = f.readlines()
+                    lines.pop(0)
+                for line in lines:
+                    row = [s.strip() for s in line.split(',')]
+                    row_port = row.pop(0)
+                    data = list(map(float, row))
+                    d[row_port] = data
+                self.log.debug(d)
+                # Unpack data for the port we passed in as an argument
+                ref, trans, absorb = d[port]
                 freq = sim.conf['Simulation']['params']['frequency']['value']
                 wvlgth = c.c / freq
                 wvlgth_nm = wvlgth * 1e9
@@ -1119,7 +1134,7 @@ class Global_Cruncher(Cruncher):
             valuelist.append(frac_absorb)
         return valuelist
 
-    def Jsc(self):
+    def Jsc(self, port='Substrate'):
         """Computes photocurrent density. This is just the integrated
         absorption scaled by a unitful factor. Assuming perfect carrier
         collection, meaning every incident photon gets converted to 1 collected
@@ -1139,9 +1154,18 @@ class Global_Cruncher(Cruncher):
             for i, sim in enumerate(group):
                 dpath = os.path.join(sim.conf['General'][
                                      'sim_dir'], 'ref_trans_abs.dat')
+                d = {}
                 with open(dpath, 'r') as f:
-                    ref, trans, absorb = list(
-                        map(float, f.readlines()[1].split(',')))
+                    lines = f.readlines()
+                    lines.pop(0)
+                for line in lines:
+                    row = [s.strip() for s in line.split(',')]
+                    row_port = row.pop(0)
+                    data = list(map(float, row))
+                    d[row_port] = data
+                self.log.debug(d)
+                # Unpack data for the port we passed in as an argument
+                ref, trans, absorb = d[port]
                 freq = sim.conf['Simulation']['params']['frequency']['value']
                 wvlgth = c.c / freq
                 wvlgth_nm = wvlgth * 1e9
@@ -1458,7 +1482,8 @@ class Plotter(Processor):
             labels = ('y [um]', 'z [um]', quantity, title)
             if sim.conf['General']['save_plots']:
                 p = os.path.join(sim.conf['General']['sim_dir'],
-                                 '%s_plane_2d_x.pdf' % quantity)
+                                 '%s_plane_2d_x_pval%s.pdf' % (quantity,
+                                                               str(pval)))
             else:
                 p = False
             self.heatmap2d(sim, y, z, cs, labels, plane,
@@ -1467,7 +1492,8 @@ class Plotter(Processor):
             labels = ('x [um]', 'z [um]', quantity, title)
             if sim.conf['General']['save_plots']:
                 p = os.path.join(sim.conf['General']['sim_dir'],
-                                 '%s_plane_2d_y.pdf' % quantity)
+                                 '%s_plane_2d_y_pval%s.pdf' % (quantity,
+                                                               str(pval)))
             else:
                 p = False
             self.heatmap2d(sim, x, z, cs, labels, plane,
@@ -1476,7 +1502,8 @@ class Plotter(Processor):
             labels = ('y [um]', 'x [um]', quantity, title)
             if sim.conf['General']['save_plots']:
                 p = os.path.join(sim.conf['General']['sim_dir'],
-                                 '%s_plane_2d_z.pdf' % quantity)
+                                 '%s_plane_2d_z_pval%s.pdf' % (quantity,
+                                                               str(pval)))
             else:
                 p = False
             self.heatmap2d(sim, x, y, cs, labels, plane,
@@ -1777,7 +1804,8 @@ class Global_Plotter(Plotter):
                     self.heatmap2d(sim, x, y, cs, labels, plane,
                                    save_path=p, show=show, draw=draw, fixed=fixed)
 
-    def transmission_data(self, absorbance, reflectance, transmission):
+    def transmission_data(self, absorbance, reflectance, transmission,
+                          port='Substrate'):
         """Plot transmissions, absorption, and reflectance assuming leaves are frequency"""
         for group in self.sim_groups:
             # base = group[0].conf['General']['base_dir']
@@ -1793,9 +1821,17 @@ class Global_Plotter(Plotter):
                 sim = group[i]
                 dpath = os.path.join(sim.conf['General'][
                                      'sim_dir'], 'ref_trans_abs.dat')
+                d = {}
                 with open(dpath, 'r') as f:
-                    ref, trans, absorb = list(
-                        map(float, f.readlines()[1].split(',')))
+                    lines = f.readlines()
+                    lines.pop(0)
+                for line in lines:
+                    row = [s.strip() for s in line.split(',')]
+                    row_port = row.pop(0)
+                    data = list(map(float, row))
+                    d[row_port] = data
+                # Unpack data for the port we passed in as an argument
+                ref, trans, absorb = d[port]
                 freq = sim.conf['Simulation']['params']['frequency']['value']
                 freqs[i] = freq
                 trans_l[i] = trans
@@ -1814,7 +1850,7 @@ class Global_Plotter(Plotter):
             if transmission:
                 plt.plot(freqs, trans_l, '-o', label='Transmission')
             plt.legend(loc='best')
-            figp = os.path.join(base, 'transmission_plots.pdf')
+            figp = os.path.join(base, 'transmission_plots_port%s.pdf'%port)
             plt.xlabel('Wavelength (nm)')
             plt.ylim((0, 1.0))
             plt.savefig(figp)
@@ -1873,6 +1909,7 @@ def main():
         plt.style.use('ggplot')
     # Collect the sims once up here and reuse them later
     proc = Processor(conf)
+    print('Collecting sims')
     sims, failed_sims = proc.collect_sims()
     # First we need to group against if specified. Grouping against corresponds
     # to "leaves" in the tree

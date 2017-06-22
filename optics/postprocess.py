@@ -672,7 +672,8 @@ class Cruncher(Processor):
             transmission). This must correspond to one of the keys placed in
             the fluxes.dat file
         """
-
+        
+        print("PORT: %s"%port)
         self.log.info('Computing transmission data ...')
         base = sim.conf['General']['sim_dir']
         path = os.path.join(base, 'fluxes.dat')
@@ -716,7 +717,7 @@ class Cruncher(Processor):
         self.log.info('Writing transmission file')
         with open(outpath, 'w') as out:
             out.write('# Reflectance,Transmission,Absorbance\n')
-            out.write('%f,%f,%f' % (reflectance, transmission, absorbance))
+            out.write('%f,%f,%f\n' % (reflectance, transmission, absorbance))
         return reflectance, transmission, absorbance
 
     def integrated_absorbtion(self, sim):

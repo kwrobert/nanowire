@@ -58,7 +58,7 @@ def get_combos(conf, keysets):
     combos = list(itertools.product(*valuelist))
     # log.debug('The list of parameter combos: %s', str(combos))
     # Gotta map to float cuz yaml writer doesn't like numpy data types
-    return keys, combos, bin_size
+    return keys, combos, float(bin_size)
 
 
 @contextmanager

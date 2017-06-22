@@ -37,9 +37,15 @@ class Simulator():
         limit when running massive job campaigns. For some reason this doesn't
         happen automagically
         """
-        for handler in self.log.handlers[:]:
-            handler.close()
-            self.log.removeHandler(handler)
+        # Sometimes we hit an error before the log object gets created and
+        # assigned as an attribute. Without the try, except we would get an
+        # attribute error which makes error messages confusing and useless
+        try:
+            for handler in self.log.handlers[:]:
+                handler.close()
+                self.log.removeHandler(handler)
+        except AttributeError:
+            pass
 
     def update_id(self):
         """Update sim id. Used after changes are made to the config"""
@@ -497,6 +503,7 @@ def main():
         pass
 
     if not sim.conf.variable_thickness:
+        sim.make_logger()
         sim.log.info('Executing sim %s' % sim.id[0:10])
         sim.get_data()
     else:
@@ -519,6 +526,7 @@ def main():
         sim.update_id()
         os.makedirs(sim.dir)
         subpath = os.path.join(orig_id, sim.id[0:10])
+        sim.make_logger()
         sim.log.info('Computing initial thickness at %s' % subpath)
         sim.get_data()
         # Now we can repeat the same exact process, but instead of rebuilding
@@ -529,8 +537,9 @@ def main():
                 sim.conf[keyseq] = {'type': 'fixed', 'value': float(combo[i])}
             sim.update_id()
             subpath = os.path.join(orig_id, sim.id[0:10])
-            sim.log.info('Computing additional thickness at %s' % subpath)
             os.makedirs(sim.dir)
+            sim.make_logger()
+            sim.log.info('Computing additional thickness at %s' % subpath)
             sim.get_data(update=True)
 
 if __name__ == '__main__':

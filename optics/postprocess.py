@@ -1304,45 +1304,70 @@ class Plotter(Processor):
                            plot, exc_info=True)
             raise
 
-    def draw_geometry_2d(self, sim, plane, ax_hand):
+    def _draw_layer_circle(self, ldata, shape_key, start, end, sim, plane, pval, ax_hand):
+        """Draws the circle within a layer"""
+        shape_data = ldata['geometry'][shape_key]
+        center = shape_data['center']
+        radius = shape_data['radius']
+        if plane == 'z':
+            circle = mpatches.Circle((center['x'], center['y']), radius=radius,
+                                     fill=False)
+            ax_hand.add_artist(circle)
+        if plane == "x":
+            plane_x = pval*sim.dx
+            plane_to_center = np.abs(center['x'] - plane_x)
+            self.log.debug('DIST: {}'.format(plane_to_center))
+            # Only draw if the observation plane actually intersects with the
+            # circle
+            if not plane_to_center >= radius:
+                # Check if the plane intersects with the center of the circle
+                if plane_to_center > 0:
+                    intersect_angle = np.arccos(plane_to_center/radius)
+                    self.log.debug('ANGLE: {}'.format(intersect_angle))
+                    half_width = plane_to_center*np.tan(intersect_angle)
+                else:
+                    half_width = radius
+                self.log.debug('HALF WIDTH: {}'.format(half_width))
+                # Vertical lines should span height of the layer
+                z = [sim.height - start * sim.dz, sim.height - end * sim.dz]
+                # The upper edge
+                x = [center['y'] + half_width, center['y'] + half_width]
+                line = mlines.Line2D(x, z, linestyle='solid', linewidth=2.0,
+                                     color='grey')
+                ax_hand.add_line(line)
+                # Now the lower edge
+                x = [center['y'] - half_width, center['y'] - half_width]
+                line = mlines.Line2D(x, z, linestyle='solid', linewidth=2.0,
+                                     color='grey')
+                ax_hand.add_line(line)
+        return ax_hand
+
+    def _draw_layer_geometry(self, ldata, start, end, sim, plane, pval, ax_hand):
+        """Given a dictionary with the data containing the geometry for a
+        layer, draw the internal geometry of the layer for a given plane type
+        and plane value"""
+        for shape, data in ldata['geometry'].items():
+            if data['type'] == 'circle':
+                ax = self._draw_layer_circle(ldata, shape, start, end, sim,
+                                             plane, pval, ax_hand)
+            else:
+                self.log.warning('Drawing of shape {} not '
+                                 'supported'.format(data['type']))
+        return ax
+
+    def draw_geometry_2d(self, sim, plane, pval, ax_hand):
         """This function draws the layer boundaries and in-plane geometry on 2D
         heatmaps"""
-        # TODO: If we want to make things general, this function could actually
-        # get really complicated for several reasons.
-        # 1. Each layer can have a unique in plane geometry. If we are plotting
-        # an xy plane (plane = z, poor notation which should be fixed), we need
-        # to identify which layer we are in so we can extract the geometry
-        # 2. We need to be able to handle any in-plane geometry thrown at us
-        # 3. If plotting an xz, yz plane (plane = x, plane = y), we need to
-        # know which plane we are at so we can scale the cross-sectional width
-        # of any geometric features appropriately. This will definitely
-        # involved some seriously nontrivial geometry depending on what shape
-        # we are dealing with, how its rotated, etc.
-        self.log.warning('Drawing capabilities are severely limited until I'
-                         ' figure out how to handle a general geometry')
+        # Get the layers in order
+        ordered_layers = sim.conf.sorted_dict(sim.conf['Layers'])
         period = sim.conf['Simulation']['params']['array_period']['value']
-        cent = sim.conf['Layers']['NW_AlShell']['geometry']['core']['center']
-        core_rad = sim.conf['Layers']['NW_AlShell'][
-            'geometry']['core']['radius']
-        try:
-            shell_rad = sim.conf['Layers']['NW_AlShell'][
-                'geometry']['shell']['radius']
-        except KeyError:
-            shell_rad = False
-        if plane[-1] == 'z':
-            self.log.info('draw nanowire circle')
-            core = mpatches.Circle(
-                (cent['x'], cent['y']), radius=core_rad, fill=False)
-            ax_hand.add_artist(core)
-            if shell_rad:
-                shell = mpatches.Circle(
-                    (cent['x'], cent['y']), radius=shell_rad, fill=False)
-                ax_hand.add_artist(shell)
-        elif plane[-1] == 'y' or plane[-1] == 'x':
-            boundaries = []
-            count = 0
-            ordered_layers = sim.conf.sorted_dict(sim.conf['Layers'])
-            for layer, ldata in ordered_layers.items():
+        # Loop through them
+        boundaries = []
+        count = 0
+        for layer, ldata in ordered_layers.items():
+            # If x or y, draw bottom edge and text label now. Layer geometry
+            # is handled in its own function
+            if plane == "x" or plane == "y":
                 # Get boundaries between layers and their starting and ending
                 # indices
                 layer_t = ldata['params']['thickness']['value']
@@ -1362,34 +1387,23 @@ class Plotter(Processor):
                          sim.height - start * sim.dz]
                     label_y = y[0] - 0.25
                     label_x = x[-1] - .01
-                    if layer == 'NW_AlShell':
-                        txt = layer[0:2]
-                        plt.text(label_x, label_y, txt, ha='right', family='sans-serif', size=16,
-                                 color='grey')
-                    else:
-                        plt.text(label_x, label_y, layer, ha='right', family='sans-serif', size=16,
-                                 color='grey')
+                    plt.text(label_x, label_y, layer, ha='right',
+                             family='sans-serif', size=16, color='grey')
                     line = mlines.Line2D(x, y, linestyle='solid', linewidth=2.0,
                                          color='grey')
                     ax_hand.add_line(line)
                     count += 1
-                if layer == 'NW_AlShell':
-                    if shell_rad:
-                        rads = (core_rad, shell_rad)
-                    else:
-                        rads = (core_rad,)
-                    for rad in rads:
-                        for x in (cent['x'] - rad, cent['x'] + rad):
-                            # Need two locations w/ same x values
-                            xv = [x, x]
-                            yv = [sim.height - start * sim.dz,
-                                  sim.height - end * sim.dz]
-                            line = mlines.Line2D(xv, yv, linestyle='solid', linewidth=2.0,
-                                                 color='grey')
-                            ax_hand.add_line(line)
-            return ax_hand
+            else:
+                # If look at a fixed z pval, the start and end values are
+                # nonsensical but we must pass a value in
+                start, end = None, None
+            # If we have some internal geometry for this layer, draw it
+            if 'geometry' in ldata:
+                ax = self._draw_layer_geometry(ldata, start, end, sim, plane, pval, ax_hand)
+        return ax
 
-    def heatmap2d(self, sim, x, y, cs, labels, ptype, save_path=None, show=False, draw=False, fixed=None, colorsMap='jet'):
+    def heatmap2d(self, sim, x, y, cs, labels, ptype, pval, save_path=None,
+                  show=False, draw=False, fixed=None, colorsMap='jet'):
         """A general utility method for plotting a 2D heat map"""
         cm = plt.get_cmap(colorsMap)
         if fixed:
@@ -1406,9 +1420,9 @@ class Plotter(Processor):
         #  ax.pcolormesh(x, y, cs,cmap=cm,norm=cNorm,alpha=.5,linewidth=0)
         #  ax.pcolor(x, y,
         #          cs,cmap=cm,norm=cNorm,alpha=.5,linewidth=0,edgecolors='none')
-        # ax.imshow(cs,cmap=cm,norm=cNorm,extent=[x.min(),x.max(),y.min(),y.max()],aspect='auto')
-        ax.imshow(cs, cmap=cm, norm=cNorm, extent=[x.min(), x.max(), y.min(), y.max()],
-                  aspect=.1)
+        ax.imshow(cs,cmap=cm,norm=cNorm,extent=[x.min(),x.max(),y.min(),y.max()],aspect='auto')
+        # ax.imshow(cs, cmap=cm, norm=cNorm, extent=[x.min(), x.max(), y.min(), y.max()],
+        #           aspect=.1)
         # ax_ins = zoomed_inset_axes(ax, 6, loc=1)
         # ax_ins.imshow(cs[75:100,:], extent=[x.min(), x.max(), .8, 1.4])
         # ax_ins.grid(False)
@@ -1425,25 +1439,26 @@ class Plotter(Processor):
         cb.set_label(labels[2])
         ax.set_xlabel(labels[0])
         ax.set_ylabel(labels[1])
-        start, end = ax.get_xlim()
-        ticks = np.arange(start, end, 0.1)
-        ax.xaxis.set_ticks(ticks)
-        ax.set_xlim((np.amin(x), np.amax(x)))
-        ax.set_ylim((np.amin(y), np.amax(y)))
-        start, end = ax.get_ylim()
-        # print('START: %f'%start)
-        # print('END: %f'%end)
-        ticks = np.arange(end, start - 0.2, -0.2)
-        ticks[-1] = 0
-        # ticks = np.arange(start,end,0.2)
-        # ticks = np.arange(start,end,-0.2)
-        # print('###### TICKS ######')
-        # print(ticks)
-        ax.yaxis.set_ticks(ticks)
-        ax.yaxis.set_ticklabels(list(reversed(ticks)))
+        # start, end = ax.get_xlim()
+        # ticks = np.arange(start, end, 0.1)
+        # ax.xaxis.set_ticks(ticks)
+        # ax.set_xlim((np.amin(x), np.amax(x)))
+        # ax.set_ylim((np.amin(y), np.amax(y)))
+        # start, end = ax.get_ylim()
+        # # print('START: %f'%start)
+        # # print('END: %f'%end)
+        # ticks = np.arange(end, start - 0.2, -0.2)
+        # ticks[-1] = 0
+        # # ticks = np.arange(start,end,0.2)
+        # # ticks = np.arange(start,end,-0.2)
+        # # print('###### TICKS ######')
+        # # print(ticks)
+        # ax.yaxis.set_ticks(ticks)
+        # ax.yaxis.set_ticklabels(list(reversed(ticks)))
         # fig.suptitle(labels[3])
         if draw:
-            ax = self.draw_geometry_2d(sim, ptype, ax)
+            self.log.info('Beginning geometry drawing routines ...')
+            ax = self.draw_geometry_2d(sim, ptype, pval, ax)
         if save_path:
             fig.savefig(save_path, bbox_inches='tight')
         if show:
@@ -1486,7 +1501,7 @@ class Plotter(Processor):
                                                                str(pval)))
             else:
                 p = False
-            self.heatmap2d(sim, y, z, cs, labels, plane,
+            self.heatmap2d(sim, y, z, cs, labels, plane, pval,
                            save_path=p, show=show, draw=draw, fixed=fixed)
         elif plane == 'y':
             labels = ('x [um]', 'z [um]', quantity, title)
@@ -1496,7 +1511,7 @@ class Plotter(Processor):
                                                                str(pval)))
             else:
                 p = False
-            self.heatmap2d(sim, x, z, cs, labels, plane,
+            self.heatmap2d(sim, x, z, cs, labels, plane, pval,
                            save_path=p, show=show, draw=draw, fixed=fixed)
         elif plane == 'z':
             labels = ('y [um]', 'x [um]', quantity, title)
@@ -1506,7 +1521,7 @@ class Plotter(Processor):
                                                                str(pval)))
             else:
                 p = False
-            self.heatmap2d(sim, x, y, cs, labels, plane,
+            self.heatmap2d(sim, x, y, cs, labels, plane, pval,
                            save_path=p, show=show, draw=draw, fixed=fixed)
 
     def scatter3d(self, sim, x, y, z, cs, labels, ptype, colorsMap='jet'):

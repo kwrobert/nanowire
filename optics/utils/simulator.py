@@ -47,6 +47,16 @@ class Simulator():
         except AttributeError:
             pass
 
+    def clean_sim(self):
+        try:
+            for handler in self.log.handlers[:]:
+                handler.close()
+                self.log.removeHandler(handler)
+            del self.log
+            del self.s4
+        except AttributeError:
+            pass
+
     def update_id(self):
         """Update sim id. Used after changes are made to the config"""
         self.id = make_hash(self.conf.data)
@@ -256,61 +266,24 @@ class Simulator():
             self.log.info('Computing for entire device')
             height = self.get_height()
             zvec = np.arange(0, height + dz, dz)
-        arr = np.zeros((x_samp * y_samp * len(zvec), 6))
-        count = 0
-        for z in zvec:
-            E, H = self.s4.GetFieldsOnGrid(
-                z=z, NumSamples=(x_samp, y_samp), Format='Array')
-            xcount = 0
-            for xval in E:
-                ycount = 0
-                for yval in xval:
-                    fixed = [val for c in yval for val in
-                             (c.real, c.imag)]
-                    arr[count, :] = fixed
-                    count += 1
-                    ycount += 1
-                xcount += 1
+        Ex = 0j*np.zeros((z_samp+1, x_samp, y_samp))
+        Ey = 0j*np.zeros((z_samp+1, x_samp, y_samp))
+        Ez = 0j*np.zeros((z_samp+1, x_samp, y_samp))
+        for zcount, z in enumerate(zvec):
+            E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(x_samp, y_samp),
+                                           Format='Array')
+            for xcount, xval in enumerate(E):
+                for ycount, yval in enumerate(xval):
+                    Ex[zcount, xcount, ycount] = yval[0]
+                    Ey[zcount, xcount, ycount] = yval[1]
+                    Ez[zcount, xcount, ycount] = yval[2]
         self.log.info('Finished computing fields!')
-        return arr
-
-    def row_iter(self, data, xsamp, ysamp, z):
-        inds = product(range(xsamp), range(ysamp))
-        for raw_row in chain(*data):
-            fixed = [val for c in raw_row for val in
-                     (c.real, c.imag)]
-            ind = inds.next()
-            final = [ind[0], ind[1], z] + fixed
-            yield final
-
-    #  @ph.timecall
-    def get_field2(self):
-        """Constructs and returns a 2D numpy array of the vector electric
-        field. The field components are complex numbers. This is about 1-2
-        seconds slower than the current get_field method, but I'm keeping it
-        around because the implementation feels nice"""
-        self.log.info('Computing fields ...')
-        x_samp = self.conf['Simulation']['x_samples']
-        y_samp = self.conf['Simulation']['y_samples']
-        z_samp = self.conf['Simulation']['z_samples']
-        height = self.get_height()
-        dz = height / z_samp
-        zvec = np.arange(0, height + dz, dz)
-        arr = np.zeros((x_samp * y_samp * len(zvec), 9))
-        count = 0
-        for z in zvec:
-            E, H = self.s4.GetFieldsOnGrid(
-                z=z, NumSamples=(x_samp, y_samp), Format='Array')
-            for row in self.row_iter(E, x_samp, y_samp, z):
-                arr[count, :] = row
-                count += 1
-        self.log.info('Finished computing fields!')
-        return arr
+        return Ex, Ey, Ez
 
     def save_field(self):
         """Saves the fields throughout the device to an npz file"""
         if self.conf['General']['adaptive_convergence']:
-            efield, numbasis, conv = self.adaptive_convergence()
+            ex, ey, ez, numbasis, conv = self.adaptive_convergence()
             if conv:
                 out = os.path.join(self.dir, 'converged_at.txt')
             else:
@@ -319,11 +292,12 @@ class Simulator():
             with open(out, 'w') as outf:
                 outf.write('{}\n'.format(numbasis))
         else:
-            efield = self.get_field()
+            ex, ey, ez = self.get_field()
         out = os.path.join(self.dir, self.conf["General"]["base_name"] + '.E')
         # headers = ['x', 'y', 'z', 'Ex', 'Ey', 'Ez']
         headers = [OrderedDict([('Ex_real', 0), ('Ex_imag', 1), ('Ey_real', 2),
                                ('Ey_imag', 3), ('Ez_real', 4), ('Ez_imag', 5)])]
+        data = {'Ex': ex, 'Ey': ey, 'Ez': ez}
         if self.conf['General']['save_as'] == 'text':
             np.savetxt(out, efield, header=','.join(headers))
         elif self.conf['General']['save_as'] == 'npz':
@@ -334,7 +308,7 @@ class Simulator():
             # I think the compression ratio is so high because npz is a binary
             # format, and all compression algs benefit from large sections of
             # repeated characters
-            np.savez_compressed(out, headers=headers, data=efield)
+            np.savez_compressed(out, **data)
             #  np.savez(out,headers=headers,data=efield)
         else:
             raise ValueError('Invalid file type specified in config')
@@ -376,19 +350,18 @@ class Simulator():
                                             forw.imag, back.imag)
                 out.write(row)
 
-    def calc_diff(self, d1, d2, exclude=False):
+    def calc_diff(self, fields1, fields2, exclude=False):
         """Calculate the percent difference between two vector fields"""
-        # This is a 2D table where each row contains the differences between
-        # each electric field component at the corresponding point in space
-        # squared. This is the magnitude squared of the difference vector
-        # between the two datasets at each sampling point
-        diffs_sq = (d1[:, 3:] - d2[:, 3:])**2
-        # Sum along the columns to get the sum of the squares of the components
-        # of the difference vector. This should be a 1D array
-        mag_diffs = np.sum(diffs_sq, axis=1)
+        # This list contains three 3D arrays corresponding to the x,y,z
+        # componenets of the e field. Within each 3D array is the complex
+        # magnitude of the difference between the two field arrays at each
+        # spatial point squared
+        diffs_sq = [np.absolute(arr1 - arr2)**2 for arr1, arr2 in zip(fields1, fields2)]
+        # Sum the squared differences of each component
+        mag_diffs = sum(diffs_sq)
         # Now compute the norm(E)^2 of the comparison sim at each sampling
         # point
-        normsq = np.sum(d1**2, axis=1)
+        normsq = sum([np.absolute(field)**2 for field in fields1])
         # We define the percent difference as the ratio of the sums of the
         # difference vector magnitudes to the comparison field magnitudes,
         # squared rooted.
@@ -406,7 +379,7 @@ class Simulator():
         self.log.info('Beginning adaptive convergence procedure')
         start_basis = self.conf['Simulation']['params']['numbasis']['value']
         basis_step = self.conf['General']['basis_step']
-        field1 = self.get_field()
+        ex, ey, ez = self.get_field()
         max_diff = self.conf['General']['max_diff']
         max_iter = self.conf['General']['max_iter']
         percent_diff = 100
@@ -418,17 +391,17 @@ class Simulator():
             self.set_basis(new_basis)
             self.build_device()
             self.set_excitation()
-            field2 = self.get_field()
-            percent_diff = self.calc_diff(field1, field2)
+            ex2, ey2, ez2 = self.get_field()
+            percent_diff = self.calc_diff([ex, ey, ex], [ex2, ey2, ez2])
             start_basis = new_basis
-            field1 = field2
+            ex, ey, ez = ex2, ey2, ez2
             iter_count += 1
         if percent_diff > max_diff:
             self.log.warning('Exceeded maximum number of iterations')
-            return field2, new_basis, False
+            return ex2, ey2, ez2, new_basis, False
         else:
             self.log.info('Converged at {} basis terms'.format(new_basis))
-            return field2, new_basis, True
+            return ex2, ey2, ez2, new_basis, True
 
     def mode_solve(self, update=False):
         """Find modes of the system. Supposedly you can get the resonant modes

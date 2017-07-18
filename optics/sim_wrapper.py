@@ -25,50 +25,6 @@ from utils.config import Config
 from utils.utils import configure_logger, make_hash, get_combos
 # from rcwa_app import RCWA_App
 from collections import OrderedDict
-#  from functools import wraps
-#  from contextlib import contextmanager
-#  from sqlalchemy.ext.declarative import declarative_base
-#  from sqlalchemy.orm import sessionmaker
-
-#__DB_ENGINE__ = None
-#__SESSION_FACTORY__ = None
-#Base = declarative_base()
-#
-# def setup_db(name,verbose=False):
-#    """Sets up the module-scope database engine and the session factory"""
-#    global __DB_ENGINE__
-#    global __SESSION_FACTORY__
-#    if not __DB_ENGINE__ and not __SESSION_FACTORY__:
-#        __DB_ENGINE__ = create_engine('sqlite:///{}'.format(name),echo=verbose)
-#        __SESSION_FACTORY__ = sessionmaker(bind=__DB_ENGINE__)
-#        Base.metadata.create_all(__DB_ENGINE__)
-#        Simulation.metadata.create_all(__DB_ENGINE__)
-#    else:
-#        raise RuntimeError('DB Engine already set')
-#
-#@contextmanager
-# def session_scope():
-#    """Provide a transactional scope around a series of operations."""
-#    session = __SESSION_FACTORY__()
-#    try:
-#        yield session
-#        session.commit()
-#    except:
-#        session.rollback()
-#        raise
-#    finally:
-#        session.close()
-
-# def dbconnect(func):
-#    @wraps(func)
-#    def wrapper(*args,**kwargs):
-#        session = __SESSION_FACTORY__()
-#        print('Setting up session scope')
-#        print('Here is session in wrapper')
-#        print(session)
-#        return func(*args,**kwargs)
-#    return wrapper
-
 
 def parse_file(path):
     """Super simple utility to parse a yaml file given a path"""
@@ -181,7 +137,12 @@ def run_sim(conf):
     runtime = end - start
     log.info('Simulation {} completed in {:.2}'
              ' seconds!'.format(sim.id[0:10], runtime))
-    return None 
+    test = "hello"
+    test2 = "world"
+    sim.clean_sim()
+    # del sim.log
+    return sim 
+    # return (test, test2) 
 
 
 def gc3_submit(gconf, sim_confs):
@@ -260,9 +221,14 @@ def execute_jobs(gconf, confs):
         pool = mp.Pool(processes=num_procs)
         total_sims = len(confs)
         remaining_sims = len(confs)
-        def callback(res):
+        def callback(completed_sim):
+            # print('Thing passed to callback')
+            # print(completed_sim)
+            # print(isinstance(completed_sim, Simulator))
             callback.remaining_sims -= 1
-            callback.log.info('%i out of %i simulations remaining'%(callback.remaining_sims,
+            # callback.log.info('%i out of %i simulations remaining'%(callback.remaining_sims,
+            #                                                 callback.total_sims))
+            print('%i out of %i simulations remaining'%(callback.remaining_sims,
                                                             callback.total_sims))
         callback.remaining_sims = remaining_sims
         callback.total_sims = total_sims
@@ -285,6 +251,7 @@ def execute_jobs(gconf, confs):
         except KeyboardInterrupt:
             pool.terminate()
         pool.join()
+        # print(results)
     elif gconf['General']['execution'] == 'gc3':
         log.info('Executing jobs using gc3 submission tools')
         gc3_submit(gconf, confs)

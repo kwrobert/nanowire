@@ -64,38 +64,28 @@ class Processor(object):
 
     def collect_sims(self):
         """Collect all the simulations beneath the base of the directory tree"""
-        # Clear out the lists
-        self.sims = []
-        self.failed_sims = []
+        sims = []
+        failed_sims = []
         ftype = self.gconf['General']['save_as']
-        if ftype == 'text':
-            datfile = self.gconf['General']['base_name'] + '.E'
+        if ftype == 'npz':
+            datfile = self.gconf['General']['base_name'] + '.npz'
         else:
-            datfile = self.gconf['General']['base_name'] + '.E.npz'
-        print('Inside collect')
-        print(self.gconf['General']['base_dir'])
-        group_dict = {}
+            raise ValueError('Invalid file type specified in config')
         for root, dirs, files in os.walk(self.gconf['General']['base_dir']):
+            conf_path = os.path.join(root, 'sim_conf.yml')
             if 'sim_conf.yml' in files and datfile in files:
                 self.log.info('Gather sim at %s', root)
-                sim_obj = Simulation(
-                    Config(os.path.join(root, 'sim_conf.yml')))
+                sim_obj = Simulation(Config(conf_path))
                 sim_obj.conf.expand_vars()
-                self.sims.append(sim_obj)
-                # This retrieves the lowest node in the tree, stores that node
-                # as the key and the list of sims beneath that node as values
-                parent_dir = os.path.dirname(root)
-                if parent_dir not in group_dict:
-                    group_dict[parent_dir] = [sim_obj]
-                else:
-                    group_dict[parent_dir].append(sim_obj)
+                sims.append(sim_obj)
             elif 'sim_conf.yml' in files:
-                sim_obj = Simulation(
-                    Config(os.path.join(root, 'sim_conf.yml')))
+                sim_obj = Simulation(Config(conf_path))
                 self.log.error('The following sim is missing its data file: %s',
                                sim_obj.conf['General']['sim_dir'])
-                self.failed_sims.append(sim_obj)
-        return self.sims, self.failed_sims
+                failed_sims.append(sim_obj)
+        self.sims = sims
+        self.failed_sims = failed_sims
+        return sims, failed_sims
 
     def sort_sims(self):
         """Sorts simulations by their parameters the way a human would. Called human sorting or
@@ -227,7 +217,7 @@ class Processor(object):
         parameter. An optional key may be passed in, the individual sims within
         each group will be sorted in increasing order of the specified key"""
 
-        self.log.info('Grouping sims by: %s' % str(key))
+        self.log.info('Grouping sims by: %s', str(key))
         # This works by storing the different values of the specifed parameter
         # as keys, and a list of sims whose value matches the key as the value
         pdict = {}
@@ -248,23 +238,21 @@ class Processor(object):
         self.sim_groups = groups
         return groups
 
-    def get_plane(self, arr, xsamp, ysamp, zsamp, plane, pval):
-        """Given a 1D array containing values for a 3D scalar field, reshapes
-        the array into 3D and returns a 2D array containing the data on a given
-        plane, for a specified index value (pval) of that plane. So, specifying
-        plane=x and pval=30 would return data on the 30th y,z plane (a plane at
-        the given x index). The number of samples (i.e data points) in each
-        coordinate direction need not be equal"""
+    def get_plane(self, scalar, plane, pval):
+        """Given a 3D array containing values for a 3D scalar field, returns a
+        2D array containing the data on a given plane, for a specified index
+        value (pval) of that plane. So, specifying plane=xy and pval=30 would
+        return data on the 30th x,y plane (a plane at the given z index). The
+        number of samples (i.e data points) in each coordinate direction need
+        not be equal"""
 
-        zsamp = int(zsamp)
-        scalar = arr.reshape(zsamp + 1, xsamp, ysamp)
-        if plane == 'x':
+        if plane == 'yz' or plane == 'zy':
             # z along rows, y along columns
             return scalar[:, pval, :]
-        elif plane == 'y':
+        elif plane == 'xz' or plane == 'zx':
             # x along columns, z along rows
             return scalar[:, :, pval]
-        elif plane == 'z':
+        elif plane == 'xy' or plane == 'yx':
             # x along rows, y along columns
             return scalar[pval, :, :]
 
@@ -320,7 +308,6 @@ class Cruncher(Processor):
         sim_path = os.path.basename(sim.conf['General']['sim_dir'])
         self.log.info('Crunching data for sim %s', sim_path)
         sim.get_data()
-        self.log.debug('SHAPE BEFORE CALCULATING: %s' % str(sim.e_data.shape))
         if sim.failed:
             self.log.error('Following simulation missing data: %s', sim_path)
             self.failed_sims.append(sim)
@@ -339,18 +326,11 @@ class Cruncher(Processor):
                                 self.calculate(quant, sim, argset)
                             else:
                                 self.calculate(quant, sim, [])
-                            self.log.debug(
-                                'SHAPE AFTER CALCULATING: %s' % str(sim.e_data.shape))
                     else:
                         if argsets:
                             self.calculate(quant, sim, argsets)
                         else:
                             self.calculate(quant, sim, [])
-                        self.log.debug('SHAPE AFTER CALCULATING: %s' %
-                                       str(sim.e_data.shape))
-                    self.log.debug('E lookup: %s', str(sim.e_lookup))
-                    self.log.debug('H lookup: %s', str(sim.h_lookup))
-
             sim.write_data()
             sim.clear_data()
 
@@ -368,48 +348,50 @@ class Cruncher(Processor):
             pool.map(self.process, self.sims)
 
     def normE(self, sim):
-        """Calculate and returns the norm of E"""
+        """
+        Calculates the norm of E. Adds it to the data dict for the simulation
+        and also returns a 3D array 
+        :param :class: `utils.Simulation.Simulation` sim: 
+        The simulation object for which you wish to calculate normE
+        :return: A 3D numpy array containing normE
+        """
 
         # Get the magnitude of E and add it to our data
-        E_mag = np.zeros(sim.e_data.shape[0])
-        for i in range(0, 6):
-            E_mag += sim.e_data[:, i] * sim.e_data[:, i]
+        E_mag = np.zeros_like(sim.data['Ex'])
+        for comp in ('Ex', 'Ey', 'Ez'):
+            E_mag += np.absolute(sim.data[comp])**2
         E_mag = np.sqrt(E_mag)
-        sim.extend_data('normE', E_mag, "E")
-        return E_mag
+        sim.extend_data('normE', E_mag.real)
+        return E_mag.real
 
     def normEsquared(self, sim):
         """Calculates and returns normE squared"""
 
         # Get the magnitude of E and add it to our data
-        E_magsq = np.zeros(sim.e_data.shape[0])
-        for i in range(0, 6):
-            E_magsq += sim.e_data[:, i] * sim.e_data[:, i]
-        sim.extend_data('normEsquared', E_magsq, "E")
-        return E_magsq
+        E_magsq = np.zeros_like(sim.data['Ex'])
+        for comp in ('Ex', 'Ey', 'Ez'):
+            E_magsq += np.absolute(sim.data[comp])**2
+        sim.extend_data('normEsquared', E_magsq.real)
+        return E_magsq.real
 
     def normH(self, sim):
         """Calculate and returns the norm of H"""
 
-        # Get the magnitude of H and add it to our data. This loops through
-        # each components real and imaginary parts and squares them (which is
-        # what would happen if you took the complex number for each component
-        # and multiplied it by its conjugate).
-        H_mag = np.zeros(sim.h_data.shape[0])
-        for i in range(0, 6):
-            H_mag += sim.h_data[:, i] * sim.h_data[:, i]
+        H_mag = np.zeros_like(sim.data['Hx'])
+        for comp in ('Hx', 'Hy', 'Hz'):
+            H_mag += np.absolute(sim.data[comp])**2
         H_mag = np.sqrt(H_mag)
-        sim.extend_data('normH', H_mag, "H")
-        return H_mag
+        sim.extend_data('normH', H_mag.real)
+        return H_mag.real
 
     def normHsquared(self, sim):
         """Calculates and returns the norm of H squared"""
 
-        H_magsq = np.zeros(sim.h_data.shape[0])
-        for i in range(0, 6):
-            H_magsq += sim.h_data[:, i] * sim.h_data[:, i]
-        sim.extend_data('normHsquared', H_magsq, "H")
-        return H_magsq
+        H_magsq = np.zeros_like(sim.data['Hx'])
+        for comp in ('Hx', 'Hy', 'Hz'):
+            H_magsq += np.absolute(sim.data[comp])**2
+        sim.extend_data('normHsquared', H_magsq.real)
+        return H_magsq.real
 
     def get_nk(self, path, freq):
         """Returns functions to compute index of refraction components n and k at a given
@@ -484,6 +466,7 @@ class Cruncher(Processor):
             normEsq = sim.get_scalar_quantity('normEsquared')
         except KeyError:
             normEsq = self.normEsquared(sim)
+            sim.extend_data('normEsquared', normEsq)
             # Make sure we don't compute it twice
             try:
                 sim.conf['Postprocessing']['Cruncher'][
@@ -501,10 +484,6 @@ class Cruncher(Processor):
         self.log.debug(nk)
         # Get spatial discretization
         samps = (sim.x_samples, sim.y_samples, sim.z_samples)
-        # Reshape into an actual 3D matrix. Rows correspond to different y fixed x, columns to fixed
-        # y variable x, and each layer in depth is a new z value
-        normEsq = np.reshape(
-            normEsq, (sim.z_samples + 1, sim.x_samples, sim.y_samples))
         gvec = np.zeros_like(normEsq)
         steps = (sim.dx, sim.dy, sim.dz)
         # Main loop to compute generation in each layer
@@ -515,8 +494,8 @@ class Cruncher(Processor):
             # Get boundaries between layers and their starting and ending
             # indices
             layer_t = ldata['params']['thickness']['value']
-            self.log.debug('LAYER: %s' % layer)
-            self.log.debug('LAYER T: %f' % layer_t)
+            self.log.debug('LAYER: %s', layer)
+            self.log.debug('LAYER T: %f', layer_t)
             if count == 0:
                 start = 0
                 end = int(layer_t / sim.dz) + 1
@@ -527,9 +506,9 @@ class Cruncher(Processor):
                 start = prev_tup[2]
                 end = int(dist / sim.dz) + 1
                 boundaries.append((dist, start, end))
-            self.log.debug('START: %i' % start)
-            self.log.debug('END: %i' % end)
-            if 'geometry' in ldata:
+            self.log.debug('START: %i', start)
+            self.log.debug('END: %i', end)
+            if '' in ldata:
                 self.log.debug('HAS GEOMETRY')
                 # This function returns the N,K profile in that layer as a 2D
                 # matrix. Each element contains the product of n and k at that
@@ -542,26 +521,19 @@ class Cruncher(Processor):
                 # Its just a simple slab
                 self.log.debug('NO GEOMETRY')
                 lmat = ldata['base_material']
-                self.log.debug('LAYER MATERIAL: %s' % lmat)
-                self.log.debug('MATERIAL n: %s' % str(nk[lmat][0]))
-                self.log.debug('MATERIAL k: %s' % str(nk[lmat][1]))
+                self.log.debug('LAYER MATERIAL: %s', lmat)
+                self.log.debug('MATERIAL n: %s', str(nk[lmat][0]))
+                self.log.debug('MATERIAL k: %s', str(nk[lmat][1]))
                 region = fact * nk[lmat][0] * \
                     nk[lmat][1] * normEsq[start:end, :, :]
-                self.log.debug('REGION SHAPE: %s' % str(region.shape))
+                self.log.debug('REGION SHAPE: %s', str(region.shape))
                 self.log.debug('REGION: ')
                 self.log.debug(str(region))
                 gvec[start:end, :, :] = region
             self.log.debug('GEN RATE MATRIX: ')
             self.log.debug(str(gvec))
             count += 1
-        # Reshape back to 1D array
-        gvec = gvec.reshape(
-            (sim.x_samples * sim.y_samples * (sim.z_samples + 1)))
-        self.log.debug('GVEC AFTER FLATTENING: ')
-        self.log.debug(str(gvec))
-        # This approach is 4 times faster than np.column_stack()
-        assert(sim.e_data.shape[0] == len(gvec))
-        sim.extend_data('genRate', gvec, "E")
+        sim.extend_data('genRate', gvec)
         return gvec
 
     def angularAvg(self, sim, quantity):
@@ -580,10 +552,6 @@ class Cruncher(Processor):
         # Get spatial discretization
         rsamp = sim.conf['Simulation']['r_samples']
         thsamp = sim.conf['Simulation']['theta_samples']
-        # Reshape into an actual 3D matrix. Rows correspond to different y fixed x, columns to fixed
-        # y variable x, and each layer in depth is a new z value
-        values = np.reshape(
-            quant, (sim.z_samples + 1, sim.x_samples, sim.y_samples))
         period = sim.conf['Simulation']['params']['array_period']['value']
         x = np.linspace(0, period, sim.x_samples)
         y = np.linspace(0, period, sim.y_samples)
@@ -596,19 +564,20 @@ class Cruncher(Processor):
         x_inds = int(np.ceil(delta / sim.dx))
         y_inds = int(np.ceil(delta / sim.dy))
         # Use periodic BCs to extend the data in the x-y plane
-        ext_vals = np.zeros((values.shape[0], values.shape[
-                            1] + 2 * x_inds, values.shape[2] + 2 * y_inds))
-        # Left-Right extensions. This indexing madness extracts the slice we want, flips it along the correct dimension
-        # then sticks in the correct spot in the extended array
-        ext_vals[:, x_inds:-x_inds, 0:y_inds] = values[:,
-                                                       :, 0:y_inds][:, :, ::-1]
+        ext_vals = np.zeros((quant.shape[0], quant.shape[1] + \
+                             2 * x_inds, quant.shape[2] + 2 * y_inds),
+                            dtype=quant.dtype)
+        # Left-Right extensions. This indexing madness extracts the slice we
+        # want, flips it along the correct dimension then sticks in the correct
+        # spot in the extended array
+        ext_vals[:, x_inds:-x_inds, 0:y_inds] = quant[:, :, 0:y_inds][:, :, ::-1]
         ext_vals[:, x_inds:-x_inds, -
-                 y_inds:] = values[:, :, -y_inds:][:, :, ::-1]
+                 y_inds:] = quant[:, :, -y_inds:][:, :, ::-1]
         # Top-Bottom extensions
         ext_vals[:, 0:x_inds, y_inds:-
-                 y_inds] = values[:, 0:x_inds, :][:, ::-1, :]
+                 y_inds] = quant[:, 0:x_inds, :][:, ::-1, :]
         ext_vals[:, -x_inds:, y_inds:-
-                 y_inds] = values[:, -x_inds:, :][:, ::-1, :]
+                 y_inds] = quant[:, -x_inds:, :][:, ::-1, :]
         # Corners, slightly trickier
         # Top left
         ext_vals[:, 0:x_inds, 0:y_inds] = ext_vals[
@@ -623,7 +592,7 @@ class Cruncher(Processor):
         ext_vals[:, -x_inds:, -y_inds:] = ext_vals[:, -
                                                    x_inds:, -2 * y_inds:-y_inds][:, :, ::-1]
         # Now the center
-        ext_vals[:, x_inds:-x_inds, y_inds:-y_inds] = values[:, :, :]
+        ext_vals[:, x_inds:-x_inds, y_inds:-y_inds] = quant[:, :, :]
         # Extend the points arrays to include these new regions
         x = np.concatenate((np.array([sim.dx * i for i in
                                       range(-x_inds, 0)]), x, np.array([x[-1] + sim.dx * i for i in range(1, x_inds + 1)])))
@@ -674,7 +643,6 @@ class Cruncher(Processor):
             the fluxes.dat file
         """
         
-        print("PORT: %s"%port)
         self.log.info('Computing transmission data ...')
         base = sim.conf['General']['sim_dir']
         path = os.path.join(base, 'fluxes.dat')
@@ -702,7 +670,6 @@ class Cruncher(Processor):
         reflectance = p_ref / p_inc
         transmission = p_trans / p_inc
         absorbance = 1 - reflectance - transmission
-        #absorbance = 1 - reflectance
         tot = reflectance + transmission + absorbance
         delta = np.abs(tot - 1)
         self.log.info('Reflectance %f' % reflectance)
@@ -713,7 +680,6 @@ class Cruncher(Processor):
         assert(transmission >= 0)
         # assert(absorbance >= 0)
         assert(delta < .00001)
-        #assert(reflectance >= 0 and transmission >= 0 and absorbance >= 0)
         outpath = os.path.join(base, 'ref_trans_abs.dat')
         self.log.info('Writing transmission file')
         if os.path.isfile(outpath):
@@ -795,14 +761,10 @@ class Global_Cruncher(Cruncher):
     def diff_sq(self, x, y):
         """Returns the magnitude of the difference vector squared between two vector fields at each
         point in space"""
-        if x.size != y.size:
-            self.log.error(
-                "You have attempted to compare datasets with an unequal number of points!!!!")
-            quit()
         # Calculate the magnitude of the difference vector SQUARED at each point in space
         # This is mag(vec(x) - vec(y))^2 at each point in space. This should be a 1D array
         # with # of elements = # sampling points
-        mag_diff_vec = np.sum((x - y)**2, axis=1)
+        mag_diff_vec = sum([np.absolute(v1 - v2)**2 for v1, v2 in zip(x, y)])
         return mag_diff_vec
 
     def get_slice(self, sim):
@@ -813,15 +775,14 @@ class Global_Cruncher(Cruncher):
         # sorted_layers is an OrderedDict, and thus has the popitem method
         sorted_layers = sim.conf.sorted_dict(sim.conf['Layers'])
         first_layer = sorted_layers.popitem(last=False)
+        print(first_layer)
         last_layer = sorted_layers.popitem()
         # We can get the starting and ending planes from their heights
-        start_plane = int(round(first_layer['params'][
+        start_plane = int(round(first_layer[1]['params'][
                           'thickness']['value'] / sim.dz))
-        start = start_plane * (sim.x_samples * sim.y_samples)
-        end_plane = int(round(last_layer['params'][
+        end_plane = int(round(last_layer[1]['params'][
                         'thickness']['value'] / sim.dz))
-        end = end_plane * (sim.x_samples * sim.y_samples)
-        return start, end
+        return start_plane, end_plane
 
     def get_comp_vec(self, sim, field, start, end):
         """Returns the comparison vector"""
@@ -829,22 +790,12 @@ class Global_Cruncher(Cruncher):
         # basis terms (last in list cuz sorting)
 
         # Get the proper file extension depending on the field.
-        if field == 'E':
-            ext = '.E'
-            # Get the comparison vector
-            vec1 = sim.e_data[start:end, 3:9]
-            normvec = sim.get_scalar_quantity('normE')
-            normvec = normvec[start:end]**2
-        elif field == 'H':
-            ext = '.H'
-            vec1 = sim.h_data[start:end, 3:9]
-            normvec = sim.get_scalar_quantity('normH')
-            normvec = normvec[start:end]**2
-        else:
-            self.log.error(
-                'The quantity for which you want to compute the error has not yet been calculated')
-            quit()
-        return vec1, normvec, ext
+        norm = 'norm'+field
+        # Get the comparison vector
+        vecs = [sim.data[field+comp][start:end] for comp in ('x', 'y', 'z')]
+        normvec = sim.get_scalar_quantity('normE')
+        normvec = normvec[start:end]**2
+        return vecs, normvec
 
     def local_error(self, field, exclude=False):
         """Computes the average of the local error between the vector fields of two simulations at
@@ -860,7 +811,6 @@ class Global_Cruncher(Cruncher):
                 start = 0
                 end = None
                 excluded = ''
-            # base = group[0].conf['General']['base_dir']
             base = group[0].conf['General']['results_dir']
             errpath = os.path.join(
                 base, 'localerror_%s%s.dat' % (field, excluded))
@@ -870,26 +820,21 @@ class Global_Cruncher(Cruncher):
                 ref_sim = group[-1]
                 ref_sim.get_data()
                 # Get the comparison vector
-                vec1, normvec, ext = self.get_comp_vec(
-                    ref_sim, field, start, end)
+                vecs1, normvec = self.get_comp_vec(ref_sim, field, start, end)
                 # For all other sims in the groups, compare to best estimate
                 # and write to error file
                 for i in range(0, len(group) - 1):
                     sim2 = group[i]
                     sim2.get_data()
-                    if field == 'E':
-                        vec2 = sim2.e_data[start:end, 3:9]
-                    elif field == 'H':
-                        vec2 = sim2.h_data[start:end, 3:9]
+                    vecs2, normvec2 = self.get_comp_vec(sim2, field, start,
+                                                        end)
                     self.log.info("Computing local error between numbasis %i and numbasis %i",
                                   ref_sim.conf['Simulation'][
                                       'params']['numbasis']['value'],
                                   sim2.conf['Simulation']['params']['numbasis']['value'])
                     # Get the array containing the magnitude of the difference vector at each point
                     # in space
-                    self.log.debug('vec1 shape: %s', str(vec1.shape))
-                    self.log.debug('vec2 shape: %s', str(vec2.shape))
-                    mag_diff_vec = self.diff_sq(vec1, vec2)
+                    mag_diff_vec = self.diff_sq(vecs1, vecs2)
                     # Normalize the magnitude squared of the difference vector by the magnitude squared of
                     # the local electric field of the comparison simulation at
                     # each point in space
@@ -934,24 +879,21 @@ class Global_Cruncher(Cruncher):
                 ref_sim = group[-1]
                 ref_sim.get_data()
                 # Get the comparison vector
-                vec1, normvec, ext = self.get_comp_vec(
-                    ref_sim, field, start, end)
+                vecs1, normvec = self.get_comp_vec(ref_sim, field, start, end)
                 # For all other sims in the groups, compare to best estimate
                 # and write to error file
                 for i in range(0, len(group) - 1):
                     sim2 = group[i]
                     sim2.get_data()
-                    if field == 'E':
-                        vec2 = sim2.e_data[start:end, 3:9]
-                    elif field == 'H':
-                        vec2 = sim2.h_data[start:end, 3:9]
+                    vecs2, normvec2 = self.get_comp_vec(sim2, field, start,
+                                                        end)
                     self.log.info("Computing global error between numbasis %i and numbasis %i",
                                   ref_sim.conf['Simulation'][
                                       'params']['numbasis']['value'],
                                   sim2.conf['Simulation']['params']['numbasis']['value'])
                     # Get the array containing the magnitude of the difference vector at each point
                     # in space
-                    mag_diff_vec = self.diff_sq(vec1, vec2)
+                    mag_diff_vec = self.diff_sq(vecs1, vecs2)
                     # Check for equal lengths between norm array and diff mag
                     # array
                     if len(mag_diff_vec) != len(normvec):
@@ -985,7 +927,7 @@ class Global_Cruncher(Cruncher):
                 end = None
                 excluded = ''
             # base = group[0].conf['General']['base_dir']
-            base = group[0].conf['General']['results_dirs']
+            base = group[0].conf['General']['results_dir']
             errpath = os.path.join(
                 base, 'adjacenterror_%s%s.dat' % (field, excluded))
             with open(errpath, 'w') as errfile:
@@ -997,28 +939,25 @@ class Global_Cruncher(Cruncher):
                     ref_sim = group[i]
                     ref_sim.get_data()
                     # Get the comparison vector
-                    vec1, normvec, ext = self.get_comp_vec(
-                        ref_sim, field, start, end)
+                    vecs1, normvec = self.get_comp_vec(ref_sim, field, start, end)
                     sim2 = group[i - 1]
                     sim2.get_data()
-                    if field == 'E':
-                        vec2 = sim2.e_data[start:end, 3:9]
-                    elif field == 'H':
-                        vec2 = sim2.h_data[start:end, 3:9]
+                    vecs2, normvec2 = self.get_comp_vec(sim2, field, start,
+                                                        end)
                     self.log.info("Computing adjacent error between numbasis %i and numbasis %i",
                                   ref_sim.conf['Simulation'][
                                       'params']['numbasis']['value'],
                                   sim2.conf['Simulation']['params']['numbasis']['value'])
                     # Get the array containing the magnitude of the difference vector at each point
                     # in space
-                    mag_diff_vec = self.diff_sq(vec1, vec2)
+                    mag_diff_vec = self.diff_sq(vecs1, vecs2)
                     # Check for equal lengths between norm array and diff mag
                     # array
                     if len(mag_diff_vec) != len(normvec):
                         self.log.error(
                             "The normalization vector has an incorrect number of elements!!!")
                         quit()
-                    # Error as a percentage should be the square root of the ratio of sum of mag diff vec
+                    # Error as a percentage should be thkkk square root of the ratio of sum of mag diff vec
                     # squared to mag efield squared
                     error = np.sqrt(np.sum(mag_diff_vec) / np.sum(normvec))
                     self.log.info(str(error))
@@ -1032,7 +971,6 @@ class Global_Cruncher(Cruncher):
         avg=False then a direct sum is computed, otherwise an average is
         computed"""
         for group in self.sim_groups:
-            # base = group[0].conf['General']['base_dir']
             base = group[0].conf['General']['results_dir']
             self.log.info('Performing scalar reduction for group at %s' % base)
             group[0].get_data()
@@ -1053,9 +991,6 @@ class Global_Cruncher(Cruncher):
             path = os.path.join(base, fname)
             if group[0].conf['General']['save_as'] == 'npz':
                 np.save(path, group_comb)
-            elif group[0].conf['General']['save_as'] == 'text':
-                path += '.crnch'
-                np.savetxt(path, group_comb)
             else:
                 raise ValueError('Invalid file type in config')
 
@@ -1309,11 +1244,11 @@ class Plotter(Processor):
         shape_data = ldata['geometry'][shape_key]
         center = shape_data['center']
         radius = shape_data['radius']
-        if plane == 'z':
+        if plane == 'xy':
             circle = mpatches.Circle((center['x'], center['y']), radius=radius,
                                      fill=False)
             ax_hand.add_artist(circle)
-        if plane == "x":
+        if plane in ["xz", "zx", "yz", "zy"]:
             plane_x = pval*sim.dx
             plane_to_center = np.abs(center['x'] - plane_x)
             self.log.debug('DIST: {}'.format(plane_to_center))
@@ -1367,7 +1302,7 @@ class Plotter(Processor):
         for layer, ldata in ordered_layers.items():
             # If x or y, draw bottom edge and text label now. Layer geometry
             # is handled in its own function
-            if plane == "x" or plane == "y":
+            if plane in ["xz", "zx", "yz", "zy"]:
                 # Get boundaries between layers and their starting and ending
                 # indices
                 layer_t = ldata['params']['thickness']['value']
@@ -1417,17 +1352,7 @@ class Plotter(Processor):
         scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
         fig = plt.figure(figsize=(10, 8))
         ax = fig.add_subplot(111)
-        #  ax.pcolormesh(x, y, cs,cmap=cm,norm=cNorm,alpha=.5,linewidth=0)
-        #  ax.pcolor(x, y,
-        #          cs,cmap=cm,norm=cNorm,alpha=.5,linewidth=0,edgecolors='none')
         ax.imshow(cs,cmap=cm,norm=cNorm,extent=[x.min(),x.max(),y.min(),y.max()],aspect='auto')
-        # ax.imshow(cs, cmap=cm, norm=cNorm, extent=[x.min(), x.max(), y.min(), y.max()],
-        #           aspect=.1)
-        # ax_ins = zoomed_inset_axes(ax, 6, loc=1)
-        # ax_ins.imshow(cs[75:100,:], extent=[x.min(), x.max(), .8, 1.4])
-        # ax_ins.grid(False)
-
-        # ax.matshow(cs,cmap=cm,norm=cNorm, aspect='auto')
         ax.grid(False)
         scalarMap.set_array(cs)
         # div = make_axes_locatable(ax)
@@ -1439,23 +1364,6 @@ class Plotter(Processor):
         cb.set_label(labels[2])
         ax.set_xlabel(labels[0])
         ax.set_ylabel(labels[1])
-        # start, end = ax.get_xlim()
-        # ticks = np.arange(start, end, 0.1)
-        # ax.xaxis.set_ticks(ticks)
-        # ax.set_xlim((np.amin(x), np.amax(x)))
-        # ax.set_ylim((np.amin(y), np.amax(y)))
-        # start, end = ax.get_ylim()
-        # # print('START: %f'%start)
-        # # print('END: %f'%end)
-        # ticks = np.arange(end, start - 0.2, -0.2)
-        # ticks[-1] = 0
-        # # ticks = np.arange(start,end,0.2)
-        # # ticks = np.arange(start,end,-0.2)
-        # # print('###### TICKS ######')
-        # # print(ticks)
-        # ax.yaxis.set_ticks(ticks)
-        # ax.yaxis.set_ticklabels(list(reversed(ticks)))
-        # fig.suptitle(labels[3])
         if draw:
             self.log.info('Beginning geometry drawing routines ...')
             ax = self.draw_geometry_2d(sim, ptype, pval, ax)
@@ -1471,77 +1379,52 @@ class Plotter(Processor):
         x = np.arange(0, sim.period, sim.dx)
         y = np.arange(0, sim.period, sim.dy)
         z = np.arange(0, sim.height + sim.dz, sim.dz)
-        # Maps planes to an integer for extracting data
-        # plane_table = {'x': 0,'y': 1,'z':2}
         # Get the scalar values
         self.log.info('Retrieving scalar %s' % quantity)
         scalar = sim.get_scalar_quantity(quantity)
         self.log.info('DATA SHAPE: %s' % str(scalar.shape))
-        # Filter out any undesired data that isn't on the planes
-        #mat = np.column_stack((sim.pos_inds[:,0],sim.pos_inds[:,1],sim.pos_inds[:,2],scalar))
-        #planes = np.array([row for row in mat if row[plane_table[plane]] == pval])
-        #self.log.debug("Planes shape: %s"%str(planes.shape))
-        # Get all unique values for x,y,z and convert them to actual values not indices
-        #x,y,z = np.unique(planes[:,0])*dx,np.unique(planes[:,1])*dy,np.unique(planes[:,2])
         freq = sim.conf['Simulation']['params']['frequency']['value']
         wvlgth = (c.c / freq) * 1E9
         title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(
             freq, wvlgth)
         # Get the plane we wish to plot
         self.log.info('Retrieving plane ...')
-        cs = self.get_plane(scalar, sim.x_samples,
-                            sim.y_samples, sim.z_samples, plane, pval)
+        cs = self.get_plane(scalar, plane, pval)
         self.log.info('Plotting plane')
         show = sim.conf['General']['show_plots']
-        if plane == 'x':
+        p = False
+        if plane == 'yz' or plane == 'zy':
             labels = ('y [um]', 'z [um]', quantity, title)
             if sim.conf['General']['save_plots']:
                 p = os.path.join(sim.conf['General']['sim_dir'],
-                                 '%s_plane_2d_x_pval%s.pdf' % (quantity,
+                                 '%s_plane_2d_yz_pval%s.pdf' % (quantity,
                                                                str(pval)))
-            else:
-                p = False
             self.heatmap2d(sim, y, z, cs, labels, plane, pval,
                            save_path=p, show=show, draw=draw, fixed=fixed)
-        elif plane == 'y':
+        elif plane == 'xz' or plane == 'zx':
             labels = ('x [um]', 'z [um]', quantity, title)
             if sim.conf['General']['save_plots']:
                 p = os.path.join(sim.conf['General']['sim_dir'],
-                                 '%s_plane_2d_y_pval%s.pdf' % (quantity,
+                                 '%s_plane_2d_xz_pval%s.pdf' % (quantity,
                                                                str(pval)))
-            else:
-                p = False
             self.heatmap2d(sim, x, z, cs, labels, plane, pval,
                            save_path=p, show=show, draw=draw, fixed=fixed)
-        elif plane == 'z':
+        elif plane == 'xy' or plane == 'yx':
             labels = ('y [um]', 'x [um]', quantity, title)
             if sim.conf['General']['save_plots']:
                 p = os.path.join(sim.conf['General']['sim_dir'],
-                                 '%s_plane_2d_z_pval%s.pdf' % (quantity,
+                                 '%s_plane_2d_xy_pval%s.pdf' % (quantity,
                                                                str(pval)))
-            else:
-                p = False
             self.heatmap2d(sim, x, y, cs, labels, plane, pval,
                            save_path=p, show=show, draw=draw, fixed=fixed)
 
     def scatter3d(self, sim, x, y, z, cs, labels, ptype, colorsMap='jet'):
         """A general utility method for scatter plots in 3D"""
-        #fig = plt.figure(figsize=(8,6))
-        #ax = fig.add_subplot(111,projection='3d')
-        #colors = cm.hsv(E_mag/max(E_mag))
-        #colmap = c.ScalarMappable(cmap=cm.hsv)
-        # colmap.set_array(E_mag)
-        #yg = ax.scatter(xs, ys, zs, c=colors, marker='o')
-        #cb = fig.colorbar(colmap)
-        # print("X SHAPE: %s"%str(x.shape))
-        # print("Y SHAPE: %s"%str(y.shape))
-        # print("Z SHAPE: %s"%str(z.shape))
         cm = plt.get_cmap(colorsMap)
         cNorm = matplotlib.colors.Normalize(vmin=min(cs), vmax=max(cs))
         scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
         fig = plt.figure(figsize=(9, 7))
 
-        #ax = Axes3D(fig)
         ax = fig.add_subplot(111, projection='3d')
         ax.scatter(x, y, z, c=scalarMap.to_rgba(cs), edgecolor='none')
         scalarMap.set_array(cs)
@@ -1572,7 +1455,7 @@ class Plotter(Processor):
         labels = ('X [um]', 'Y [um]', 'Z [um]', quantity)
         # Now plot!
         self.scatter3d(sim, points[:, 1], points[:, 2], points[
-                       :, 0], scalar, labels, 'full_3d')
+                       :, 0], scalar.flatten(), labels, 'full_3d')
 
     def planes_3d(self, sim, quantity, xplane, yplane):
         """Plots some scalar quantity in 3D but only along specified x-z and y-z planes"""
@@ -1585,11 +1468,7 @@ class Plotter(Processor):
         z = np.arange(0, sim.height + sim.dz, sim.dz)
         # Get the data on the plane with a fixed x value. These means we'll
         # have changing (y, z) points
-        xdata = self.get_plane(scalar, sim.x_samples, sim.y_samples, sim.z_samples,
-                               'x', xplane)
-        # plt.figure()
-        # plt.imshow(xdata)
-        # plt.show()
+        xdata = self.get_plane(scalar, 'yz', xplane)
         # z first cuz we want y to be changing before z to correspond with the
         # way numpy flattens arrays. Note this means y points will be in the
         # 2nd column
@@ -1602,8 +1481,7 @@ class Plotter(Processor):
         xplanedata[:, 2] = xplanepoints[:, 0]
         xplanedata[:, 3] = xdata
         # Same procedure for fixed y plane
-        ydata = self.get_plane(scalar, sim.x_samples, sim.y_samples, sim.z_samples,
-                               'y', yplane)
+        ydata = self.get_plane(scalar, 'xz', yplane)
         yplanepoints = np.array(list(itertools.product(z, x)))
         ydata = ydata.flatten()
         yplaneyval = np.array(list(itertools.repeat(y[yplane], len(ydata))))
@@ -1655,10 +1533,6 @@ class Plotter(Processor):
         elif direction == 'z':
             # x along rows, y along columns
             pos_data = z
-        #mat = np.column_stack((sim.pos_inds[:,0],sim.pos_inds[:,1],sim.pos_inds[:,2],scalar))
-        #planes = np.array([row for row in mat if row[0] == coord1 and row[1] == coord2])
-        #planes[:,0] = planes[:,0]*dx
-        #planes[:,1] = planes[:,1]*dy
         freq = sim.conf['Simulation']['params']['frequency']['value']
         wvlgth = (c.c / freq) * 1E9
         title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(
@@ -1757,66 +1631,47 @@ class Global_Plotter(Plotter):
             self.log.info('Plotting scalar reduction of %s for quantity'
                           ' %s' % (base, quantity))
             cm = plt.get_cmap('jet')
-            zs = sim.conf['Simulation']['z_samples']
-            xs = sim.conf['Simulation']['x_samples']
-            xs = int(float(xs))
-            ys = sim.conf['Simulation']['y_samples']
-            ys = int(float(ys))
             max_depth = sim.conf['Simulation']['max_depth']
             period = sim.conf['Simulation']['params']['array_period']['value']
-            dx = period / xs
-            dy = period / ys
-            dz = max_depth / zs
-            x = np.arange(0, period, dx)
-            y = np.arange(0, period, dy)
-            z = np.arange(0, max_depth + dz, dz)
+            x = np.arange(0, period, sim.dx)
+            y = np.arange(0, period, sim.dy)
+            z = np.arange(0, max_depth + sim.dz, sim.dz)
             if sim.conf['General']['save_as'] == 'npz':
                 globstr = os.path.join(
                     base, 'scalar_reduce*_%s.npy' % quantity)
-                files = glob.glob(globstr)
-            elif sim.conf['General']['save_as'] == 'text':
-                globstr = os.path.join(
-                    base, 'scalar_reduce*_%s.crnch' % quantity)
                 files = glob.glob(globstr)
             else:
                 raise ValueError('Incorrect file type in config')
             title = 'Reduction of %s' % quantity
             for datfile in files:
+                p = False
                 if sim.conf['General']['save_as'] == 'npz':
                     scalar = np.load(datfile)
-                elif sim.conf['General']['save_as'] == 'text':
-                    scalar = np.loadtxt(datfile, group_comb)
                 else:
                     raise ValueError('Incorrect file type in config')
-                cs = self.get_plane(scalar, xs, ys, zs, plane, pval)
-                if plane == 'x':
+                cs = self.get_plane(scalar, plane, pval)
+                if plane == 'yz' or plane == 'zy':
                     labels = ('y [um]', 'z [um]', quantity, title)
                     if sim.conf['General']['save_plots']:
-                        fname = 'scalar_reduce_%s_plane_2d_x.pdf' % quantity
+                        fname = 'scalar_reduce_%s_plane_2d_yz.pdf' % quantity
                         p = os.path.join(base, fname)
-                    else:
-                        p = False
                     show = sim.conf['General']['show_plots']
-                    self.heatmap2d(sim, y, z, cs, labels, plane,
+                    self.heatmap2d(sim, y, z, cs, labels, plane, pval,
                                    save_path=p, show=show, draw=draw, fixed=fixed)
-                elif plane == 'y':
+                elif plane == 'xz' or plane == 'zx':
                     labels = ('x [um]', 'z [um]', quantity, title)
                     if sim.conf['General']['save_plots']:
-                        fname = 'scalar_reduce_%s_plane_2d_y.pdf' % quantity
+                        fname = 'scalar_reduce_%s_plane_2d_xz.pdf' % quantity
                         p = os.path.join(base, fname)
-                    else:
-                        p = False
                     show = sim.conf['General']['show_plots']
-                    self.heatmap2d(sim, x, z, cs, labels, plane,
+                    self.heatmap2d(sim, x, z, cs, labels, plane, pval,
                                    save_path=p, show=show, draw=draw, fixed=fixed)
-                elif plane == 'z':
+                elif plane == 'xy' or plane == 'yx':
                     labels = ('y [um]', 'x [um]', quantity, title)
                     if sim.conf['General']['save_plots']:
-                        fname = 'scalar_reduce_%s_plane_2d_z.pdf' % quantity
+                        fname = 'scalar_reduce_%s_plane_2d_xy.pdf' % quantity
                         p = os.path.join(base, fname)
-                    else:
-                        p = False
-                    self.heatmap2d(sim, x, y, cs, labels, plane,
+                    self.heatmap2d(sim, x, y, cs, labels, plane, pval,
                                    save_path=p, show=show, draw=draw, fixed=fixed)
 
     def transmission_data(self, absorbance, reflectance, transmission,

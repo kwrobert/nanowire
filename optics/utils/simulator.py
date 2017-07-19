@@ -293,14 +293,9 @@ class Simulator():
                 outf.write('{}\n'.format(numbasis))
         else:
             ex, ey, ez = self.get_field()
-        out = os.path.join(self.dir, self.conf["General"]["base_name"] + '.E')
-        # headers = ['x', 'y', 'z', 'Ex', 'Ey', 'Ez']
-        headers = [OrderedDict([('Ex_real', 0), ('Ex_imag', 1), ('Ey_real', 2),
-                               ('Ey_imag', 3), ('Ez_real', 4), ('Ez_imag', 5)])]
+        out = os.path.join(self.dir, self.conf["General"]["base_name"])
         data = {'Ex': ex, 'Ey': ey, 'Ez': ez}
-        if self.conf['General']['save_as'] == 'text':
-            np.savetxt(out, efield, header=','.join(headers))
-        elif self.conf['General']['save_as'] == 'npz':
+        if self.conf['General']['save_as'] == 'npz':
             # Compression adds a small amount of time. The time cost is
             # nonlinear in the file size, meaning the penalty gets larger as the
             # field grid gets finer. However, the storage gains are enormous!

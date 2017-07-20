@@ -634,13 +634,11 @@ class Cruncher(Processor):
         """
         Computes reflection, transmission, and absorbance
 
-        sim: :py:class:`utils.simulation.Simulation`
-        port: string
-            Default: 'substrate'
-            Name of the location at which you would like to place the
-            transmission port (i.e where you would like to compute
-            transmission). This must correspond to one of the keys placed in
-            the fluxes.dat file
+        :param sim: :py:class:`utils.simulation.Simulation`
+        :param str port: Name of the location at which you would like to place the
+                         transmission port (i.e where you would like to compute
+                         transmission). This must correspond to one of the keys placed in
+                         the fluxes.dat file
         """
         
         self.log.info('Computing transmission data ...')

@@ -1,0 +1,519 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>postprocess module &#8212; Nanowire .1 documentation</title>
+    
+    <link rel="stylesheet" href="_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '.1',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="sim_wrapper module" href="sim_wrapper.html" />
+    <link rel="prev" title="Code" href="Code.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head>
+  <body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <div class="section" id="module-postprocess">
+<span id="postprocess-module"></span><h1>postprocess module<a class="headerlink" href="#module-postprocess" title="Permalink to this headline">¶</a></h1>
+<dl class="function">
+<dt id="postprocess.counted">
+<code class="descclassname">postprocess.</code><code class="descname">counted</code><span class="sig-paren">(</span><em>fn</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#counted"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.counted" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="class">
+<dt id="postprocess.Processor">
+<em class="property">class </em><code class="descclassname">postprocess.</code><code class="descname">Processor</code><span class="sig-paren">(</span><em>global_conf</em>, <em>sims=[]</em>, <em>sim_groups=[]</em>, <em>failed_sims=[]</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Processor"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Processor" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal"><span class="pre">object</span></code></p>
+<p>Base data processor class that has some methods every other processor needs</p>
+<dl class="method">
+<dt id="postprocess.Processor.collect_sims">
+<code class="descname">collect_sims</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Processor.collect_sims"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Processor.collect_sims" title="Permalink to this definition">¶</a></dt>
+<dd><p>Collect all the simulations beneath the base of the directory tree</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Processor.sort_sims">
+<code class="descname">sort_sims</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Processor.sort_sims"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Processor.sort_sims" title="Permalink to this definition">¶</a></dt>
+<dd><p>Sorts simulations by their parameters the way a human would. Called human sorting or
+natural sorting. Thanks stackoverflow</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Processor.get_param_vals">
+<code class="descname">get_param_vals</code><span class="sig-paren">(</span><em>parseq</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Processor.get_param_vals"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Processor.get_param_vals" title="Permalink to this definition">¶</a></dt>
+<dd><p>Return all possible values of the provided parameter for this sweep</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Processor.filter_by_param">
+<code class="descname">filter_by_param</code><span class="sig-paren">(</span><em>pars</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Processor.filter_by_param"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Processor.filter_by_param" title="Permalink to this definition">¶</a></dt>
+<dd><p>Accepts a dict where the keys are parameter names and the values are a list of possible
+values for that parameter. Any simulation whose parameter does not match any of the provided
+values is removed from the sims and sim_groups attribute</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Processor.group_against">
+<code class="descname">group_against</code><span class="sig-paren">(</span><em>key</em>, <em>variable_params</em>, <em>sort_key=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Processor.group_against"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Processor.group_against" title="Permalink to this definition">¶</a></dt>
+<dd><p>Groups simulations by against particular parameter. Within each
+group, the parameter specified will vary, and all other
+parameters will remain fixed. Populates the sim_groups attribute and
+also returns a list of lists. The simulations with each group will be
+sorted in increasing order of the specified parameter. An optional key
+may be passed in, the groups will be sorted in increasing order of the
+specified key</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Processor.group_by">
+<code class="descname">group_by</code><span class="sig-paren">(</span><em>key</em>, <em>sort_key=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Processor.group_by"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Processor.group_by" title="Permalink to this definition">¶</a></dt>
+<dd><p>Groups simulations by a particular parameter. Within each group, the
+parameter specified will remain fixed, and all other parameters will
+vary. Populates the sim_groups attribute and also returns a list of
+lists. The groups will be sorted in increasing order of the specified
+parameter. An optional key may be passed in, the individual sims within
+each group will be sorted in increasing order of the specified key</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Processor.get_plane">
+<code class="descname">get_plane</code><span class="sig-paren">(</span><em>scalar</em>, <em>plane</em>, <em>pval</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Processor.get_plane"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Processor.get_plane" title="Permalink to this definition">¶</a></dt>
+<dd><p>Given a 3D array containing values for a 3D scalar field, returns a
+2D array containing the data on a given plane, for a specified index
+value (pval) of that plane. So, specifying plane=xy and pval=30 would
+return data on the 30th x,y plane (a plane at the given z index). The
+number of samples (i.e data points) in each coordinate direction need
+not be equal</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Processor.get_line">
+<code class="descname">get_line</code><span class="sig-paren">(</span><em>arr</em>, <em>xsamp</em>, <em>ysamp</em>, <em>zsamp</em>, <em>line_dir</em>, <em>c1</em>, <em>c2</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Processor.get_line"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Processor.get_line" title="Permalink to this definition">¶</a></dt>
+<dd><p>Given a 1D array containing values for a 3D scalar field, reshapes
+the array into 3D and returns a new 1D array containing the data on a
+line in a given direction, for a specified index value for the other
+two spatial coordinates. So, specifying line_dir=z and c1=5,c2=5 would
+return all the data along the z-direction at the 5th x,y index. Note
+coordinates c1,c2 must always be specified in (x,y,z) order</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Processor.process">
+<code class="descname">process</code><span class="sig-paren">(</span><em>sim</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Processor.process"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Processor.process" title="Permalink to this definition">¶</a></dt>
+<dd><p>Retrieves data for a particular simulation, then processes that
+data</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Processor.process_all">
+<code class="descname">process_all</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Processor.process_all"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Processor.process_all" title="Permalink to this definition">¶</a></dt>
+<dd><p>Processes all the sims collected and stored in self.sims and
+self.sim_groups</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="class">
+<dt id="postprocess.Cruncher">
+<em class="property">class </em><code class="descclassname">postprocess.</code><code class="descname">Cruncher</code><span class="sig-paren">(</span><em>global_conf</em>, <em>sims=[]</em>, <em>sim_groups=[]</em>, <em>failed_sims=[]</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Cruncher"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Cruncher" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#postprocess.Processor" title="postprocess.Processor"><code class="xref py py-class docutils literal"><span class="pre">postprocess.Processor</span></code></a></p>
+<p>Crunches all the raw data. Calculates quantities specified in the global
+config file and either appends them to the existing data files or creates
+new ones as needed</p>
+<dl class="method">
+<dt id="postprocess.Cruncher.calculate">
+<code class="descname">calculate</code><span class="sig-paren">(</span><em>quantity</em>, <em>sim</em>, <em>args</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Cruncher.calculate"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Cruncher.calculate" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Cruncher.process">
+<code class="descname">process</code><span class="sig-paren">(</span><em>sim</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Cruncher.process"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Cruncher.process" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Cruncher.process_all">
+<code class="descname">process_all</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Cruncher.process_all"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Cruncher.process_all" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Cruncher.normE">
+<code class="descname">normE</code><span class="sig-paren">(</span><em>sim</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Cruncher.normE"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Cruncher.normE" title="Permalink to this definition">¶</a></dt>
+<dd><p>Calculates the norm of E. Adds it to the data dict for the simulation
+and also returns a 3D array 
+:param :class: <cite>utils.Simulation.Simulation</cite> sim: 
+The simulation object for which you wish to calculate normE
+:return: A 3D numpy array containing normE</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Cruncher.normEsquared">
+<code class="descname">normEsquared</code><span class="sig-paren">(</span><em>sim</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Cruncher.normEsquared"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Cruncher.normEsquared" title="Permalink to this definition">¶</a></dt>
+<dd><p>Calculates and returns normE squared</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Cruncher.normH">
+<code class="descname">normH</code><span class="sig-paren">(</span><em>sim</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Cruncher.normH"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Cruncher.normH" title="Permalink to this definition">¶</a></dt>
+<dd><p>Calculate and returns the norm of H</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Cruncher.normHsquared">
+<code class="descname">normHsquared</code><span class="sig-paren">(</span><em>sim</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Cruncher.normHsquared"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Cruncher.normHsquared" title="Permalink to this definition">¶</a></dt>
+<dd><p>Calculates and returns the norm of H squared</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Cruncher.get_nk">
+<code class="descname">get_nk</code><span class="sig-paren">(</span><em>path</em>, <em>freq</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Cruncher.get_nk"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Cruncher.get_nk" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns functions to compute index of refraction components n and k at a given
+frequency</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Cruncher.genRate">
+<code class="descname">genRate</code><span class="sig-paren">(</span><em>sim</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Cruncher.genRate"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Cruncher.genRate" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Cruncher.angularAvg">
+<code class="descname">angularAvg</code><span class="sig-paren">(</span><em>sim</em>, <em>quantity</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Cruncher.angularAvg"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Cruncher.angularAvg" title="Permalink to this definition">¶</a></dt>
+<dd><p>Perform an angular average of some quantity for either the E or H field</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Cruncher.transmissionData">
+<code class="descname">transmissionData</code><span class="sig-paren">(</span><em>sim</em>, <em>port=’Substrate’</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Cruncher.transmissionData"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Cruncher.transmissionData" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes reflection, transmission, and absorbance</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first last simple">
+<li><strong>sim</strong> – <a class="reference internal" href="utils.html#utils.simulation.Simulation" title="utils.simulation.Simulation"><code class="xref py py-class docutils literal"><span class="pre">utils.simulation.Simulation</span></code></a></li>
+<li><strong>port</strong> (<em>str</em>) – Name of the location at which you would like to place the
+transmission port (i.e where you would like to compute
+transmission). This must correspond to one of the keys placed in
+the fluxes.dat file</li>
+</ul>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Cruncher.integrated_absorbtion">
+<code class="descname">integrated_absorbtion</code><span class="sig-paren">(</span><em>sim</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Cruncher.integrated_absorbtion"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Cruncher.integrated_absorbtion" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the absorption of a layer by using the volume integral of the product of the
+imaginary part of the relative permittivity and the norm squared of the E field</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="class">
+<dt id="postprocess.Global_Cruncher">
+<em class="property">class </em><code class="descclassname">postprocess.</code><code class="descname">Global_Cruncher</code><span class="sig-paren">(</span><em>global_conf</em>, <em>sims=[]</em>, <em>sim_groups=[]</em>, <em>failed_sims=[]</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Global_Cruncher"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Global_Cruncher" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#postprocess.Cruncher" title="postprocess.Cruncher"><code class="xref py py-class docutils literal"><span class="pre">postprocess.Cruncher</span></code></a></p>
+<p>Computes global quantities for an entire run, instead of local quantities for an individual
+simulation</p>
+<dl class="method">
+<dt id="postprocess.Global_Cruncher.calculate">
+<code class="descname">calculate</code><span class="sig-paren">(</span><em>quantity</em>, <em>args</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Global_Cruncher.calculate"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Global_Cruncher.calculate" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Global_Cruncher.process_all">
+<code class="descname">process_all</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Global_Cruncher.process_all"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Global_Cruncher.process_all" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Global_Cruncher.diff_sq">
+<code class="descname">diff_sq</code><span class="sig-paren">(</span><em>x</em>, <em>y</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Global_Cruncher.diff_sq"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Global_Cruncher.diff_sq" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the magnitude of the difference vector squared between two vector fields at each
+point in space</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Global_Cruncher.get_slice">
+<code class="descname">get_slice</code><span class="sig-paren">(</span><em>sim</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Global_Cruncher.get_slice"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Global_Cruncher.get_slice" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns indices for data that strip out air and substrate regions</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Global_Cruncher.get_comp_vec">
+<code class="descname">get_comp_vec</code><span class="sig-paren">(</span><em>sim</em>, <em>field</em>, <em>start</em>, <em>end</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Global_Cruncher.get_comp_vec"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Global_Cruncher.get_comp_vec" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the comparison vector</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Global_Cruncher.local_error">
+<code class="descname">local_error</code><span class="sig-paren">(</span><em>field</em>, <em>exclude=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Global_Cruncher.local_error"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Global_Cruncher.local_error" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the average of the local error between the vector fields of two simulations at
+each point in space</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Global_Cruncher.global_error">
+<code class="descname">global_error</code><span class="sig-paren">(</span><em>field</em>, <em>exclude=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Global_Cruncher.global_error"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Global_Cruncher.global_error" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the global error between the vector fields of two simulations. This is the sum
+of the magnitude squared of the difference vectors divided by the sum of the magnitude
+squared of the comparison efield vector over the desired section of the simulation cell</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Global_Cruncher.adjacent_error">
+<code class="descname">adjacent_error</code><span class="sig-paren">(</span><em>field</em>, <em>exclude=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Global_Cruncher.adjacent_error"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Global_Cruncher.adjacent_error" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the global error between the vector fields of two simulations. This is the sum
+of the magnitude squared of the difference vectors divided by the sum of the magnitude
+squared of the comparison efield vector over the desired section of the simulation cell.
+This computes error between adjacent sims in a sweep through basis terms.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Global_Cruncher.scalar_reduce">
+<code class="descname">scalar_reduce</code><span class="sig-paren">(</span><em>quantity</em>, <em>avg=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Global_Cruncher.scalar_reduce"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Global_Cruncher.scalar_reduce" title="Permalink to this definition">¶</a></dt>
+<dd><p>Combine a scalar quantity across all simulations in each group. If
+avg=False then a direct sum is computed, otherwise an average is
+computed</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Global_Cruncher.fractional_absorbtion">
+<code class="descname">fractional_absorbtion</code><span class="sig-paren">(</span><em>port=’Substrate’</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Global_Cruncher.fractional_absorbtion"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Global_Cruncher.fractional_absorbtion" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the fraction of the incident spectrum that is absorbed by
+the device. This is a unitless number, and its interpretation somewhat
+depends on the units you express the incident spectrum in. If you
+expressed your incident spectrum in photon number, this can be
+interpreted as the fraction of incident photons that were absorbed. If
+you expressed your incident spectrum in terms of power per unit area,
+then this can be interpreted as the fraction of incident power per unit
+area that gets absorbed. In summary, its the fraction of whatever you
+put in that is being absorbed by the device.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Global_Cruncher.Jsc">
+<code class="descname">Jsc</code><span class="sig-paren">(</span><em>port=’Substrate’</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Global_Cruncher.Jsc"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Global_Cruncher.Jsc" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes photocurrent density. This is just the integrated
+absorption scaled by a unitful factor. Assuming perfect carrier
+collection, meaning every incident photon gets converted to 1 collected
+electron, this factor is q/(hbar*c) which converts to a current per
+unit area</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Global_Cruncher.weighted_transmissionData">
+<code class="descname">weighted_transmissionData</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Global_Cruncher.weighted_transmissionData"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Global_Cruncher.weighted_transmissionData" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes spectrally weighted absorption,transmission, and reflection</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="class">
+<dt id="postprocess.Plotter">
+<em class="property">class </em><code class="descclassname">postprocess.</code><code class="descname">Plotter</code><span class="sig-paren">(</span><em>global_conf</em>, <em>sims=[]</em>, <em>sim_groups=[]</em>, <em>failed_sims=[]</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Plotter"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Plotter" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#postprocess.Processor" title="postprocess.Processor"><code class="xref py py-class docutils literal"><span class="pre">postprocess.Processor</span></code></a></p>
+<p>Plots all the things listed in the config file</p>
+<dl class="method">
+<dt id="postprocess.Plotter.process">
+<code class="descname">process</code><span class="sig-paren">(</span><em>sim</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Plotter.process"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Plotter.process" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Plotter.process_all">
+<code class="descname">process_all</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Plotter.process_all"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Plotter.process_all" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Plotter.gen_plot">
+<code class="descname">gen_plot</code><span class="sig-paren">(</span><em>plot</em>, <em>sim</em>, <em>args</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Plotter.gen_plot"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Plotter.gen_plot" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Plotter.draw_geometry_2d">
+<code class="descname">draw_geometry_2d</code><span class="sig-paren">(</span><em>sim</em>, <em>plane</em>, <em>pval</em>, <em>ax_hand</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Plotter.draw_geometry_2d"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Plotter.draw_geometry_2d" title="Permalink to this definition">¶</a></dt>
+<dd><p>This function draws the layer boundaries and in-plane geometry on 2D
+heatmaps</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Plotter.heatmap2d">
+<code class="descname">heatmap2d</code><span class="sig-paren">(</span><em>sim</em>, <em>x</em>, <em>y</em>, <em>cs</em>, <em>labels</em>, <em>ptype</em>, <em>pval</em>, <em>save_path=None</em>, <em>show=False</em>, <em>draw=False</em>, <em>fixed=None</em>, <em>colorsMap=’jet’</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Plotter.heatmap2d"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Plotter.heatmap2d" title="Permalink to this definition">¶</a></dt>
+<dd><p>A general utility method for plotting a 2D heat map</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Plotter.plane_2d">
+<code class="descname">plane_2d</code><span class="sig-paren">(</span><em>sim</em>, <em>quantity</em>, <em>plane</em>, <em>pval</em>, <em>draw=False</em>, <em>fixed=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Plotter.plane_2d"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Plotter.plane_2d" title="Permalink to this definition">¶</a></dt>
+<dd><p>Plots a heatmap of a fixed 2D plane</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Plotter.scatter3d">
+<code class="descname">scatter3d</code><span class="sig-paren">(</span><em>sim</em>, <em>x</em>, <em>y</em>, <em>z</em>, <em>cs</em>, <em>labels</em>, <em>ptype</em>, <em>colorsMap=’jet’</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Plotter.scatter3d"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Plotter.scatter3d" title="Permalink to this definition">¶</a></dt>
+<dd><p>A general utility method for scatter plots in 3D</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Plotter.full_3d">
+<code class="descname">full_3d</code><span class="sig-paren">(</span><em>sim</em>, <em>quantity</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Plotter.full_3d"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Plotter.full_3d" title="Permalink to this definition">¶</a></dt>
+<dd><p>Generates a full 3D plot of a specified scalar quantity</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Plotter.planes_3d">
+<code class="descname">planes_3d</code><span class="sig-paren">(</span><em>sim</em>, <em>quantity</em>, <em>xplane</em>, <em>yplane</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Plotter.planes_3d"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Plotter.planes_3d" title="Permalink to this definition">¶</a></dt>
+<dd><p>Plots some scalar quantity in 3D but only along specified x-z and y-z planes</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Plotter.line_plot">
+<code class="descname">line_plot</code><span class="sig-paren">(</span><em>sim</em>, <em>x</em>, <em>y</em>, <em>ptype</em>, <em>labels</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Plotter.line_plot"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Plotter.line_plot" title="Permalink to this definition">¶</a></dt>
+<dd><p>Make a simple line plot</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Plotter.fixed_line">
+<code class="descname">fixed_line</code><span class="sig-paren">(</span><em>sim</em>, <em>quantity</em>, <em>direction</em>, <em>coord1</em>, <em>coord2</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Plotter.fixed_line"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Plotter.fixed_line" title="Permalink to this definition">¶</a></dt>
+<dd><p>Plot a scalar quantity on a line along a the z direction at some pair of
+coordinates in the plane perpendicular to that direction</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="class">
+<dt id="postprocess.Global_Plotter">
+<em class="property">class </em><code class="descclassname">postprocess.</code><code class="descname">Global_Plotter</code><span class="sig-paren">(</span><em>global_conf</em>, <em>sims=[]</em>, <em>sim_groups=[]</em>, <em>failed_sims=[]</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Global_Plotter"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Global_Plotter" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#postprocess.Plotter" title="postprocess.Plotter"><code class="xref py py-class docutils literal"><span class="pre">postprocess.Plotter</span></code></a></p>
+<p>Plots global quantities for an entire run that are not specific to a single simulation</p>
+<dl class="method">
+<dt id="postprocess.Global_Plotter.process_all">
+<code class="descname">process_all</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Global_Plotter.process_all"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Global_Plotter.process_all" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Global_Plotter.gen_plot">
+<code class="descname">gen_plot</code><span class="sig-paren">(</span><em>plot</em>, <em>args</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Global_Plotter.gen_plot"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Global_Plotter.gen_plot" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Global_Plotter.convergence">
+<code class="descname">convergence</code><span class="sig-paren">(</span><em>quantity</em>, <em>err_type=’global’</em>, <em>scale=’linear’</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Global_Plotter.convergence"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Global_Plotter.convergence" title="Permalink to this definition">¶</a></dt>
+<dd><p>Plots the convergence of a field across all available simulations</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Global_Plotter.scalar_reduce">
+<code class="descname">scalar_reduce</code><span class="sig-paren">(</span><em>quantity</em>, <em>plane</em>, <em>pval</em>, <em>draw=False</em>, <em>fixed=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Global_Plotter.scalar_reduce"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Global_Plotter.scalar_reduce" title="Permalink to this definition">¶</a></dt>
+<dd><p>Plot the result of a particular scalar reduction for each group</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="postprocess.Global_Plotter.transmission_data">
+<code class="descname">transmission_data</code><span class="sig-paren">(</span><em>absorbance</em>, <em>reflectance</em>, <em>transmission</em>, <em>port=’Substrate’</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#Global_Plotter.transmission_data"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.Global_Plotter.transmission_data" title="Permalink to this definition">¶</a></dt>
+<dd><p>Plot transmissions, absorption, and reflectance assuming leaves are frequency</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="function">
+<dt id="postprocess.main">
+<code class="descclassname">postprocess.</code><code class="descname">main</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/postprocess.html#main"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#postprocess.main" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+  <h3><a href="index.html">Table Of Contents</a></h3>
+  <ul>
+<li class="toctree-l1"><a class="reference internal" href="Introduction.html">Introduction</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Code.html">Code</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Code.html#optics">optics</a></li>
+</ul>
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+  <li><a href="Code.html">Code</a><ul>
+      <li>Previous: <a href="Code.html" title="previous chapter">Code</a></li>
+      <li>Next: <a href="sim_wrapper.html" title="next chapter">sim_wrapper module</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="_sources/postprocess.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <form class="search" action="search.html" method="get">
+      <div><input type="text" name="q" /></div>
+      <div><input type="submit" value="Go" /></div>
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2017, Kyle Robertson.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 1.6.2</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.10</a>
+      
+      |
+      <a href="_sources/postprocess.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

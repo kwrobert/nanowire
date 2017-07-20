@@ -118,10 +118,11 @@ class Simulation(object):
         Retrieves the entire 3D matrix for some scalar quantity
 
         :param str quantity: The quantity you would like to retrive (ex: 'Ex'
-        or 'normE')
+                             or 'normE')
         :return: A 3D numpy array of the specified quantity
         :raises KeyError: If the specified quantity does not exist in the data
-        dict
+                          dict
+
         """
         self.log.debug('Retrieving scalar quantity %s', str(quantity))
         try:

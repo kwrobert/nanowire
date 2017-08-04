@@ -20,8 +20,6 @@ from config import Config
 class Simulator():
 
     def __init__(self, conf, q=None):
-        # conf.interpolate()
-        # conf.evaluate()
         self.conf = conf
         self.q = q
         numbasis = self.conf['Simulation']['params']['numbasis']['value']
@@ -294,8 +292,34 @@ class Simulator():
             Ex, Ey, Ez = self._compute_fields()
             self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez})
 
-    def save_field(self):
-        """Saves the fields throughout the device to an npz file"""
+    def get_fluxes(self):
+        """
+        Get the fluxes at the top and bottom of each layer. This is a surface
+        integral of the component of the Poynting flux perpendicular to this
+        x-y plane of the interface, and have forward and backward componenets.
+        Returns a dict where the keys are the layer name and the values are a
+        length 2 tuple with the forward component first and the backward
+        component second. The components are complex numbers
+        """
+        self.log.info('Computing fluxes ...')
+        for layer, ldata in self.conf['Layers'].items():
+            self.log.info('Computing fluxes through layer: %s' % layer)
+            # This gets flux at top of layer
+            forw, back = self.s4.GetPowerFlux(S4_Layer=layer)
+            self.flux_dict[layer] = (forw, back)
+            # This gets flux at the bottom
+            offset = ldata['params']['thickness']['value']
+            forw, back = self.s4.GetPowerFlux(S4_Layer=layer, zOffset=offset)
+            key = layer + '_bottom'
+            self.flux_dict[key] = (forw, back)
+        if self.conf['General']['save_as'] == 'npz':
+            self.data['fluxes'] = self.flux_dict
+        self.log.info('Finished computing fluxes!')
+        return self.flux_dict
+
+    def save_data(self):
+        """Saves the self.data dictionary to an npz file. This dictionary
+        contains all the fields and the fluxes dictionary"""
 
         if self.conf['General']['save_as'] == 'npz':
             self.log.info('Saving fields to NPZ')
@@ -317,6 +341,7 @@ class Simulator():
             # repeated characters
             np.savez_compressed(out, **self.data)
         elif self.conf['General']['save_as'] == 'hdf5':
+            # Save the field arrays
             self.log.info('Saving fields to HDF5')
             path = '/sim_'+self.id[0:10]
             for name, arr in self.data.iteritems():
@@ -324,46 +349,7 @@ class Simulator():
                 tup = ('create_array', (path, name, arr),
                        {'createparents':True})
                 self.q.put(tup)
-        else:
-            raise ValueError('Invalid file type specified in config')
-
-    def get_fluxes(self):
-        """
-        Get the fluxes at the top and bottom of each layer. This is a surface
-        integral of the component of the Poynting flux perpendicular to this
-        x-y plane of the interface, and have forward and backward componenets.
-        Returns a dict where the keys are the layer name and the values are a
-        length 2 tuple with the forward component first and the backward
-        component second. The components are complex numbers
-        """
-        self.log.info('Computing fluxes ...')
-        for layer, ldata in self.conf['Layers'].items():
-            self.log.info('Computing fluxes through layer: %s' % layer)
-            # This gets flux at top of layer
-            forw, back = self.s4.GetPowerFlux(S4_Layer=layer)
-            self.flux_dict[layer] = (forw, back)
-            # This gets flux at the bottom
-            offset = ldata['params']['thickness']['value']
-            forw, back = self.s4.GetPowerFlux(S4_Layer=layer, zOffset=offset)
-            key = layer + '_bottom'
-            self.flux_dict[key] = (forw, back)
-        self.log.info('Finished computing fluxes!')
-        return self.flux_dict
-
-    def save_fluxes(self):
-        """Saves the fluxes at layer interfaces to a file"""
-        if self.conf['General']['save_as'] == 'npz':
-            path = os.path.join(self.dir, 'fluxes.dat')
-            # fluxes = self.get_fluxes()
-            with open(path, 'w') as out:
-                out.write(
-                    '# Layer,ForwardReal,BackwardReal,ForwardImag,BackwardImag\n')
-                for layer, ldata in self.flux_dict.items():
-                    forw, back = ldata
-                    row = '%s,%s,%s,%s,%s\n' % (layer, forw.real, back.real,
-                                                forw.imag, back.imag)
-                    out.write(row)
-        elif self.conf['General']['save_as'] == 'hdf5':
+            # Save the flux dict to a table
             self.log.info('Saving fluxes to HDF5')
             self.log.info(self.flux_dict)
             path = '/sim_{}'.format(self.id[0:10])
@@ -477,7 +463,7 @@ class Simulator():
         res = mant*base**expo
         self.log.info('Result: %s'%str(res))
 
-    def save_data(self, update=False):
+    def save_all(self, update=False):
         """Gets all the data for this similation by calling the relevant class
         methods. Basically just a convenient wrapper to execute all the
         functions defined above"""
@@ -489,9 +475,8 @@ class Simulator():
         else:
             self.update_thicknesses()
         self.get_field()
-        self.save_field()
         self.get_fluxes()
-        self.save_fluxes()
+        self.save_data()
         self.save_conf()
         end = time.time()
         self.runtime = end - start

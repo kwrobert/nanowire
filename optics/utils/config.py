@@ -29,13 +29,15 @@ class Config(MutableMapping):
     It can be initialized with a path, or an actual python data structure as
     with the usual dict but has some extra convenience methods"""
 
-    def __init__(self, path=None, data=None):
+    def __init__(self, path=None, data=None, raw_text=None):
         # self.log = logging.getLogger(name='config')
         # self.log.debug('CONFIG INIT')
         if path:
             self.data = self._parse_file(path)
+        elif raw_text:
+            self.data = yaml.load(raw_text, Loader=yaml.Loader)
         else:
-            self.data = dict()
+            self.data = {}
             self.update(dict(data))
         self._update_params()
         self.dep_graph = {}

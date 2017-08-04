@@ -55,7 +55,7 @@ def run_sim(conf, q=None):
         except OSError:
             pass
         log.info('Executing sim %s'%sim.id[0:10])
-        sim.save_data()
+        sim.save_all()
         # sim.mode_solve()
     else:
         log.info('Computing a thickness sweep at %s' % sim.id[0:10])
@@ -85,7 +85,7 @@ def run_sim(conf, q=None):
             pass
         subpath = os.path.join(orig_id, sim.id[0:10])
         log.info('Computing initial thickness at %s', subpath)
-        sim.save_data()
+        sim.save_all()
         # Now we can repeat the same exact process, but instead of rebuilding
         # the device we just update the thicknesses
         for combo in combos:
@@ -96,7 +96,7 @@ def run_sim(conf, q=None):
             subpath = os.path.join(orig_id, sim.id[0:10])
             log.info('Computing additional thickness at %s', subpath)
             os.makedirs(sim.dir)
-            sim.save_data(update=True)
+            sim.save_all(update=True)
     end = time.time()
     runtime = end - start
     log.info('Simulation %s completed in %.2f seconds!', sim.id[0:10], runtime)
@@ -111,9 +111,9 @@ class LayerFlux(tb.IsDescription):
 class FileWriter(threading.Thread):
 
     def __init__(self, q, group=None, target=None, name=None):
-        super(FileWriter,self).__init__(group=group, target=target, name=name)
+        super(FileWriter, self).__init__(group=group, target=target, name=name)
         self.q = q
-        self.hdf5 = tb.open_file('data.hdf5','w')
+        self.hdf5 = tb.open_file('data.hdf5', 'w')
 
     def run(self):
         while True:
@@ -183,8 +183,7 @@ class SimulationManager:
             pass
         self.log = configure_logger(level=log_level, console=True, logfile=lfile)
         self.sim_confs = []
-        self.log.debug('Making q')
-        self.log.debug('Queue created')
+        self.write_queue = None
 
     def make_listener(self):
         """
@@ -273,9 +272,9 @@ class SimulationManager:
                 pool.terminate()
             pool.join()
             self.write_queue.put(None)
-            for res in results:
-                print(res)
-                print(res.get())
+            # for res in results:
+            #     print(res)
+            #     print(res.get())
         elif self.gconf['General']['execution'] == 'gc3':
             self.log.info('Executing jobs using gc3 submission tools')
             self.gc3_submit(self.gconf, self.sim_confs)

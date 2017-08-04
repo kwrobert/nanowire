@@ -1,10 +1,19 @@
-import pandas
 import numpy as np
 import os
 import time
 import glob
 import logging
+import tables as tb
+import scipy.constants as c
+from scipy import interpolate
 from .utils import open_atomic
+
+
+class TransmissionData(tb.IsDescription):
+    layer = tb.StringCol(60, pos=0)
+    reflection = tb.Float32Col(pos=1)
+    transmission = tb.Float32Col(pos=2)
+    absorption = tb.Float32Col(pos=3)
 
 
 class Simulation(object):
@@ -16,8 +25,9 @@ class Simulation(object):
     processor objects
     """
 
-    def __init__(self, conf):
+    def __init__(self, conf, hdf5_handle=None):
         self.conf = conf
+        self.hdf5 = hdf5_handle
         self.log = logging.getLogger('postprocess')
         self.data = None
         self.failed = False
@@ -36,13 +46,14 @@ class Simulation(object):
         self.period = conf['Simulation']['params']['array_period']['value']
         self.dx = self.period / self.x_samples
         self.dy = self.period / self.y_samples
+        self.id = os.path.basename(conf['General']['sim_dir'])
 
     def load_npz(self, path):
         """Load all field data for this simulation from an npz file"""
         try:
             # Get the headers and the data
             with np.load(path) as loaded:
-                data = {key: arr for key, arr in loaded.iteritems()}
+                data = {key: arr for key, arr in loaded.items()}
                 self.log.debug('Quantities in npz file: %s', str(data.keys()))
         except IOError:
             self.log.error('Following file missing or unloadable: %s', path)
@@ -55,14 +66,41 @@ class Simulation(object):
         dictionary attribute"""
         self.log.info('Collecting data for sim %s',
                       self.conf['General']['sim_dir'])
-        sim_path = self.conf['General']['sim_dir']
-        base_name = self.conf['General']['base_name']
         ftype = self.conf['General']['save_as']
         # If data was saved in in npz format
         if ftype == 'npz':
+            sim_path = self.conf['General']['sim_dir']
+            base_name = self.conf['General']['base_name']
             # Get the paths
             path = os.path.join(sim_path, base_name + '.npz')
             data = self.load_npz(path)
+            # When using savez it wraps the dict in a numpy array so we need to
+            # extract it here. Its wrapped in a "0-d" array, which is why we
+            # need to use this weird [()] indexing
+            data['fluxes'] = data['fluxes'][()]
+            if 'transmission_data' in data:
+                data['transmission_data'] = data['transmission_data'][()]
+        elif ftype == 'hdf5':
+            # First load the fields
+            path = '/sim_{}'.format(self.id)
+            data = {}
+            for arr in self.hdf5.iter_nodes(path,  classname="Array"):
+                data[arr.name] = arr.read()
+            # Now load the fluxes
+            flux_path = path + '/fluxes'
+            flux_table = self.hdf5.get_node(flux_path)
+            flux_dict = {tup[0].decode('utf-8'): (tup[1], tup[2]) for tup in
+                         flux_table.read()}
+            data['fluxes'] = flux_dict
+            # Now load the transmission and reflection data if it exists
+            trans_path = path + '/transmission_data'
+            try:
+                trans_table = self.hdf5.get_node(trans_path)
+                trans_dict = {tup[0].decode('utf-8'): (tup[1], tup[2], tup[3]) for tup
+                              in trans_table.read()}
+                data['transmission_data'] = trans_dict
+            except tb.NoSuchNodeError:
+                pass
         else:
             raise ValueError('Incorrect file type specified in [General] '
                              'section of config file')
@@ -94,13 +132,13 @@ class Simulation(object):
         manager than ensures all writes are atomic and do not corrupt data
         files if they are interrupted for any reason"""
         start = time.time()
-        # Get the current path
-        base = self.conf['General']['sim_dir']
-        self.log.info('Writing data for %s', base)
-        fname = os.path.join(base, self.conf['General']['base_name'])
         # Save matrices in specified file tipe
         ftype = self.conf['General']['save_as']
         if ftype == 'npz':
+            # Get the current path
+            base = self.conf['General']['sim_dir']
+            self.log.info('Writing data for %s', base)
+            fname = os.path.join(base, self.conf['General']['base_name'])
             # Save the headers and the data
             with open_atomic(fname, 'w') as out:
                 np.savez_compressed(out, **self.data)
@@ -108,6 +146,39 @@ class Simulation(object):
             dpath = os.path.join(base, 'all.avg')
             with open_atomic(dpath, 'w') as out:
                 np.savez_compressed(out, **self.avgs)
+        elif ftype == 'hdf5':
+            path = '/sim_{}'.format(self.id)
+            # Filter out the original data so we don't resave it
+            black_list = ('fluxes', 'Ex', 'Ey', 'Ez', 'transmission_data')
+            save_dict = {key: value for key, value in self.data.items() if
+                         key not in black_list}
+            for key, arr in save_dict.items():
+                try:
+                    existing_arr = self.hdf5.get_node(path, name=key)
+                    existing_arr[...] = arr
+                except tb.NoSuchNodeError:
+                    self.hdf5.create_array(path, key, arr)
+            group = '/sim_{}'.format(self.id)
+            num_rows = len(list(self.conf['Layers'].keys()))*2
+            # We need to handle transmission_data separately because it gets
+            # saved into a table
+            try:
+                tb_path = group + '/transmission_data'
+                table = self.hdf5.get_node(tb_path, classname='Table')
+                # If the table exists, clear it out
+                table.remove_rows(start=0)
+            except tb.NoSuchNodeError:
+                table = self.hdf5.create_table(group, 'transmission_data',
+                                               description=TransmissionData,
+                                               expectedrows=num_rows)
+            for port, tup in self.data['transmission_data'].items():
+                row = table.row
+                row['layer'] = port
+                row['reflection'] = tup[0]
+                row['transmission'] = tup[1]
+                row['absorption'] = tup[2]
+                row.append()
+            table.flush()
         else:
             raise ValueError('Specified saving in an unsupported file format')
         end = time.time()
@@ -124,6 +195,7 @@ class Simulation(object):
                           dict
 
         """
+
         self.log.debug('Retrieving scalar quantity %s', str(quantity))
         try:
             return self.data[quantity]
@@ -148,3 +220,391 @@ class Simulation(object):
         else:
             self.log.debug('Adding %s to data dict', str(quantity))
             self.data[quantity] = new_data
+
+    def normE(self):
+        """
+        Calculates the norm of E. Adds it to the data dict for the simulation
+        and also returns a 3D array
+        :return: A 3D numpy array containing normE
+        """
+
+        # Get the magnitude of E and add it to our data
+        E_mag = np.zeros_like(self.data['Ex'])
+        for comp in ('Ex', 'Ey', 'Ez'):
+            E_mag += np.absolute(self.data[comp])**2
+        E_mag = np.sqrt(E_mag)
+        self.extend_data('normE', E_mag.real)
+        return E_mag.real
+
+    def normEsquared(self):
+        """Calculates and returns normE squared"""
+
+        # Get the magnitude of E and add it to our data
+        E_magsq = np.zeros_like(self.data['Ex'])
+        for comp in ('Ex', 'Ey', 'Ez'):
+            E_magsq += np.absolute(self.data[comp])**2
+        self.extend_data('normEsquared', E_magsq.real)
+        return E_magsq.real
+
+    def normH(self):
+        """Calculate and returns the norm of H"""
+
+        H_mag = np.zeros_like(self.data['Hx'])
+        for comp in ('Hx', 'Hy', 'Hz'):
+            H_mag += np.absolute(self.data[comp])**2
+        H_mag = np.sqrt(H_mag)
+        self.extend_data('normH', H_mag.real)
+        return H_mag.real
+
+    def normHsquared(self):
+        """Calculates and returns the norm of H squared"""
+
+        H_magsq = np.zeros_like(self.data['Hx'])
+        for comp in ('Hx', 'Hy', 'Hz'):
+            H_magsq += np.absolute(self.data[comp])**2
+        self.extend_data('normHsquared', H_magsq.real)
+        return H_magsq.real
+
+    def get_nk(self, path, freq):
+        """Returns functions to compute index of refraction components n and k at a given
+        frequency"""
+        # Get data
+        freq_vec, n_vec, k_vec = np.loadtxt(path, unpack=True)
+        # Get n and k at specified frequency via interpolation
+        f_n = interpolate.interp1d(freq_vec, n_vec, kind='linear',
+                                   bounds_error=False, fill_value='extrapolate')
+        f_k = interpolate.interp1d(freq_vec, k_vec, kind='linear',
+                                   bounds_error=False, fill_value='extrapolate')
+        return f_n(freq), f_k(freq)
+
+    def _get_circle_nk(self, shape, sdata, nk, samps, steps):
+        """Returns a 2D matrix containing the N,K values at each point in space
+        for a circular in-plane geometry"""
+        # Set up the parameters
+        cx, cy = sdata['center']['x'], sdata['center']['y']
+        rad = sdata['radius']
+        rad_sq = rad * rad
+        mat = sdata['material']
+        dx = steps[0]
+        dy = steps[1]
+        # Build the matrix
+        nk_mat = np.zeros((samps[1], samps[0]))
+        for xi in range(samps[0]):
+            for yi in range(samps[1]):
+                dist = ((xi * dx) - cx)**2 + ((yi * dy) - cy)**2
+                if dist <= rad_sq:
+                    nk_mat[yi, xi] = nk[mat][0] * nk[mat][1]
+        return nk_mat
+
+    def _genrate_nk_geometry(self, lname, nk, samps, steps):
+        """Computes the nk profile in a layer with a nontrivial internal
+        geometry. Returns a 2D matrix containing the product of n and k at each
+        point
+        lname: Name of the layer as a string
+        ldata: This dict containing all the data for this layer
+        nk: A dictionary with the material name as the key an a tuple
+        containing (n,k) as the value
+        samps: A tuple/list containing the number of sampling points in each
+        spatial direction in (x,y,z) order
+        steps: Same as samps but instead contains the step sizes in each
+        direction"""
+        # Initialize the matrix with values for the base material
+        base_mat = self.conf['Layers'][lname]['base_material']
+        nk_mat = nk[base_mat][0] * nk[base_mat][1] * \
+            np.ones((samps[1], samps[0]))
+        # Get the shapes sorted in increasing order
+        shapes = self.conf.sorted_dict(self.conf['Layers'][lname]['geometry'])
+        # Loop through the layers. We want them in increasing order so the
+        # smallest shape, which is contained within all the other shapes and
+        # should override their nk values, goes last
+        for shape, sdata in shapes.items():
+            if sdata['type'] == 'circle':
+                update = self._get_circle_nk(shape, sdata, nk, samps, steps)
+            else:
+                raise NotImplementedError('Computing generation rate for layers'
+                                          ' with %s shapes is not currently supported' % sdata['type'])
+            # Update the matrix with the values from this new shape. The update
+            # array will contain nonzero values within the shape, and zero
+            # everywhere else. This line updates the nk_mat with only the
+            # nonzero from the update matrix, and leaves all other elements
+            # untouched
+            nk_mat = np.where(update != 0, update, nk_mat)
+        return nk_mat
+
+    def genRate(self):
+        # We need to compute normEsquared before we can compute the generation
+        # rate
+        try:
+            normEsq = self.get_scalar_quantity('normEsquared')
+        except KeyError:
+            normEsq = self.normEsquared()
+            self.extend_data('normEsquared', normEsq)
+            # Make sure we don't compute it twice
+            try:
+                self.conf['Postprocessing']['Cruncher'][
+                    'normEsquared']['compute'] = False
+            except KeyError:
+                pass
+        # Prefactor for generation rate. Note we gotta convert from m^3 to cm^3,
+        # hence 1e6 factor
+        fact = c.epsilon_0 / (c.hbar * 1e6)
+        # Get the indices of refraction at this frequency
+        freq = self.conf['Simulation']['params']['frequency']['value']
+        nk = {mat: (self.get_nk(matpath, freq)) for mat, matpath in
+              self.conf['Materials'].items()}
+        nk['vacuum'] = (1, 0)
+        self.log.debug(nk)
+        # Get spatial discretization
+        samps = (self.x_samples, self.y_samples, self.z_samples)
+        gvec = np.zeros_like(normEsq)
+        steps = (self.dx, self.dy, self.dz)
+        # Main loop to compute generation in each layer
+        boundaries = []
+        count = 0
+        ordered_layers = self.conf.sorted_dict(self.conf['Layers'])
+        for layer, ldata in ordered_layers.items():
+            # Get boundaries between layers and their starting and ending
+            # indices
+            layer_t = ldata['params']['thickness']['value']
+            self.log.debug('LAYER: %s', layer)
+            self.log.debug('LAYER T: %f', layer_t)
+            if count == 0:
+                start = 0
+                end = int(layer_t / self.dz) + 1
+                boundaries.append((layer_t, start, end))
+            else:
+                prev_tup = boundaries[count - 1]
+                dist = prev_tup[0] + layer_t
+                start = prev_tup[2]
+                end = int(dist / self.dz) + 1
+                boundaries.append((dist, start, end))
+            self.log.debug('START: %i', start)
+            self.log.debug('END: %i', end)
+            if 'geometry' in ldata:
+                self.log.debug('HAS GEOMETRY')
+                # This function returns the N,K profile in that layer as a 2D
+                # matrix. Each element contains the product of n and k at that
+                # point, using the NK values for the appropriate material
+                nk_mat = self._genrate_nk_geometry(layer, nk, samps, steps)
+                gvec[start:end, :, :] = fact * \
+                    nk_mat * normEsq[start:end, :, :]
+            else:
+                # Its just a simple slab
+                self.log.debug('NO GEOMETRY')
+                lmat = ldata['base_material']
+                self.log.debug('LAYER MATERIAL: %s', lmat)
+                self.log.debug('MATERIAL n: %s', str(nk[lmat][0]))
+                self.log.debug('MATERIAL k: %s', str(nk[lmat][1]))
+                region = fact * nk[lmat][0] * \
+                    nk[lmat][1] * normEsq[start:end, :, :]
+                self.log.debug('REGION SHAPE: %s', str(region.shape))
+                self.log.debug('REGION: ')
+                self.log.debug(str(region))
+                gvec[start:end, :, :] = region
+            self.log.debug('GEN RATE MATRIX: ')
+            self.log.debug(str(gvec))
+            count += 1
+        self.extend_data('genRate', gvec)
+        return gvec
+
+    def angularAvg(self, quantity):
+        """Perform an angular average of some quantity for either the E or H field"""
+        try:
+            quant = self.get_scalar_quantity(quantity)
+        except KeyError:
+            getattr(self, quantity)()
+            quant = self.get_scalar_quantity(quantity)
+            # Make sure we don't compute it twice
+            try:
+                self.conf['Postprocessing']['Cruncher'][
+                    quantity]['compute'] = False
+            except KeyError:
+                pass
+        # Get spatial discretization
+        rsamp = self.conf['Simulation']['r_samples']
+        thsamp = self.conf['Simulation']['theta_samples']
+        period = self.conf['Simulation']['params']['array_period']['value']
+        x = np.linspace(0, period, self.x_samples)
+        y = np.linspace(0, period, self.y_samples)
+        # Maximum r value such that circle and square unit cell have equal area
+        rmax = period / np.sqrt(np.pi)
+        # Diff between rmax and unit cell boundary at point of maximum
+        # difference
+        delta = rmax - period / 2.0
+        # Extra indices we need to expand layers by
+        x_inds = int(np.ceil(delta / self.dx))
+        y_inds = int(np.ceil(delta / self.dy))
+        # Use periodic BCs to extend the data in the x-y plane
+        ext_vals = np.zeros((quant.shape[0], quant.shape[1] +
+                             2 * x_inds, quant.shape[2] + 2 * y_inds),
+                            dtype=quant.dtype)
+        # Left-Right extensions. This indexing madness extracts the slice we
+        # want, flips it along the correct dimension then sticks in the correct
+        # spot in the extended array
+        ext_vals[:, x_inds:-x_inds, 0:y_inds] = quant[:, :, 0:y_inds][:, :, ::-1]
+        ext_vals[:, x_inds:-x_inds, -
+                 y_inds:] = quant[:, :, -y_inds:][:, :, ::-1]
+        # Top-Bottom extensions
+        ext_vals[:, 0:x_inds, y_inds:-
+                 y_inds] = quant[:, 0:x_inds, :][:, ::-1, :]
+        ext_vals[:, -x_inds:, y_inds:-
+                 y_inds] = quant[:, -x_inds:, :][:, ::-1, :]
+        # Corners, slightly trickier
+        # Top left
+        ext_vals[:, 0:x_inds, 0:y_inds] = ext_vals[
+            :, x_inds:2 * x_inds, 0:y_inds][:, ::-1, :]
+        # Bottom left
+        ext_vals[:, -x_inds:, 0:y_inds] = ext_vals[:, -
+                                                   2 * x_inds:-x_inds, 0:y_inds][:, ::-1, :]
+        # Top right
+        ext_vals[:, 0:x_inds, -y_inds:] = ext_vals[:,
+                                                   0:x_inds, -2 * y_inds:-y_inds][:, :, ::-1]
+        # Bottom right
+        ext_vals[:, -x_inds:, -y_inds:] = ext_vals[:, -
+                                                   x_inds:, -2 * y_inds:-y_inds][:, :, ::-1]
+        # Now the center
+        ext_vals[:, x_inds:-x_inds, y_inds:-y_inds] = quant[:, :, :]
+        # Extend the points arrays to include these new regions
+        x = np.concatenate((np.array([self.dx * i for i in
+                                      range(-x_inds, 0)]), x, np.array([x[-1] + self.dx * i for i in range(1, x_inds + 1)])))
+        y = np.concatenate((np.array([self.dy * i for i in
+                                      range(-y_inds, 0)]), y, np.array([y[-1] + self.dy * i for i in range(1, y_inds + 1)])))
+        # The points on which we have data
+        points = (x, y)
+        # The points corresponding to "rings" in cylindrical coordinates. Note we construct these
+        # rings around the origin so we have to shift them to actually correspond to the center of
+        # the nanowire
+        rvec = np.linspace(0, rmax, rsamp)
+        thvec = np.linspace(0, 2 * np.pi, thsamp)
+        cyl_coords = np.zeros((len(rvec) * len(thvec), 2))
+        start = 0
+        for r in rvec:
+            xring = r * np.cos(thvec)
+            yring = r * np.sin(thvec)
+            cyl_coords[start:start + len(thvec), 0] = xring
+            cyl_coords[start:start + len(thvec), 1] = yring
+            start += len(thvec)
+        cyl_coords += period / 2.0
+        # For every z layer in the 3D matrix of our quantity
+        avgs = np.zeros((ext_vals.shape[0], len(rvec)))
+        i = 0
+        for layer in ext_vals:
+            interp_vals = interpolate.interpn(
+                points, layer, cyl_coords, method='linear')
+            rings = interp_vals.reshape((len(rvec), len(thvec)))
+            avg = np.average(rings, axis=1)
+            avgs[i, :] = avg
+            i += 1
+        avgs = avgs[:, ::-1]
+        # Save to avgs dict for this sim
+        key = quantity + '_angularAvg'
+        self.data[key] = avgs
+        return avgs
+
+    def transmissionData(self, port='Substrate'):
+        """
+        Computes reflection, transmission, and absorbance
+
+        :param sim: :py:class:`utils.simulation.Simulation`
+        :param str port: Name of the location at which you would like to place the
+                         transmission port (i.e where you would like to compute
+                         transmission). This must correspond to one of the keys placed in
+                         the fluxes.dat file
+        """
+
+        data = self.data['fluxes']
+        # sorted_layers is an OrderedDict, and thus has the popitem method
+        sorted_layers = self.conf.sorted_dict(self.conf['Layers'])
+        self.log.info('SORTED LAYERS: %s', str(sorted_layers))
+        first_layer = sorted_layers.popitem(last=False)
+        self.log.info('FIRST LAYER: %s', str(first_layer))
+        # An ordered dict is actually just a list of tuples so we can access
+        # the key directly like so
+        first_name = first_layer[0]
+        self.log.info('FIRST LAYER NAME: %s', str(first_name))
+        # p_inc = data[first_name][0]
+        # p_ref = np.abs(data[first_name][1])
+        # p_trans = data[last_name][0]
+        p_inc = np.sqrt(np.absolute(data[first_name][0]))
+        p_ref = np.sqrt(np.absolute(data[first_name][1]))
+        p_trans = np.sqrt(np.absolute(data[port][0]))
+        reflectance = p_ref / p_inc
+        transmission = p_trans / p_inc
+        absorbance = 1 - reflectance - transmission
+        tot = reflectance + transmission + absorbance
+        delta = np.abs(tot - 1)
+        self.log.info('Reflectance %f' % reflectance)
+        self.log.info('Transmission %f' % transmission)
+        self.log.info('Absorbance %f' % absorbance)
+        self.log.info('Total = %f' % tot)
+        assert(reflectance >= 0)
+        assert(transmission >= 0)
+        # assert(absorbance >= 0)
+        # assert(delta < .00001)
+        if 'transmission_data' in self.data:
+            self.data['transmission_data'].update({port: (reflectance,
+                                                          transmission,
+                                                          absorbance)})
+        else:
+            self.data['transmission_data'] = {port: (reflectance,
+                                                     transmission,
+                                                     absorbance)}
+        # ftype = self.conf['General']['save_as']
+        # if ftype == 'npz':
+        #     outpath = os.path.join(base, 'ref_trans_abs.dat')
+        #     self.log.info('Writing transmission file')
+        #     if os.path.isfile(outpath):
+        #         with open(outpath, 'a') as out:
+        #             out.write('%s,%f,%f,%f\n' % (port, reflectance, transmission, absorbance))
+        #     else:
+        #         with open(outpath, 'w') as out:
+        #             out.write('# Port, Reflectance,Transmission,Absorbance\n')
+        #             out.write('%s,%f,%f,%f\n' % (port, reflectance, transmission, absorbance))
+        # elif ftype == 'hdf5':
+        #     group = '/sim_{}'.format(self.id)
+        #     num_rows = len(list(self.conf['Layers'].keys()))*2
+        #     try:
+        #         tb_path = group + '/transmission_data'
+        #         table = self.hdf5.get_node(tb_path, classname='Table')
+        #     except tb.NoSuchNodeError:
+        #         table = self.hdf5.create_table(group, 'transmission_data',
+        #                                        description=TransmissionData,
+        #                                        expectedrows=num_rows)
+        #     row = table.row
+        #     row['layer'] = port
+        #     row['reflection'] = reflectance
+        #     row['transmission'] = transmission
+        #     row['absorption'] = absorbance
+        #     row.append()
+        #     table.flush()
+        return reflectance, transmission, absorbance
+
+    def integrated_absorbtion(self):
+        """Computes the absorption of a layer by using the volume integral of
+        the product of the imaginary part of the relative permittivity and the
+        norm squared of the E field"""
+
+        raise NotImplementedError('There are some bugs in S4 and other reasons'
+                                  ' that this function doesnt work yet')
+        base = self.conf['General']['sim_dir']
+        path = os.path.join(base, 'integrated_absorption.dat')
+        inpath = os.path.join(base, 'energy_densities.dat')
+        freq = self.conf['Simulation']['params']['frequency']['value']
+        # TODO: Assuming incident amplitude and therefore incident power is
+        # just 1 for now
+        fact = -.5 * freq * c.epsilon_0
+        with open(inpath, 'r') as inf:
+            lines = inf.readlines()
+            # Remove header line
+            lines.pop(0)
+            # Dict where key is layer name and value is list of length 2 containing real and
+            # imaginary parts of energy density integral
+            data = {line.strip().split(',')[0]: line.strip().split(',')[
+                1:] for line in lines}
+        self.log.info('Energy densities: %s' % str(data))
+        with open(path, 'w') as outf:
+            outf.write('# Layer, Absorption\n')
+            for layer, vals in data.items():
+                absorb = fact * float(vals[1])
+                outf.write('%s,%s\n' % (layer, absorb))
+

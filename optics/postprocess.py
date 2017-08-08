@@ -768,6 +768,13 @@ class Global_Cruncher(Cruncher):
             valuelist.append(Jsc)
         return valuelist
 
+    # def Jsc_integrated(self):
+    #     """
+    #     Compute te photocurrent density by performing a volume integral of the
+    #     generation rate
+    #     """
+
+
     def weighted_transmissionData(self, port='Substrate'):
         """Computes spectrally weighted absorption,transmission, and reflection"""
         for group in self.sim_groups:

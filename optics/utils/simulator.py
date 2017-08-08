@@ -317,6 +317,17 @@ class Simulator():
         self.log.info('Finished computing fluxes!')
         return self.flux_dict
 
+    # def get_integrals(self):
+    #     self.log.info('Computing volume integrals')
+    #     integrals = {}
+    #     for layer, ldata in self.conf['Layers'].items():
+    #         self.log.info('Computing integral through layer: %s' % layer)
+    #         result = self.s4.GetLayerVolumeIntegral(S4_Layer=layer, Quantity='E')
+    #         self.log.info('Integral = %s', str(result))
+    #         integrals[layer] = result
+    #     print(integrals)
+    #     return integrals
+
     def save_data(self):
         """Saves the self.data dictionary to an npz file. This dictionary
         contains all the fields and the fluxes dictionary"""
@@ -393,7 +404,7 @@ class Simulator():
             self.q.put(tup)
         else:
             raise ValueError('Invalid file type specified in config')
-            
+
     def calc_diff(self, fields1, fields2, exclude=False):
         """Calculate the percent difference between two vector fields"""
         # This list contains three 3D arrays corresponding to the x,y,z

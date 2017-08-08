@@ -231,9 +231,8 @@ class Simulation(object):
         # Get the magnitude of E and add it to our data
         E_mag = np.zeros_like(self.data['Ex'])
         for comp in ('Ex', 'Ey', 'Ez'):
-            E_mag += np.absolute(self.data[comp])**2
-        E_mag = np.sqrt(E_mag)
-        self.extend_data('normE', E_mag.real)
+            E_mag += np.absolute(self.data[comp])
+        self.extend_data('normE', E_mag)
         return E_mag.real
 
     def normEsquared(self):
@@ -243,7 +242,7 @@ class Simulation(object):
         E_magsq = np.zeros_like(self.data['Ex'])
         for comp in ('Ex', 'Ey', 'Ez'):
             E_magsq += np.absolute(self.data[comp])**2
-        self.extend_data('normEsquared', E_magsq.real)
+        self.extend_data('normEsquared', E_magsq)
         return E_magsq.real
 
     def normH(self):
@@ -251,8 +250,7 @@ class Simulation(object):
 
         H_mag = np.zeros_like(self.data['Hx'])
         for comp in ('Hx', 'Hy', 'Hz'):
-            H_mag += np.absolute(self.data[comp])**2
-        H_mag = np.sqrt(H_mag)
+            H_mag += np.absolute(self.data[comp])
         self.extend_data('normH', H_mag.real)
         return H_mag.real
 
@@ -262,7 +260,7 @@ class Simulation(object):
         H_magsq = np.zeros_like(self.data['Hx'])
         for comp in ('Hx', 'Hy', 'Hz'):
             H_magsq += np.absolute(self.data[comp])**2
-        self.extend_data('normHsquared', H_magsq.real)
+        self.extend_data('normHsquared', H_magsq)
         return H_magsq.real
 
     def get_nk(self, path, freq):
@@ -525,9 +523,9 @@ class Simulation(object):
         # p_inc = data[first_name][0]
         # p_ref = np.abs(data[first_name][1])
         # p_trans = data[last_name][0]
-        p_inc = np.sqrt(np.absolute(data[first_name][0]))
-        p_ref = np.sqrt(np.absolute(data[first_name][1]))
-        p_trans = np.sqrt(np.absolute(data[port][0]))
+        p_inc = np.absolute(data[first_name][0])
+        p_ref = np.absolute(data[first_name][1])
+        p_trans = np.absolute(data[port][0])
         reflectance = p_ref / p_inc
         transmission = p_trans / p_inc
         absorbance = 1 - reflectance - transmission

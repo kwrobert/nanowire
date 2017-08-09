@@ -123,7 +123,8 @@ class FileWriter(threading.Thread):
             try:
                 data = self.q.get(False)
             except Queue.Empty:
-                time.sleep(.5)
+                print('QUEUE EMPTY')
+                time.sleep(.1)
                 continue
             else:
                 if data is None:
@@ -189,6 +190,14 @@ class FileWriter(threading.Thread):
         # fnode.write(conf_str)
         # fnode.close()
 
+    def clean_file(self, *args, **kwargs):
+        """
+        Deletes everything beneath the root group in the file
+        """
+        print('CLEANING FILE')
+        for node in self.hdf5.iter_nodes('/'):
+            self.hdf5.remove_node(node._v_pathname, recursive=True)
+
 class SimulationManager:
 
     """
@@ -206,17 +215,22 @@ class SimulationManager:
         self.log = configure_logger(level=log_level, console=True, logfile=lfile)
         self.sim_confs = []
         self.write_queue = None
+        self.reader = None
+
+    def make_queue(self):
+        manager = mp.Manager()
+        self.write_queue = manager.Queue()
 
     def make_listener(self):
         """
-        Sets up the process that listens to a queue for requests to write data
+        Sets up the thread that listens to a queue for requests to write data
         to an HDF5 file. This prevents multiple subprocesses from attempting to
         write data to the HDF5 file at the same time
         """
 
         self.log.debug('Making listener')
-        manager = mp.Manager()
-        self.write_queue = manager.Queue()
+        if self.write_queue is None:
+            self.make_queue()
         self.reader = FileWriter(self.write_queue)
         self.reader.start()
 
@@ -255,7 +269,10 @@ class SimulationManager:
             for conf in self.sim_confs:
                 run_sim(conf)
         elif self.gconf['General']['execution'] == 'parallel':
-            self.make_listener()
+            if self.gconf['General']['save_as'] == 'hdf5':
+                self.make_listener()
+            else:
+                self.make_queue()
             # All this crap is necessary for killing the parent and all child
             # processes with CTRL-C
             num_procs = self.gconf['General']['num_cores']
@@ -334,15 +351,20 @@ class SimulationManager:
         # Optimizing shell thickness could result is negative thickness so we need to take absolute
         # value here
         #opt_pars[0] = abs(opt_pars[0])
-        self.log.info('Param keys: %s' % str(self.gconf.optimized))
-        self.log.info('Current values %s' % str(opt_pars))
+        self.log.info('Param keys: %s', str(self.gconf.optimized))
+        self.log.info('Current values %s', str(opt_pars))
         # Clean up old data unless the user asked us not to. We do this first so on the last
         # iteration all our data is left intact
         basedir = self.gconf['General']['base_dir']
+        ftype = self.gconf['General']['save_as']
+        hdf_file = os.path.join(basedir, 'data.hdf5')
         if not self.gconf['General']['opt_keep_intermediates']:
             for item in os.listdir(basedir):
                 if os.path.isdir(item) and item != 'logs':
                     shutil.rmtree(item)
+                if 'data.hdf5' in item:
+                    os.remove('data.hdf5')
+
         # Set the value key of all the params we are optimizing over to the current
         # guess
         for i in range(len(self.gconf.optimized)):
@@ -352,6 +374,7 @@ class SimulationManager:
             print(valseq)
             self.gconf[valseq] = float(opt_pars[i])
         # Make all the sim objects
+        self.sim_confs = []
         sims = self.make_confs()
         # Let's reuse the convergence information from the previous iteration if it exists
         # NOTE: This kind of assumes your initial guess was somewhat decent with regards to the in plane
@@ -388,7 +411,13 @@ class SimulationManager:
         # With the leaf directories made and the number of basis terms adjusted,
         # we can now kick off our frequency sweep
         self.execute_jobs()
-
+        # We need to wait for the writer thread to empty the queue for us
+        # before we can postprocess the data
+        if ftype == 'hdf5' and self.write_queue is not None:
+            while not self.write_queue.empty():
+                self.log.info('Waiting for queue to empty bottom')
+                self.log.info(self.write_queue.qsize())
+                time.sleep(.1)
         #####
         # TODO: This needs to be generalized. The user could pass in the name of
         # a postprocessing function in the config file. The function will be called
@@ -404,7 +433,10 @@ class SimulationManager:
         cruncher = pp.Cruncher(self.gconf)
         cruncher.collect_sims()
         for sim in cruncher.sims:
-            cruncher.transmissionData(sim)
+            # cruncher.transmissionData(sim)
+            sim.get_data()
+            sim.transmissionData()
+            sim.write_data()
         # Now get the fraction of photons absorbed
         gcruncher = pp.Global_Cruncher(
             self.gconf, cruncher.sims, cruncher.sim_groups, cruncher.failed_sims)
@@ -471,7 +503,6 @@ class SimulationManager:
         # Run the simplex optimizer
         opt_val = optz.minimize(self.spectral_wrapper,
                                 guess,
-                                args=(self.gconf,),
                                 method='Nelder-Mead',
                                 options={'maxiter': max_iter, 'xatol': tol,
                                          'fatol': ftol, 'disp': True})
@@ -486,6 +517,7 @@ class SimulationManager:
             out.write('# Param name, value\n')
             for key, value in zip(self.gconf.optimized, opt_val.x):
                 out.write('%s: %f\n' % (str(key), value))
+        self.write_queue.put(None)
         return opt_val.x
 
 

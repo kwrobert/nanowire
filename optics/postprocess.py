@@ -88,7 +88,6 @@ class Processor(object):
                     self.log.error('The following sim is missing its data file: %s',
                                    sim_obj.conf['General']['sim_dir'])
                     failed_sims.append(sim_obj)
-
         elif ftype == 'hdf5':
             sim_groups = [group for group in self.hdf5.iter_nodes('/', classname="Group")
                           if 'sim_' in group._v_name]
@@ -101,8 +100,8 @@ class Processor(object):
                     sims.append(sim_obj)
                 else:
                     self.log.critical('The following sim is missing its config file: %s',
-                                      group.name)
-                    hdf5.close()
+                                      group._v_name)
+                    self.hdf5.close()
                     raise RuntimeError
         else:
             raise ValueError('Invalid file type specified in config')

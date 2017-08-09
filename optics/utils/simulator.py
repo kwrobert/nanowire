@@ -357,8 +357,10 @@ class Simulator():
             path = '/sim_'+self.id[0:10]
             for name, arr in self.data.iteritems():
                 self.log.debug("Saving array %s", name)
-                tup = ('create_array', (path, name, arr),
-                       {'createparents':True})
+                tup = ('create_array', (path, name),
+                       {'compression': self.conf['General']['compression'],
+                        'createparents': True, 'obj': arr,
+                        'atom': tb.Atom.from_dtype(arr.dtype)})
                 self.q.put(tup)
             # Save the flux dict to a table
             self.log.info('Saving fluxes to HDF5')
@@ -380,6 +382,7 @@ class Simulator():
             self.conf.write(os.path.join(self.dir, 'sim_conf.yml'))
         elif self.conf['General']['save_as'] == 'hdf5':
             self.log.info('Saving conf to HDF5 file')
+            self.conf.write(os.path.join(self.dir, 'sim_conf.yml'))
             path = '/sim_{}'.format(self.id[0:10])
             attr_name = 'conf'
             tup = ('save_attr', (self.conf.dump(), path, attr_name), {})

@@ -101,22 +101,25 @@ def run_sim(conf, q=None):
     runtime = end - start
     log.info('Simulation %s completed in %.2f seconds!', sim.id[0:10], runtime)
     sim.clean_sim()
-    return sim
+    return None
+
 
 class LayerFlux(tb.IsDescription):
     layer = tb.StringCol(60, pos=0)
     forward = tb.ComplexCol(pos=1, itemsize=8)
     backward = tb.ComplexCol(pos=2, itemsize=8)
 
+
 class FileWriter(threading.Thread):
 
     def __init__(self, q, group=None, target=None, name=None):
         super(FileWriter, self).__init__(group=group, target=target, name=name)
         self.q = q
-        self.hdf5 = tb.open_file('data.hdf5', 'w')
+        self.hdf5 = tb.open_file('data.hdf5', 'a')
 
     def run(self):
         while True:
+            # print('QSIZE: %i'%self.q.qsize())
             try:
                 data = self.q.get(False)
             except Queue.Empty:
@@ -137,7 +140,20 @@ class FileWriter(threading.Thread):
         method of a PyTables HDF5 file object. It passes through any arguments
         and keyword arguments through untouched
         """
-        self.hdf5.create_array(*args, **kwargs)
+        if 'compression' in kwargs and kwargs['compression']:
+            del kwargs['compression']
+            filter_obj = tb.Filters(complevel=4, complib='blosc')
+            try:
+                self.hdf5.create_carray(*args, filters=filter_obj, **kwargs)
+            except tb.NodeError:
+                self.hdf5.remove_node(args[0], name=args[1])
+                self.hdf5.create_carray(*args, filters=filter_obj, **kwargs)
+        else:
+            try:
+                self.hdf5.create_array(*args, **kwargs)
+            except tb.NodeError:
+                self.hdf5.remove_node(args[0], name=args[1])
+                self.hdf5.create_array(*args, **kwargs)
 
     def create_flux_table(self, flux_dict, *args, **kwargs):
         """
@@ -148,7 +164,13 @@ class FileWriter(threading.Thread):
         of the PyTables file object
         """
 
-        table = self.hdf5.create_table(*args, description=LayerFlux, **kwargs)
+        try:
+            table = self.hdf5.create_table(*args, description=LayerFlux,
+                                           **kwargs)
+        except tb.NodeError:
+            table = self.hdf5.get_node(args[0], name=args[1],
+                                       classname='Table')
+            table.remove_rows(0)
         row = table.row
         for layer, (forward, backward) in flux_dict.iteritems():
             row['layer'] = layer
@@ -241,35 +263,57 @@ class SimulationManager:
             pool = mp.Pool(processes=num_procs)
             total_sims = len(self.sim_confs)
             remaining_sims = len(self.sim_confs)
-            def callback(completed_sim):
+            def callback(ind):
                 callback.remaining_sims -= 1
                 callback.log.info('%i out of %i simulations remaining'%(callback.remaining_sims,
                                                                 callback.total_sims))
             callback.remaining_sims = remaining_sims
             callback.total_sims = total_sims
             callback.log = self.log
-            results = []
+            results = {}
+            # results = []
             self.log.debug('Entering try, except pool clause')
+            inds = []
             try:
                 # res = pool.map_async(run_sim, self.sim_confs, callback=callback)
                 # res.get(999999999)
                 # pool.close()
-                for conf in self.sim_confs:
-                    res = pool.apply_async(run_sim, (conf,),
+                for ind, conf in enumerate(self.sim_confs):
+                    res = pool.apply_async(run_sim, (conf, ),
                                            {'q':self.write_queue}, callback=callback)
+                    # results.append(res)
+                    results[ind] = res
+                    inds.append(ind)
                     # res = pool.apply_async(run_sim, (conf,), callback=callback)
-                    results.append(res)
+                    # results[ind] = res
+                    # print(del_list)
+                    # for completed_ind in del_list:
+                    #     results[completed_ind].wait(9999999)
+                    #     del results[completed_ind]
+                    # del_list = []
                 self.log.debug("Waiting on results")
-                for r in results:
+                # for sid, res in results.items():
+                self.log.debug('Results before wait loop: %s',
+                               str(list(results.keys())))
+                for ind in inds:
                     # We need to add this really long timeout so that subprocesses
                     # receive keyboard interrupts. If our simulations take longer
                     # than this timeout, an exception would be raised but that
                     # should never happen
-                    r.wait(99999999)
+                    res = results[ind]
+                    self.log.debug('Sim ID: %s', str(ind))
+                    res.wait(99999999)
+                    self.log.debug('Done waiting on Sim ID %s', str(ind))
+                    del results[ind]
+                    self.log.debug('Cleaned results: %s',
+                                   str(list(results.keys())))
+                    self.log.debug('Number of items in queue: %i',
+                                   self.write_queue.qsize())
                 self.log.debug('Finished waiting')
                 pool.close()
             except KeyboardInterrupt:
                 pool.terminate()
+            self.log.debug('Joining pool')
             pool.join()
             self.write_queue.put(None)
             # for res in results:

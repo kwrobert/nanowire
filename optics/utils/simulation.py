@@ -157,7 +157,13 @@ class Simulation(object):
                     existing_arr = self.hdf5.get_node(path, name=key)
                     existing_arr[...] = arr
                 except tb.NoSuchNodeError:
-                    self.hdf5.create_array(path, key, arr)
+                    if self.conf['General']['compression']:
+                        filt = tb.Filters(complevel=4, complib='blosc')
+                        self.hdf5.create_carray(path, key, obj=arr,
+                                                filters=filt,
+                                                atom=tb.Atom.from_dtype(arr.dtype))
+                    else:
+                        self.hdf5.create_array(path, key, arr)
             group = '/sim_{}'.format(self.id)
             num_rows = len(list(self.conf['Layers'].keys()))*2
             # We need to handle transmission_data separately because it gets
@@ -229,39 +235,39 @@ class Simulation(object):
         """
 
         # Get the magnitude of E and add it to our data
-        E_mag = np.zeros_like(self.data['Ex'])
+        E_mag = np.zeros_like(self.data['Ex'], dtype=np.float64)
         for comp in ('Ex', 'Ey', 'Ez'):
             E_mag += np.absolute(self.data[comp])
         self.extend_data('normE', E_mag)
-        return E_mag.real
+        return E_mag
 
     def normEsquared(self):
         """Calculates and returns normE squared"""
 
         # Get the magnitude of E and add it to our data
-        E_magsq = np.zeros_like(self.data['Ex'])
+        E_magsq = np.zeros_like(self.data['Ex'], dtype=np.float64)
         for comp in ('Ex', 'Ey', 'Ez'):
             E_magsq += np.absolute(self.data[comp])**2
         self.extend_data('normEsquared', E_magsq)
-        return E_magsq.real
+        return E_magsq
 
     def normH(self):
         """Calculate and returns the norm of H"""
 
-        H_mag = np.zeros_like(self.data['Hx'])
+        H_mag = np.zeros_like(self.data['Hx'], dtype=np.float64)
         for comp in ('Hx', 'Hy', 'Hz'):
             H_mag += np.absolute(self.data[comp])
-        self.extend_data('normH', H_mag.real)
-        return H_mag.real
+        self.extend_data('normH', H_mag)
+        return H_mag
 
     def normHsquared(self):
         """Calculates and returns the norm of H squared"""
 
-        H_magsq = np.zeros_like(self.data['Hx'])
+        H_magsq = np.zeros_like(self.data['Hx'], dtype=np.float64)
         for comp in ('Hx', 'Hy', 'Hz'):
             H_magsq += np.absolute(self.data[comp])**2
         self.extend_data('normHsquared', H_magsq)
-        return H_magsq.real
+        return H_magsq
 
     def get_nk(self, path, freq):
         """Returns functions to compute index of refraction components n and k at a given
@@ -286,7 +292,7 @@ class Simulation(object):
         dx = steps[0]
         dy = steps[1]
         # Build the matrix
-        nk_mat = np.zeros((samps[1], samps[0]))
+        nk_mat = np.full((samps[1], samps[0]), np.nan)
         for xi in range(samps[0]):
             for yi in range(samps[1]):
                 dist = ((xi * dx) - cx)**2 + ((yi * dy) - cy)**2
@@ -312,7 +318,7 @@ class Simulation(object):
             np.ones((samps[1], samps[0]))
         # Get the shapes sorted in increasing order
         shapes = self.conf.sorted_dict(self.conf['Layers'][lname]['geometry'])
-        # Loop through the layers. We want them in increasing order so the
+        # Loop through the shapes. We want them in increasing order so the
         # smallest shape, which is contained within all the other shapes and
         # should override their nk values, goes last
         for shape, sdata in shapes.items():
@@ -322,11 +328,12 @@ class Simulation(object):
                 raise NotImplementedError('Computing generation rate for layers'
                                           ' with %s shapes is not currently supported' % sdata['type'])
             # Update the matrix with the values from this new shape. The update
-            # array will contain nonzero values within the shape, and zero
+            # array will contain nonzero values within the shape, and nan
             # everywhere else. This line updates the nk_mat with only the
-            # nonzero from the update matrix, and leaves all other elements
+            # not nans from the update matrix, and leaves all other elements
             # untouched
-            nk_mat = np.where(update != 0, update, nk_mat)
+            # nk_mat = np.where(update != 0, update, nk_mat)
+            nk_mat = np.where(np.isnan(update), nk_mat, update)
         return nk_mat
 
     def genRate(self):

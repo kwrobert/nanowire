@@ -427,7 +427,6 @@ class Global_Cruncher(Cruncher):
         # sorted_layers is an OrderedDict, and thus has the popitem method
         sorted_layers = sim.conf.sorted_dict(sim.conf['Layers'])
         first_layer = sorted_layers.popitem(last=False)
-        print(first_layer)
         last_layer = sorted_layers.popitem()
         # We can get the starting and ending planes from their heights
         start_plane = int(round(first_layer[1]['params'][
@@ -626,14 +625,20 @@ class Global_Cruncher(Cruncher):
             base = group[0].conf['General']['results_dir']
             self.log.info('Performing scalar reduction for group at %s' % base)
             group[0].get_data()
+            self.log.debug('QUANTITY: %s'%quantity)
             group_comb = group[0].get_scalar_quantity(quantity)
+            self.log.debug(group_comb.dtype)
             group[0].clear_data()
             # This approach is more memory efficient then building a 2D array
             # of all the data from each group and summing along an axis
-            for i in range(1, len(group)):
-                group[i].get_data()
-                group_comb += group[i].get_scalar_quantity(quantity)
-                group[i].clear_data()
+            for sim in group[1:]:
+                sim.get_data()
+                self.log.debug(sim.id)
+                quant = sim.get_scalar_quantity(quantity)
+                self.log.debug(quant.dtype)
+                print(quant)
+                group_comb += quant
+                sim.clear_data()
             if avg:
                 group_comb = group_comb / len(group)
                 fname = 'scalar_reduce_avg_%s' % quantity
@@ -645,7 +650,7 @@ class Global_Cruncher(Cruncher):
             if ftype == 'npz':
                 np.save(path, group_comb)
             elif ftype == 'hdf5':
-                print('FIX HDF5 SCALAR REDUCE SAVING')
+                self.log.warning('FIX HDF5 SCALAR REDUCE SAVING')
                 np.save(path, group_comb)
             else:
                 raise ValueError('Invalid file type in config')
@@ -672,8 +677,6 @@ class Global_Cruncher(Cruncher):
             # them
             for i, sim in enumerate(group):
                 sim.get_data()
-                print(list(sim.data.keys()))
-                print(sim.data['transmission_data'])
                 # Unpack data for the port we passed in as an argument
                 ref, trans, absorb = sim.data['transmission_data'][port]
                 freq = sim.conf['Simulation']['params']['frequency']['value']
@@ -691,6 +694,7 @@ class Global_Cruncher(Cruncher):
                 sun_pow = p_wv(wvlgth_nm)
                 spectra[i] = sun_pow * wvlgth_nm
                 vals[i] = absorb * sun_pow * wvlgth_nm
+                sim.clear_data()
             # Use Trapezoid rule to perform the integration. Note all the
             # necessary factors of the wavelength have already been included
             # above
@@ -731,8 +735,6 @@ class Global_Cruncher(Cruncher):
             # them
             for i, sim in enumerate(group):
                 sim.get_data()
-                print(list(sim.data.keys()))
-                print(sim.data['transmission_data'])
                 # Unpack data for the port we passed in as an argument
                 ref, trans, absorb = sim.data['transmission_data'][port]
                 freq = sim.conf['Simulation']['params']['frequency']['value']
@@ -751,6 +753,7 @@ class Global_Cruncher(Cruncher):
                 spectra[i] = sun_pow * wvlgth_nm
                 # This is our integrand
                 vals[i] = absorb * sun_pow * wvlgth_nm
+                sim.clear_data()
             # Use Trapezoid rule to perform the integration. Note all the
             # necessary factors of the wavelength have already been included
             # above
@@ -1277,7 +1280,7 @@ class Global_Plotter(Plotter):
                     base, 'scalar_reduce*_%s.npy' % quantity)
                 files = glob.glob(globstr)
             elif ftype == 'hdf5':
-                print('FIX LOAD IN GLOBAL SCALAR REDUCE')
+                self.log.warning('FIX LOAD IN GLOBAL SCALAR REDUCE')
                 globstr = os.path.join(
                     base, 'scalar_reduce*_%s.npy' % quantity)
                 files = glob.glob(globstr)
@@ -1290,7 +1293,7 @@ class Global_Plotter(Plotter):
                 if ftype == 'npz':
                     scalar = np.load(datfile)
                 elif ftype == 'hdf5':
-                    print('FIX LOAD IN GLOBAL SCALAR REDUCE')
+                    self.log.warning('FIX LOAD IN GLOBAL SCALAR REDUCE')
                     scalar = np.load(datfile)
                 else:
                     raise ValueError('Incorrect file type in config')

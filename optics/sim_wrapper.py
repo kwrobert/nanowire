@@ -123,7 +123,6 @@ class FileWriter(threading.Thread):
             try:
                 data = self.q.get(False)
             except Queue.Empty:
-                print('QUEUE EMPTY')
                 time.sleep(.1)
                 continue
             else:
@@ -194,7 +193,6 @@ class FileWriter(threading.Thread):
         """
         Deletes everything beneath the root group in the file
         """
-        print('CLEANING FILE')
         for node in self.hdf5.iter_nodes('/'):
             self.hdf5.remove_node(node._v_pathname, recursive=True)
 
@@ -369,9 +367,9 @@ class SimulationManager:
         # guess
         for i in range(len(self.gconf.optimized)):
             keyseq = self.gconf.optimized[i]
-            print(keyseq)
+            self.log.info(keyseq)
             valseq = list(keyseq) + ['value']
-            print(valseq)
+            self.log.info(valseq)
             self.gconf[valseq] = float(opt_pars[i])
         # Make all the sim objects
         self.sim_confs = []
@@ -415,7 +413,7 @@ class SimulationManager:
         # before we can postprocess the data
         if ftype == 'hdf5' and self.write_queue is not None:
             while not self.write_queue.empty():
-                self.log.info('Waiting for queue to empty bottom')
+                self.log.info('Waiting for queue to empty')
                 self.log.info(self.write_queue.qsize())
                 time.sleep(.1)
         #####
@@ -481,7 +479,7 @@ class SimulationManager:
     def run_optimization(self):
         """Runs an optimization on a given set of parameters"""
         self.log.info("Running optimization")
-        print(self.gconf.optimized)
+        self.log.info(self.gconf.optimized)
         # Make sure the only variable parameter we have is a sweep through
         # frequency
         for keyseq in self.gconf.variable:

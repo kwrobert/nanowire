@@ -1,4 +1,5 @@
 import shutil
+import psutil
 #import subprocess
 import itertools
 import os
@@ -112,10 +113,11 @@ class LayerFlux(tb.IsDescription):
 
 class FileWriter(threading.Thread):
 
-    def __init__(self, q, group=None, target=None, name=None):
+    def __init__(self, q, write_dir='', group=None, target=None, name=None):
         super(FileWriter, self).__init__(group=group, target=target, name=name)
         self.q = q
-        self.hdf5 = tb.open_file('data.hdf5', 'a')
+        outpath = os.path.join(write_dir, 'data.hdf5')
+        self.hdf5 = tb.open_file(outpath, 'a')
 
     def run(self):
         while True:
@@ -216,8 +218,38 @@ class SimulationManager:
         self.reader = None
 
     def make_queue(self):
+        """
+        Makes the queue for transferring data from simulation subprocesses to
+        the FileWriter thread. Sets a maximum size on the queue based on the
+        number of data points in the arrays and the total ram on the system.
+        """
+        total_mem = psutil.virtual_memory().total
+        # If we have hardcoded in a fixed number of samples, we can compute the
+        # number of data points here.
+        samps = [self.gconf['Simulation'][s] for s in ('x_samples',
+                                                       'y_samples',
+                                                       'z_samples')]
+        # We can multiply by the ones that are hardcoded. For those
+        # that are not, we have no way of evaluating the string expressions yet
+        # so we'll just assume that they are 150 points
+        # TODO: Maybe fix this random guessing
+        max_points = 1
+        for samp in samps:
+            if type(samp) == int or type(samp) == float:
+                max_points *= round(samp)
+            else:
+                max_points *= 150
+        # Numpy complex128 consists of two 64 bit numbers, plus some overhead.
+        # So 16 bytes + 8 bytes of overhead to be safe
+        arr_mem = max_points*24
+        # Subtract a gigabyte from total system memory to leave safety room
+        maxsize = round((total_mem-(1024**3))/arr_mem)
+        self.log.info('Maximum Queue Size: %i', maxsize)
         manager = mp.Manager()
-        self.write_queue = manager.Queue()
+        # We can go ahead and use maxsize directly because we left safety space
+        # and there will also be items on the queue that are not massive arrays
+        # and thus take up less space
+        self.write_queue = manager.Queue(maxsize=maxsize)
 
     def make_listener(self):
         """
@@ -229,7 +261,8 @@ class SimulationManager:
         self.log.debug('Making listener')
         if self.write_queue is None:
             self.make_queue()
-        self.reader = FileWriter(self.write_queue)
+        basedir = self.gconf['General']['base_dir']
+        self.reader = FileWriter(self.write_queue, write_dir=basedir)
         self.reader.start()
 
     def make_confs(self):
@@ -264,8 +297,15 @@ class SimulationManager:
 
         if self.gconf['General']['execution'] == 'serial':
             self.log.info('Executing sims serially')
+            # Make the write queue, then instanstiate and run the thread that
+            # pulls data from the queue and writes to the HDF5 file
+            if self.gconf['General']['save_as'] == 'hdf5':
+                self.make_listener()
+            else:
+                self.make_queue()
             for conf in self.sim_confs:
-                run_sim(conf)
+                run_sim(conf, q=self.write_queue)
+            self.write_queue.put(None, block=True)
         elif self.gconf['General']['execution'] == 'parallel':
             if self.gconf['General']['save_as'] == 'hdf5':
                 self.make_listener()
@@ -330,7 +370,10 @@ class SimulationManager:
                 pool.terminate()
             self.log.debug('Joining pool')
             pool.join()
-            self.write_queue.put(None)
+            self.write_queue.put(None, block=True)
+            if self.reader is not None:
+                self.log.info('Joining FileWriter thread')
+                self.reader.join()
             # for res in results:
             #     print(res)
             #     print(res.get())
@@ -515,7 +558,7 @@ class SimulationManager:
             out.write('# Param name, value\n')
             for key, value in zip(self.gconf.optimized, opt_val.x):
                 out.write('%s: %f\n' % (str(key), value))
-        self.write_queue.put(None)
+        self.write_queue.put(None, block=True)
         return opt_val.x
 
 

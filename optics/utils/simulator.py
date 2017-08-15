@@ -44,7 +44,7 @@ class Simulator():
         # assigned as an attribute. Without the try, except we would get an
         # attribute error which makes error messages confusing and useless
         try:
-            for handler in self.log.handlers[:]:
+            for handler in self.log.handlers:
                 handler.close()
                 self.log.removeHandler(handler)
         except AttributeError:
@@ -52,7 +52,7 @@ class Simulator():
 
     def clean_sim(self):
         try:
-            for handler in self.log.handlers[:]:
+            for handler in self.log.handlers:
                 handler.close()
                 self.log.removeHandler(handler)
             del self.log
@@ -263,15 +263,14 @@ class Simulator():
         if max_depth:
             self.log.info('Computing up to depth of {} '
                           'microns'.format(max_depth))
-            dz = max_depth / z_samp
-            zvec = np.arange(0, max_depth + dz, dz)
+            zvec = np.linspace(0, max_depth, z_samp)
         else:
             self.log.info('Computing for entire device')
             height = self.get_height()
-            zvec = np.arange(0, height + dz, dz)
-        Ex = 0j*np.zeros((z_samp+1, x_samp, y_samp))
-        Ey = 0j*np.zeros((z_samp+1, x_samp, y_samp))
-        Ez = 0j*np.zeros((z_samp+1, x_samp, y_samp))
+            zvec = np.linspace(0, height, z_samp)
+        Ex = 0j*np.zeros((z_samp, x_samp, y_samp))
+        Ey = 0j*np.zeros((z_samp, x_samp, y_samp))
+        Ez = 0j*np.zeros((z_samp, x_samp, y_samp))
         for zcount, z in enumerate(zvec):
             E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(x_samp, y_samp),
                                            Format='Array')
@@ -361,7 +360,7 @@ class Simulator():
                        {'compression': self.conf['General']['compression'],
                         'createparents': True, 'obj': arr,
                         'atom': tb.Atom.from_dtype(arr.dtype)})
-                self.q.put(tup)
+                self.q.put(tup, block=True)
             # Save the flux dict to a table
             self.log.info('Saving fluxes to HDF5')
             self.log.info(self.flux_dict)
@@ -369,7 +368,7 @@ class Simulator():
             tup = ('create_flux_table', (self.flux_dict, path, 'fluxes'),
                    {'createparents': True,
                     'expectedrows': len(list(self.conf['Layers'].keys()))})
-            self.q.put(tup)
+            self.q.put(tup, block=True)
         else:
             raise ValueError('Invalid file type specified in config')
 
@@ -386,7 +385,7 @@ class Simulator():
             path = '/sim_{}'.format(self.id[0:10])
             attr_name = 'conf'
             tup = ('save_attr', (self.conf.dump(), path, attr_name), {})
-            self.q.put(tup)
+            self.q.put(tup, block=True)
         else:
             raise ValueError('Invalid file type specified in config')
 
@@ -404,7 +403,7 @@ class Simulator():
             path = '/sim_{}'.format(self.id[0:10])
             attr_name = 'runtime'
             tup = ('save_attr', (self.runtime, path, attr_name), {})
-            self.q.put(tup)
+            self.q.put(tup, block=True)
         else:
             raise ValueError('Invalid file type specified in config')
 

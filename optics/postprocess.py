@@ -4,13 +4,12 @@ import scipy.constants as c
 import scipy.integrate as intg
 import argparse as ap
 import os
-import time
+# import time
 import copy
-import re
+# import re
 import glob
 import logging
 import itertools
-from collections import OrderedDict
 import matplotlib
 # Enables saving plots over ssh
 try:
@@ -33,7 +32,7 @@ import tables as tb
 
 from utils.config import Config
 from utils.simulation import Simulation
-from utils.utils import configure_logger, cmp_dicts, open_atomic
+from utils.utils import configure_logger, cmp_dicts
 
 # Configure module level logger if not running as main process
 if not __name__ == '__main__':
@@ -137,9 +136,10 @@ class Processor(object):
         return vals
 
     def filter_by_param(self, pars):
-        """Accepts a dict where the keys are parameter names and the values are a list of possible
-        values for that parameter. Any simulation whose parameter does not match any of the provided
-        values is removed from the sims and sim_groups attribute"""
+        """Accepts a dict where the keys are parameter names and the values are
+        a list of possible values for that parameter. Any simulation whose
+        parameter does not match any of the provided values is removed from the
+        sims and sim_groups attribute"""
 
         assert(type(pars) == dict)
         for par, vals in pars.items():

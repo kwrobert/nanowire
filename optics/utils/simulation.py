@@ -18,6 +18,29 @@ class TransmissionData(tb.IsDescription):
 
 
 class DataManager(MutableMapping):
+    """
+    The base class for all *DataManager objects. This purpose of this object is
+    to manage retrieving data from some on-disk format and storing it in a
+    dictionary for later retrieval (the _data dict). This object behaves like a
+    dict, and overrides all the key dictionary special methods.
+
+    Lazy-loading logic is implemented. When initialized, this object should
+    populate the keys of _data with all data items available on disk without
+    loading them, instead storing None as the value. An item is only actually
+    retrieved from the on-disk format when it is requested.
+
+    Lazy writing is implemented as well. The value corresponding to a given key
+    is updated if and only if the attempted assignment value differs from the
+    existing value. If so, the _updated dict stores True to indicate that data
+    value has been updated. Upon writing, only update values are written to
+    disk. DISCLAIMER: This doesn't actually work for the NPZ backend because
+    IDK how to modify individual arrays within the archive.
+
+    We don't use the object dict (i.e __dict__) to store the simulation
+    data because I dont want to worry about having keys for certain pieces of
+    data conflict with some attributes I might want to set on this object. It's
+    slightly less memory efficient but not in a significant way.
+    """
 
     def __init__(self, conf, log):
         self._data = {}
@@ -92,14 +115,17 @@ class DataManager(MutableMapping):
 
 
 class HDF5DataManager(DataManager):
-
     """
-    We don't want to use the object dict (i.e __dict__) to store the simulation
-    data because I dont want to worry about having keys for certain pieces of
-    data conflict with some attributes I might want to set on this object
+    Data manager class for the HDF5 storage backend
     """
 
     def __init__(self, conf, log):
+        """
+        :param :class:`~utils.config.Config`: Config object for the simulation
+        that this DataManager will be managing data for
+        :param log: A logger object
+        """
+
         super(HDF5DataManager, self).__init__(conf, log)
         path = os.path.join(self.conf['General']['base_dir'], 'data.hdf5')
         self._dfile = tb.open_file(path, 'a')
@@ -110,8 +136,8 @@ class HDF5DataManager(DataManager):
 
     def _update_keys(self, clear=False):
         """
-        Used to pull in keys for all the possible data items this simulation
-        could have, without loading the actual items
+        Used to pull in keys for all the data items this simulation has stored
+        on disk, without loading the actual items
         """
         for child in self.gobj._f_iter_nodes():
             if clear:
@@ -199,12 +225,17 @@ class HDF5DataManager(DataManager):
             table.flush()
         else:
             self.log.info('Data for transmission_data unchanged, not writing')
-            
 
 
 class NPZDataManager(MutableMapping):
 
     def __init__(self, conf, log):
+        """
+        :param :class:`~utils.config.Config`: Config object for the simulation
+        that this DataManager will be managing data for
+        :param log: A logger object
+        """
+
         super(NPZDataManager, self).__init__(conf, log)
         self._update_keys()
         path = os.path.join(self.conf['General']['sim_dir'],
@@ -212,6 +243,10 @@ class NPZDataManager(MutableMapping):
         self._dfile = np.load(path)
 
     def _update_keys(self, clear=False):
+        """
+        Used to pull in keys for all the data items this simulation has stored
+        on disk, without loading the actual items
+        """
         for key in self._dfile.files:
             if clear:
                 self._data[key] = None
@@ -222,7 +257,7 @@ class NPZDataManager(MutableMapping):
     def _load_data(self, key):
         """
         Actually pulls data from disk out of the _dfile NPZ archive for the
-        requested key and puts it in the self._data disk
+        requested key and puts it in the self._data dict for later retrieval
         """
 
         if key == 'fluxes' or key == 'transmission_data':
@@ -241,6 +276,7 @@ class NPZDataManager(MutableMapping):
         object (i.e _dfile) and only writing the changes, so if any data key
         has been updated we need to write the entire dict for now
         """
+
         # TODO: Stop using .npz archives and make my own wrapper around a bunch
         # of individual npy files
 
@@ -259,14 +295,18 @@ class NPZDataManager(MutableMapping):
 
 class Simulation:
     """
-    An object that represents a simulation. It contains the data for the
-    sim, the data file headers, and its configuration object as attributes.
-    This object contains all the information about a simulation, but DOES NOT
-    perform any actions on that data. That job is relegated to the various
-    processor objects
+    An object that represents a simulation. It stores a DataManager object for
+    managing the reading and writing of all data as an attribute. It also
+    stores a Config object, which is a dict-like object representing the
+    configuration for the simulation, as an attribute. Many of the methods are
+    for performing calculations on the data.
     """
 
     def __init__(self, conf):
+        """
+        :param :class:`~utils.config.Config`: Config object for this simulation
+        """
+
         self.conf = conf
         self.log = logging.getLogger('postprocess')
         self.data = self._get_data_manager()
@@ -291,8 +331,9 @@ class Simulation:
     def _get_data_manager(self):
         """
         Factory function that instantiates the correct data manager object
-        depending on the specified file type
+        depending on the file type specified in the config
         """
+
         ftype = self.conf['General']['save_as']
         if ftype == 'npz':
             return NPZDataManager(self.conf, self.log)
@@ -302,9 +343,12 @@ class Simulation:
             raise ValueError('Invalid file type in config')
 
     def write_data(self):
-        """Writes the data. All writes have been wrapped with an atomic context
-        manager than ensures all writes are atomic and do not corrupt data
-        files if they are interrupted for any reason"""
+        """
+        Writes the data. This is a simple wrapper around the write_data()
+        method of the DataManager object, with some code to compute the time it
+        took to perform the write operation
+        """
+
         start = time.time()
         self.data.write_data()
         end = time.time()
@@ -319,7 +363,6 @@ class Simulation:
         :return: A 3D numpy array of the specified quantity
         :raises KeyError: If the specified quantity does not exist in the data
                           dict
-
         """
 
         self.log.debug('Retrieving scalar quantity %s', str(quantity))
@@ -336,8 +379,7 @@ class Simulation:
 
     def extend_data(self, quantity, new_data):
         """
-        Adds a new column of data to the field arrays, or updates it if it
-        already exists
+        Adds a new key, value pair to the DataManager object
         """
         if quantity in self.data:
             self.log.debug("Quantity %s exists in matrix, updating", quantity)
@@ -361,7 +403,11 @@ class Simulation:
         return E_mag
 
     def normEsquared(self):
-        """Calculates and returns normE squared"""
+        """
+        Calculates and returns normE squared. Adds it to the data dict for
+        the simulation and also returns a 3D array
+        :return: A 3D numpy array containing normE squared
+        """
 
         # Get the magnitude of E and add it to our data
         E_magsq = np.zeros_like(self.data['Ex'], dtype=np.float64)
@@ -389,8 +435,16 @@ class Simulation:
         return H_magsq
 
     def get_nk(self, path, freq):
-        """Returns functions to compute index of refraction components n and k at a given
-        frequency"""
+        """
+        Returns n and k, the real and imaginary components of the index of refraction at a given
+        frequency
+        :param str path: A path to a text file containing the n and k data. The
+        first column should be the frequency in Hertz, the second column the n
+        values, and the third column the k values. Columns must be delimited
+        by whitespace.
+        :param float freq: The desired frequency in Hertz
+        """
+
         # Get data
         freq_vec, n_vec, k_vec = np.loadtxt(path, unpack=True)
         # Get n and k at specified frequency via interpolation
@@ -401,8 +455,19 @@ class Simulation:
         return f_n(freq), f_k(freq)
 
     def _get_circle_nk(self, shape, sdata, nk, samps, steps):
-        """Returns a 2D matrix containing the N,K values at each point in space
-        for a circular in-plane geometry"""
+        """
+        Returns a 2D matrix containing the N,K values at each point in space
+        for a circular in-plane geometry
+        :param dict sdata: The dictionary containing the parameters and info
+        about this circle
+        :param dict nk: The dict containing the n and k values for all the
+        materials used in the sim. Keys are material names, values are tuples
+        containing (n, k)
+        :param tup samps: The number of samples taken in the (x, y) directions
+        :param tup steps: The length of the spatial discretization step in the
+        (x, y) directions
+        """
+
         # Set up the parameters
         cx, cy = sdata['center']['x'], sdata['center']['y']
         rad = sdata['radius']
@@ -420,17 +485,20 @@ class Simulation:
         return nk_mat
 
     def _genrate_nk_geometry(self, lname, nk, samps, steps):
-        """Computes the nk profile in a layer with a nontrivial internal
+        """
+        Computes the nk profile in a layer with a nontrivial internal
         geometry. Returns a 2D matrix containing the product of n and k at each
         point
-        lname: Name of the layer as a string
-        ldata: This dict containing all the data for this layer
-        nk: A dictionary with the material name as the key an a tuple
+        :param str lname: Name of the layer as a string
+        :param dict ldata: This dict containing all the data for this layer
+        :param dict nk: A dictionary with the material name as the key an a tuple
         containing (n,k) as the value
-        samps: A tuple/list containing the number of sampling points in each
+        :param tup samps: A tuple/list containing the number of sampling points in each
         spatial direction in (x,y,z) order
-        steps: Same as samps but instead contains the step sizes in each
-        direction"""
+        :param tup steps: Same as samps but instead contains the step sizes in each
+        direction
+        """
+
         # Initialize the matrix with values for the base material
         base_mat = self.conf['Layers'][lname]['base_material']
         nk_mat = nk[base_mat][0] * nk[base_mat][1] * \
@@ -456,6 +524,11 @@ class Simulation:
         return nk_mat
 
     def genRate(self):
+        """
+        Computes and returns the 3D matrix containing the generation rate.
+        Returns in units of cm^-3
+        """
+
         # We need to compute normEsquared before we can compute the generation
         # rate
         try:
@@ -532,7 +605,10 @@ class Simulation:
         return gvec
 
     def angularAvg(self, quantity):
-        """Perform an angular average of some quantity for either the E or H field"""
+        """
+        Perform an angular average of some quantity for either the E or H field
+        """
+
         try:
             quant = self.get_scalar_quantity(quantity)
         except KeyError:
@@ -629,11 +705,10 @@ class Simulation:
         """
         Computes reflection, transmission, and absorbance
 
-        :param sim: :py:class:`utils.simulation.Simulation`
         :param str port: Name of the location at which you would like to place the
                          transmission port (i.e where you would like to compute
                          transmission). This must correspond to one of the keys placed in
-                         the fluxes.dat file
+                         the fluxes dict located at self.data['fluxes']
         """
 
         data = self.data['fluxes']
@@ -704,9 +779,11 @@ class Simulation:
         return reflectance, transmission, absorbance
 
     def integrated_absorbtion(self):
-        """Computes the absorption of a layer by using the volume integral of
+        """
+        Computes the absorption of a layer by using the volume integral of
         the product of the imaginary part of the relative permittivity and the
-        norm squared of the E field"""
+        norm squared of the E field
+        """
 
         raise NotImplementedError('There are some bugs in S4 and other reasons'
                                   ' that this function doesnt work yet')
@@ -731,4 +808,3 @@ class Simulation:
             for layer, vals in data.items():
                 absorb = fact * float(vals[1])
                 outf.write('%s,%s\n' % (layer, absorb))
-

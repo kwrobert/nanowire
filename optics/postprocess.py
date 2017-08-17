@@ -69,6 +69,13 @@ class Processor(object):
         # data file)
         self.failed_sims = failed_sims
 
+    def __del__(self):
+        """
+        Close HDF5 file
+        """
+        if self.hdf5 is not None:
+            self.hdf5.close()
+
     def collect_sims(self):
         """Collect all the simulations beneath the base of the directory tree"""
         sims = []
@@ -95,13 +102,12 @@ class Processor(object):
             for group in sim_groups:
                 if 'conf' in group._v_attrs:
                     conf_str = group._v_attrs['conf']
-                    sim_obj = Simulation(Config(raw_text=conf_str), hdf5_handle=self.hdf5)
+                    sim_obj = Simulation(Config(raw_text=conf_str))
                     sim_obj.conf.expand_vars()
                     sims.append(sim_obj)
                 else:
                     self.log.critical('The following sim is missing its config file: %s',
                                       group._v_name)
-                    self.hdf5.close()
                     raise RuntimeError
         else:
             raise ValueError('Invalid file type specified in config')

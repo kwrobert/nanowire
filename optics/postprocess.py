@@ -329,7 +329,7 @@ class Cruncher(Processor):
     def process(self, sim):
         sim_path = os.path.basename(sim.conf['General']['sim_dir'])
         self.log.info('Crunching data for sim %s', sim_path)
-        sim.get_data()
+        # sim.get_data()
         if sim.failed:
             self.log.error('Following simulation missing data: %s', sim_path)
             self.failed_sims.append(sim)
@@ -468,14 +468,14 @@ class Global_Cruncher(Cruncher):
                 self.log.info('Computing local error for sweep %s', base)
                 # Set the reference sim
                 ref_sim = group[-1]
-                ref_sim.get_data()
+                # ref_sim.get_data()
                 # Get the comparison vector
                 vecs1, normvec = self.get_comp_vec(ref_sim, field, start, end)
                 # For all other sims in the groups, compare to best estimate
                 # and write to error file
                 for i in range(0, len(group) - 1):
                     sim2 = group[i]
-                    sim2.get_data()
+                    # sim2.get_data()
                     vecs2, normvec2 = self.get_comp_vec(sim2, field, start,
                                                         end)
                     self.log.info("Computing local error between numbasis %i and numbasis %i",
@@ -497,7 +497,7 @@ class Global_Cruncher(Cruncher):
                     # the difference vectors
                     avg_diffvec_mag = np.sum(
                         norm_mag_diff) / norm_mag_diff.size
-                    self.log.info(str(avg_diffvec_mag))
+                    # self.log.info(str(avg_diffvec_mag))
                     errfile.write('%i,%f\n' % (sim2.conf['Simulation']['params'][
                                   'numbasis']['value'], avg_diffvec_mag))
                     sim2.clear_data()
@@ -527,14 +527,14 @@ class Global_Cruncher(Cruncher):
                 self.log.info('Computing global error for sweep %s', base)
                 # Set reference sim
                 ref_sim = group[-1]
-                ref_sim.get_data()
+                # ref_sim.get_data()
                 # Get the comparison vector
                 vecs1, normvec = self.get_comp_vec(ref_sim, field, start, end)
                 # For all other sims in the groups, compare to best estimate
                 # and write to error file
                 for i in range(0, len(group) - 1):
                     sim2 = group[i]
-                    sim2.get_data()
+                    # sim2.get_data()
                     vecs2, normvec2 = self.get_comp_vec(sim2, field, start,
                                                         end)
                     self.log.info("Computing global error between numbasis %i and numbasis %i",
@@ -553,7 +553,7 @@ class Global_Cruncher(Cruncher):
                     # Error as a percentage should be the square root of the ratio of sum of mag diff vec
                     # squared to mag efield squared
                     error = np.sqrt(np.sum(mag_diff_vec) / np.sum(normvec))
-                    self.log.info(str(error))
+                    # self.log.info(str(error))
                     errfile.write('%i,%f\n' % (sim2.conf['Simulation'][
                                   'params']['numbasis']['value'], error))
                     sim2.clear_data()
@@ -587,11 +587,11 @@ class Global_Cruncher(Cruncher):
                 for i in range(1, len(group)):
                     # Set reference sim
                     ref_sim = group[i]
-                    ref_sim.get_data()
+                    # ref_sim.get_data()
                     # Get the comparison vector
                     vecs1, normvec = self.get_comp_vec(ref_sim, field, start, end)
                     sim2 = group[i - 1]
-                    sim2.get_data()
+                    # sim2.get_data()
                     vecs2, normvec2 = self.get_comp_vec(sim2, field, start,
                                                         end)
                     self.log.info("Computing adjacent error between numbasis %i and numbasis %i",
@@ -610,7 +610,7 @@ class Global_Cruncher(Cruncher):
                     # Error as a percentage should be thkkk square root of the ratio of sum of mag diff vec
                     # squared to mag efield squared
                     error = np.sqrt(np.sum(mag_diff_vec) / np.sum(normvec))
-                    self.log.info(str(error))
+                    # self.log.info(str(error))
                     errfile.write('%i,%f\n' % (sim2.conf['Simulation'][
                                   'params']['numbasis']['value'], error))
                     sim2.clear_data()
@@ -623,7 +623,7 @@ class Global_Cruncher(Cruncher):
         for group in self.sim_groups:
             base = group[0].conf['General']['results_dir']
             self.log.info('Performing scalar reduction for group at %s' % base)
-            group[0].get_data()
+            # group[0].get_data()
             self.log.debug('QUANTITY: %s'%quantity)
             group_comb = group[0].get_scalar_quantity(quantity)
             self.log.debug(group_comb.dtype)
@@ -631,11 +631,10 @@ class Global_Cruncher(Cruncher):
             # This approach is more memory efficient then building a 2D array
             # of all the data from each group and summing along an axis
             for sim in group[1:]:
-                sim.get_data()
+                # sim.get_data()
                 self.log.debug(sim.id)
                 quant = sim.get_scalar_quantity(quantity)
                 self.log.debug(quant.dtype)
-                print(quant)
                 group_comb += quant
                 sim.clear_data()
             if avg:
@@ -675,7 +674,7 @@ class Global_Cruncher(Cruncher):
             # Assuming the sims have been grouped by frequency, sum over all of
             # them
             for i, sim in enumerate(group):
-                sim.get_data()
+                # sim.get_data()
                 # Unpack data for the port we passed in as an argument
                 ref, trans, absorb = sim.data['transmission_data'][port]
                 freq = sim.conf['Simulation']['params']['frequency']['value']
@@ -733,7 +732,7 @@ class Global_Cruncher(Cruncher):
             # Assuming the sims have been grouped by frequency, sum over all of
             # them
             for i, sim in enumerate(group):
-                sim.get_data()
+                # sim.get_data()
                 # Unpack data for the port we passed in as an argument
                 ref, trans, absorb = sim.data['transmission_data'][port]
                 freq = sim.conf['Simulation']['params']['frequency']['value']
@@ -766,16 +765,41 @@ class Global_Cruncher(Cruncher):
             outf = os.path.join(base, 'jsc.dat')
             with open(outf, 'w') as out:
                 out.write('%f\n' % Jsc)
-            self.log.info('Jsc = %f' % Jsc)
+            self.log.info('Jsc = %f', Jsc)
             valuelist.append(Jsc)
         return valuelist
 
-    # def Jsc_integrated(self):
-    #     """
-    #     Compute te photocurrent density by performing a volume integral of the
-    #     generation rate
-    #     """
-
+    def Jsc_integrated(self):
+        """
+        Compute te photocurrent density by performing a volume integral of the
+        generation rate
+        """
+        fname = 'scalar_reduce_genRate.npy'
+        valueList = np.zeros(len(self.sim_groups))
+        for i, group in enumerate(self.sim_groups):
+            base = group[0].conf['General']['results_dir']
+            self.log.info('Computing integrated Jsc for group at %s', base)
+            path = os.path.join(base, fname)
+            try:
+                genRate = np.load(path)
+            except FileNotFoundError:
+                self.scalar_reduce('genRate')
+                genRate = np.load(path)
+            # Gen rate in cm^-3. Gotta convert lengths here from um to cm
+            z_vals = np.linspace(0, group[0].height*1e-4, group[0].z_samples)
+            x_vals = np.linspace(0, group[0].height*1e-4, group[0].x_samples)
+            y_vals = np.linspace(0, group[0].height*1e-4, group[0].y_samples)
+            z_integral = intg.trapz(genRate, x=z_vals, axis=0)
+            x_integral = intg.trapz(z_integral, x=x_vals, axis=0)
+            y_integral = intg.trapz(x_integral, x=y_vals, axis=0)
+            # Convert period to cm
+            Jsc = (c.e/(group[0].period*1e-4)**2)*y_integral
+            outf = os.path.join(base, 'jsc_integrated.dat')
+            with open(outf, 'w') as out:
+                out.write('%f\n' % Jsc)
+            valueList[i] = Jsc
+            self.log.info('Jsc_integrated = %f', Jsc)
+        return valueList
 
     def weighted_transmissionData(self, port='Substrate'):
         """Computes spectrally weighted absorption,transmission, and reflection"""
@@ -837,7 +861,7 @@ class Plotter(Processor):
         self.log.debug("This is the plotter")
 
     def process(self, sim):
-        sim.get_data()
+        # sim.get_data()
         sim_path = os.path.basename(sim.conf['General']['sim_dir'])
         self.log.info('Plotting data for sim %s', sim_path)
         # For each plot
@@ -1288,7 +1312,6 @@ class Global_Plotter(Plotter):
             title = 'Reduction of %s' % quantity
             for datfile in files:
                 p = False
-                print(ftype)
                 if ftype == 'npz':
                     scalar = np.load(datfile)
                 elif ftype == 'hdf5':
@@ -1335,7 +1358,7 @@ class Global_Plotter(Plotter):
             trans_l = np.zeros(len(group))
             absorb_l = np.zeros(len(group))
             for i, sim in enumerate(group):
-                sim.get_data()
+                # sim.get_data()
                 # Unpack data for the port we passed in as an argument
                 ref, trans, absorb = sim.data['transmission_data'][port]
                 freq = sim.conf['Simulation']['params']['frequency']['value']

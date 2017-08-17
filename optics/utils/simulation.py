@@ -6,6 +6,7 @@ import logging
 import tables as tb
 import scipy.constants as c
 from scipy import interpolate
+from collections import MutableMapping
 from .utils import open_atomic
 
 
@@ -16,7 +17,194 @@ class TransmissionData(tb.IsDescription):
     absorption = tb.Float32Col(pos=3)
 
 
-class Simulation(object):
+class DataManager(MutableMapping):
+
+    def __init__(self, conf):
+        print('Calling base data manager init')
+        self._data = {}
+        self.conf = conf
+
+    def _load_data(self, key):
+        self._data[key] = None
+
+    def __getitem__(self, key):
+        """
+        Here is were the fancy lazy loading is implemented
+        """
+        if self._data[key] is None:
+            self._load_data(key)
+            return self._data[key]
+        else:
+            return self._data[key]
+
+    def __setitem__(self, key, value):
+        """
+        Transparently pass value through to underlying dict
+        """
+        self._data[key] = value
+
+    def __delitem__(self, key):
+        del self._data[key]
+
+    def __iter__(self):
+        return iter(self._data)
+
+    def __len__(self):
+        return len(self._data)
+
+    def __str__(self):
+        '''returns simple dict representation of the mapping'''
+        return str(self._data)
+
+    def __repr__(self):
+        '''echoes class, id, & reproducible representation in the REPL'''
+        return '{}, D({})'.format(super(HDF5DataManager, self).__repr__(), self._data)
+
+
+class HDF5DataManager(DataManager):
+
+    """
+    We don't want to use the object dict (i.e __dict__) to store the simulation
+    data because I dont want to worry about having keys for certain pieces of
+    data conflict with some attributes I might want to set on this object
+    """
+
+    def __init__(self, conf):
+        print('Creating HDF5 data mutable mapping')
+        super(HDF5DataManager, self).__init__(conf)
+        path = os.path.join(self.conf['General']['base_dir'], 'data.hdf5')
+        self._dfile = tb.open_file(path, 'a')
+        ID = os.path.basename(self.conf['General']['sim_dir'])
+        self.gpath = '/sim_{}'.format(ID)
+        self.gobj = self._dfile.get_node(self.gpath, classname='Group')
+        self._update_keys()
+
+    def _update_keys(self, clear=False):
+        """
+        Used to pull in keys for all the possible data items this simulation
+        could have, without loading the actual items
+        """
+        for child in self.gobj._f_iter_nodes():
+            if clear:
+                self._data[child._v_name] = None
+            else:
+                if child._v_name not in self._data:
+                    self._data[child._v_name] = None
+
+    def _load_data(self, key):
+        """
+        Implements logic for loading data when the user asks for it by
+        accessing the revelant key. This is only called from __getitem__
+        """
+
+        nodepath = os.path.join(self.gpath, key)
+        try:
+            node = self._dfile.get_node(nodepath)
+        except tb.NoSuchNodeError:
+            # Maybe we just haven't computed transmission data yet
+            if key == 'transmission_data':
+                return
+            else:
+                raise tb.NoSuchNodeError
+        if isinstance(node, tb.Array):
+            self._data[node.name] = node.read()
+        elif isinstance(node, tb.Table):
+            if key == 'fluxes':
+                self._data[key] = {tup[0].decode('utf-8'): (tup[1], tup[2])
+                                  for tup in node.read()}
+            elif key == 'transmission_data':
+                try:
+                    self._data['transmission_data'] = {tup[0].decode('utf-8'):
+                                                       (tup[1], tup[2], tup[3])
+                                                       for tup in node.read()}
+                except tb.NoSuchNodeError:
+                    pass
+
+    def write_data(self):
+        """
+        Writes all necessary data out to the HDF5 file
+        """
+
+        # Filter out the original data so we don't resave it
+        black_list = ('fluxes', 'Ex', 'Ey', 'Ez', 'transmission_data')
+        for key, arr in self._data.items():
+            if key not in black_list:
+                try:
+                    existing_arr = self._dfile.get_node(self.gpath, name=key)
+                    existing_arr[...] = arr
+                except tb.NoSuchNodeError:
+                    if self.conf['General']['compression']:
+                        filt = tb.Filters(complevel=4, complib='blosc')
+                        self._dfile.create_carray(self.gpath, key, obj=arr,
+                                                filters=filt,
+                                                atom=tb.Atom.from_dtype(arr.dtype))
+                    else:
+                        self._dfile.create_array(self.gpath, key, arr)
+            num_rows = len(list(self.conf['Layers'].keys()))*2
+            # We need to handle transmission_data separately because it gets
+            # saved into a table
+            try:
+                tb_path = self.gpath + '/transmission_data'
+                table = self._dfile.get_node(tb_path, classname='Table')
+                # If the table exists, clear it out
+                table.remove_rows(start=0)
+            except tb.NoSuchNodeError:
+                table = self._dfile.create_table(self.gpath, 'transmission_data',
+                                               description=TransmissionData,
+                                               expectedrows=num_rows)
+            for port, tup in self._data['transmission_data'].items():
+                row = table.row
+                row['layer'] = port
+                row['reflection'] = tup[0]
+                row['transmission'] = tup[1]
+                row['absorption'] = tup[2]
+                row.append()
+            table.flush()
+
+
+class NPZDataManager(MutableMapping):
+
+    def __init__(self, conf):
+        print('Creating NPZ data mutable mapping')
+        super(NPZDataManager, self).__init__(conf)
+        self._update_keys()
+        path = os.path.join(self.conf['General']['sim_dir'],
+                            'field_data.npz')
+        self._dfile = np.load(path)
+
+    def _update_keys(self, clear=False):
+        for key in self._dfile.files:
+            if clear:
+                self._data[key] = None
+            else:
+                if key not in self._data:
+                    self._data[key] = None
+
+    def _load_data(self, key):
+        if key == 'fluxes' or key == 'transmission_data':
+            if key in self._dfile:
+                # We have do so some weird stuff here to unpack the
+                # dictionaries because np.savez sticks them in a 0D array for
+                # some reason
+                self._data[key] == self._dfile[key][()]
+        else:
+            self._data[key] = self._dfile[key]
+
+    def write_data(self):
+        # Get the current path
+        base = self.conf['General']['sim_dir']
+        self.log.info('Writing data for %s', base)
+        fname = os.path.join(base, self.conf['General']['base_name'])
+        # Save the headers and the data
+        with open_atomic(fname, 'w') as out:
+            np.savez_compressed(out, **self.data)
+        # Save any local averages we have computed
+        dpath = os.path.join(base, 'all.avg')
+        with open_atomic(dpath, 'w') as out:
+            np.savez_compressed(out, **self.avgs)
+
+
+class Simulation:
     """
     An object that represents a simulation. It contains the data for the
     sim, the data file headers, and its configuration object as attributes.
@@ -29,7 +217,7 @@ class Simulation(object):
         self.conf = conf
         self.hdf5 = hdf5_handle
         self.log = logging.getLogger('postprocess')
-        self.data = None
+        self.data = self._get_data_manager()
         self.failed = False
         self.avgs = {}
         # Compute and store dx, dy, dz at attributes
@@ -48,145 +236,148 @@ class Simulation(object):
         self.dy = self.period / self.y_samples
         self.id = os.path.basename(conf['General']['sim_dir'])
 
-    def load_npz(self, path):
-        """Load all field data for this simulation from an npz file"""
-        try:
-            # Get the headers and the data
-            with np.load(path) as loaded:
-                data = {key: arr for key, arr in loaded.items()}
-                self.log.debug('Quantities in npz file: %s', str(data.keys()))
-        except IOError:
-            self.log.error('Following file missing or unloadable: %s', path)
-            self.failed = True
-            data = None
-        return data
-
-    def get_data(self):
-        """Loads all the data contained in the npz file into a self.data
-        dictionary attribute"""
-        self.log.info('Collecting data for sim %s',
-                      self.conf['General']['sim_dir'])
+    def _get_data_manager(self):
+        """
+        Factory function that instantiates the correct data manager object
+        depending on the specified file type
+        """
         ftype = self.conf['General']['save_as']
-        # If data was saved in in npz format
         if ftype == 'npz':
-            sim_path = self.conf['General']['sim_dir']
-            base_name = self.conf['General']['base_name']
-            # Get the paths
-            path = os.path.join(sim_path, base_name + '.npz')
-            data = self.load_npz(path)
-            # When using savez it wraps the dict in a numpy array so we need to
-            # extract it here. Its wrapped in a "0-d" array, which is why we
-            # need to use this weird [()] indexing
-            data['fluxes'] = data['fluxes'][()]
-            if 'transmission_data' in data:
-                data['transmission_data'] = data['transmission_data'][()]
+            return NPZDataManager(self.conf)
         elif ftype == 'hdf5':
-            # First load the fields
-            path = '/sim_{}'.format(self.id)
-            data = {}
-            for arr in self.hdf5.iter_nodes(path,  classname="Array"):
-                data[arr.name] = arr.read()
-            # Now load the fluxes
-            flux_path = path + '/fluxes'
-            flux_table = self.hdf5.get_node(flux_path)
-            flux_dict = {tup[0].decode('utf-8'): (tup[1], tup[2]) for tup in
-                         flux_table.read()}
-            data['fluxes'] = flux_dict
-            # Now load the transmission and reflection data if it exists
-            trans_path = path + '/transmission_data'
-            try:
-                trans_table = self.hdf5.get_node(trans_path)
-                trans_dict = {tup[0].decode('utf-8'): (tup[1], tup[2], tup[3]) for tup
-                              in trans_table.read()}
-                data['transmission_data'] = trans_dict
-            except tb.NoSuchNodeError:
-                pass
+            return HDF5DataManager(self.conf)
         else:
-            raise ValueError('Incorrect file type specified in [General] '
-                             'section of config file')
-        self.data = data
-        self.log.info('Collection complete!')
-        return data
+            raise ValueError('Invalid file type in config')
 
-    def get_avgs(self):
-        """Load all averages"""
-        # Get the current path
-        base = self.conf['General']['sim_dir']
-        ftype = self.conf['General']['save_as']
-        if ftype == 'text':
-            globstr = os.path.join(base, '*avg.crnch')
-            for f in glob.glob(globstr):
-                fname = os.path.basename(f)
-                key = fname[0:fname.index('.')]
-                self.avgs[key] = np.loadtxt(f)
-            self.log.info('Available averages: %s', str(self.avgs.keys()))
-        elif ftype == 'npz':
-            path = os.path.join(base, 'all.avg.npz')
-            with np.load(path) as avgs_file:
-                for arr in avgs_file.files:
-                    self.avgs[arr] = avgs_file[arr]
-            self.log.info('Available averages: %s', str(self.avgs.keys()))
+    # def load_npz(self, path):
+    #     """Load all field data for this simulation from an npz file"""
+    #     try:
+    #         # Get the headers and the data
+    #         with np.load(path) as loaded:
+    #             data = {key: arr for key, arr in loaded.items()}
+    #             self.log.debug('Quantities in npz file: %s', str(data.keys()))
+    #     except IOError:
+    #         self.log.error('Following file missing or unloadable: %s', path)
+    #         self.failed = True
+    #         data = None
+    #     return data
+
+    # def get_data(self):
+    #     """Loads all the data contained in the npz file into a self.data
+    #     dictionary attribute"""
+    #     self.log.info('Collecting data for sim %s',
+    #                   self.conf['General']['sim_dir'])
+    #     ftype = self.conf['General']['save_as']
+    #     # If data was saved in in npz format
+    #     if ftype == 'npz':
+    #         sim_path = self.conf['General']['sim_dir']
+    #         base_name = self.conf['General']['base_name']
+    #         # Get the paths
+    #         path = os.path.join(sim_path, base_name + '.npz')
+    #         data = self.load_npz(path)
+    #         # When using savez it wraps the dict in a numpy array so we need to
+    #         # extract it here. Its wrapped in a "0-d" array, which is why we
+    #         # need to use this weird [()] indexing
+    #         data['fluxes'] = data['fluxes'][()]
+    #         if 'transmission_data' in data:
+    #             data['transmission_data'] = data['transmission_data'][()]
+    #     elif ftype == 'hdf5':
+    #         # First load the fields
+    #         path = '/sim_{}'.format(self.id)
+    #         data = {}
+    #         for arr in self.hdf5.iter_nodes(path,  classname="Array"):
+    #             data[arr.name] = arr.read()
+    #         # Now load the fluxes
+    #         flux_path = path + '/fluxes'
+    #         flux_table = self.hdf5.get_node(flux_path)
+    #         flux_dict = {tup[0].decode('utf-8'): (tup[1], tup[2]) for tup in
+    #                      flux_table.read()}
+    #         data['fluxes'] = flux_dict
+    #         # Now load the transmission and reflection data if it exists
+    #         trans_path = path + '/transmission_data'
+    #         try:
+    #             trans_table = self.hdf5.get_node(trans_path)
+    #             trans_dict = {tup[0].decode('utf-8'): (tup[1], tup[2], tup[3]) for tup
+    #                           in trans_table.read()}
+    #             data['transmission_data'] = trans_dict
+    #         except tb.NoSuchNodeError:
+    #             pass
+    #     else:
+    #         raise ValueError('Incorrect file type specified in [General] '
+    #                          'section of config file')
+    #     self.data = data
+    #     self.log.info('Collection complete!')
+    #     return data
+
+    # def get_avgs(self):
+    #     """Load all averages"""
+    #     # Get the current path
+    #     base = self.conf['General']['sim_dir']
+    #     ftype = self.conf['General']['save_as']
+    #     if ftype == 'text':
+    #         globstr = os.path.join(base, '*avg.crnch')
+    #         for f in glob.glob(globstr):
+    #             fname = os.path.basename(f)
+    #             key = fname[0:fname.index('.')]
+    #             self.avgs[key] = np.loadtxt(f)
+    #         self.log.info('Available averages: %s', str(self.avgs.keys()))
+    #     elif ftype == 'npz':
+    #         path = os.path.join(base, 'all.avg.npz')
+    #         with np.load(path) as avgs_file:
+    #             for arr in avgs_file.files:
+    #                 self.avgs[arr] = avgs_file[arr]
+    #         self.log.info('Available averages: %s', str(self.avgs.keys()))
 
     def write_data(self):
         """Writes the data. All writes have been wrapped with an atomic context
         manager than ensures all writes are atomic and do not corrupt data
         files if they are interrupted for any reason"""
         start = time.time()
-        # Save matrices in specified file tipe
-        ftype = self.conf['General']['save_as']
-        if ftype == 'npz':
-            # Get the current path
-            base = self.conf['General']['sim_dir']
-            self.log.info('Writing data for %s', base)
-            fname = os.path.join(base, self.conf['General']['base_name'])
-            # Save the headers and the data
-            with open_atomic(fname, 'w') as out:
-                np.savez_compressed(out, **self.data)
-            # Save any local averages we have computed
-            dpath = os.path.join(base, 'all.avg')
-            with open_atomic(dpath, 'w') as out:
-                np.savez_compressed(out, **self.avgs)
-        elif ftype == 'hdf5':
-            path = '/sim_{}'.format(self.id)
-            # Filter out the original data so we don't resave it
-            black_list = ('fluxes', 'Ex', 'Ey', 'Ez', 'transmission_data')
-            save_dict = {key: value for key, value in self.data.items() if
-                         key not in black_list}
-            for key, arr in save_dict.items():
-                try:
-                    existing_arr = self.hdf5.get_node(path, name=key)
-                    existing_arr[...] = arr
-                except tb.NoSuchNodeError:
-                    if self.conf['General']['compression']:
-                        filt = tb.Filters(complevel=4, complib='blosc')
-                        self.hdf5.create_carray(path, key, obj=arr,
-                                                filters=filt,
-                                                atom=tb.Atom.from_dtype(arr.dtype))
-                    else:
-                        self.hdf5.create_array(path, key, arr)
-            group = '/sim_{}'.format(self.id)
-            num_rows = len(list(self.conf['Layers'].keys()))*2
-            # We need to handle transmission_data separately because it gets
-            # saved into a table
-            try:
-                tb_path = group + '/transmission_data'
-                table = self.hdf5.get_node(tb_path, classname='Table')
-                # If the table exists, clear it out
-                table.remove_rows(start=0)
-            except tb.NoSuchNodeError:
-                table = self.hdf5.create_table(group, 'transmission_data',
-                                               description=TransmissionData,
-                                               expectedrows=num_rows)
-            for port, tup in self.data['transmission_data'].items():
-                row = table.row
-                row['layer'] = port
-                row['reflection'] = tup[0]
-                row['transmission'] = tup[1]
-                row['absorption'] = tup[2]
-                row.append()
-            table.flush()
-        else:
-            raise ValueError('Specified saving in an unsupported file format')
+        self.data.write_data()
+        # # Save matrices in specified file tipe
+        # ftype = self.conf['General']['save_as']
+        # if ftype == 'npz':
+        # elif ftype == 'hdf5':
+        #     path = '/sim_{}'.format(self.id)
+        #     # Filter out the original data so we don't resave it
+        #     black_list = ('fluxes', 'Ex', 'Ey', 'Ez', 'transmission_data')
+        #     save_dict = {key: value for key, value in self.data.items() if
+        #                  key not in black_list}
+        #     for key, arr in save_dict.items():
+        #         try:
+        #             existing_arr = self.hdf5.get_node(path, name=key)
+        #             existing_arr[...] = arr
+        #         except tb.NoSuchNodeError:
+        #             if self.conf['General']['compression']:
+        #                 filt = tb.Filters(complevel=4, complib='blosc')
+        #                 self.hdf5.create_carray(path, key, obj=arr,
+        #                                         filters=filt,
+        #                                         atom=tb.Atom.from_dtype(arr.dtype))
+        #             else:
+        #                 self.hdf5.create_array(path, key, arr)
+        #     group = '/sim_{}'.format(self.id)
+        #     num_rows = len(list(self.conf['Layers'].keys()))*2
+        #     # We need to handle transmission_data separately because it gets
+        #     # saved into a table
+        #     try:
+        #         tb_path = group + '/transmission_data'
+        #         table = self.hdf5.get_node(tb_path, classname='Table')
+        #         # If the table exists, clear it out
+        #         table.remove_rows(start=0)
+        #     except tb.NoSuchNodeError:
+        #         table = self.hdf5.create_table(group, 'transmission_data',
+        #                                        description=TransmissionData,
+        #                                        expectedrows=num_rows)
+        #     for port, tup in self.data['transmission_data'].items():
+        #         row = table.row
+        #         row['layer'] = port
+        #         row['reflection'] = tup[0]
+        #         row['transmission'] = tup[1]
+        #         row['absorption'] = tup[2]
+        #         row.append()
+        #     table.flush()
+        # else:
+        #     raise ValueError('Specified saving in an unsupported file format')
         end = time.time()
         self.log.info('Write time: %.2f seconds', end - start)
 
@@ -212,8 +403,9 @@ class Simulation(object):
 
     def clear_data(self):
         """Clears all the data attributes to free up memory"""
-        self.data = {}
-        self.avgs = {}
+        self.data._update_keys(clear=True)
+        # self.data = {}
+        # self.avgs = {}
 
     def extend_data(self, quantity, new_data):
         """
@@ -520,7 +712,7 @@ class Simulation(object):
         data = self.data['fluxes']
         # sorted_layers is an OrderedDict, and thus has the popitem method
         sorted_layers = self.conf.sorted_dict(self.conf['Layers'])
-        self.log.info('SORTED LAYERS: %s', str(sorted_layers))
+        # self.log.info('SORTED LAYERS: %s', str(sorted_layers))
         first_layer = sorted_layers.popitem(last=False)
         self.log.info('FIRST LAYER: %s', str(first_layer))
         # An ordered dict is actually just a list of tuples so we can access

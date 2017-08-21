@@ -775,7 +775,7 @@ class Global_Cruncher(Cruncher):
             valuelist.append(Jsc)
         return valuelist
 
-    def Jsc_integrated(self):
+    def Jsc_integrated(self, port='Substrate'):
         """
         Compute te photocurrent density by performing a volume integral of the
         generation rate
@@ -793,13 +793,14 @@ class Global_Cruncher(Cruncher):
                 genRate = np.load(path)
             # Gen rate in cm^-3. Gotta convert lengths here from um to cm
             z_vals = np.linspace(0, group[0].height*1e-4, group[0].z_samples)
-            x_vals = np.linspace(0, group[0].height*1e-4, group[0].x_samples)
-            y_vals = np.linspace(0, group[0].height*1e-4, group[0].y_samples)
+            x_vals = np.linspace(0, group[0].period*1e-4, group[0].x_samples)
+            y_vals = np.linspace(0, group[0].period*1e-4, group[0].y_samples)
             z_integral = intg.trapz(genRate, x=z_vals, axis=0)
             x_integral = intg.trapz(z_integral, x=x_vals, axis=0)
             y_integral = intg.trapz(x_integral, x=y_vals, axis=0)
-            # Convert period to cm
-            Jsc = (c.e/(group[0].period*1e-4)**2)*y_integral
+            print('y_int = %f'%y_integral)
+            # Convert period to cm and current to mA
+            Jsc = 1000*(c.e/(group[0].period*1e-4)**2)*y_integral
             outf = os.path.join(base, 'jsc_integrated.dat')
             with open(outf, 'w') as out:
                 out.write('%f\n' % Jsc)

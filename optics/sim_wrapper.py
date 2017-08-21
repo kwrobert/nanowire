@@ -356,7 +356,7 @@ class SimulationManager:
                     # than this timeout, an exception would be raised but that
                     # should never happen
                     res = results[ind]
-                    self.log.debug('Sim ID: %s', str(ind))
+                    self.log.debug('Sim #: %s', str(ind))
                     res.wait(99999999)
                     self.log.debug('Done waiting on Sim ID %s', str(ind))
                     del results[ind]

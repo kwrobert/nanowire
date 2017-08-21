@@ -17,6 +17,11 @@ from utils import make_hash, configure_logger, get_combos
 from config import Config
 
 
+class LayerFlux(tb.IsDescription):
+    layer = tb.StringCol(60, pos=0)
+    forward = tb.ComplexCol(pos=1, itemsize=8)
+    backward = tb.ComplexCol(pos=2, itemsize=8)
+
 class Simulator():
 
     def __init__(self, conf, q=None):
@@ -31,6 +36,7 @@ class Simulator():
         self.s4 = S4.New(Lattice=((period, 0), (0, period)), NumBasis=numbasis)
         self.data = {}
         self.flux_dict = {}
+        self.hdf5 = None
         self.runtime = 0
 
     def __del__(self):
@@ -49,6 +55,10 @@ class Simulator():
                 self.log.removeHandler(handler)
         except AttributeError:
             pass
+
+    def open_hdf5(self):
+        fpath = os.path.join(self.dir, 'sim.hdf5')
+        self.hdf5 = tb.open_file(fpath, 'w')
 
     def clean_sim(self):
         try:
@@ -351,24 +361,47 @@ class Simulator():
             # repeated characters
             np.savez_compressed(out, **self.data)
         elif self.conf['General']['save_as'] == 'hdf5':
-            # Save the field arrays
-            self.log.info('Saving fields to HDF5')
-            path = '/sim_'+self.id[0:10]
+            compression = self.conf['General']['compression']
+            if compression:
+                filter_obj = tb.Filters(complevel=4, complib='blosc')
+            gpath = '/sim_'+self.id[0:10]
             for name, arr in self.data.iteritems():
                 self.log.debug("Saving array %s", name)
-                tup = ('create_array', (path, name),
-                       {'compression': self.conf['General']['compression'],
-                        'createparents': True, 'obj': arr,
-                        'atom': tb.Atom.from_dtype(arr.dtype)})
-                self.q.put(tup, block=True)
-            # Save the flux dict to a table
-            self.log.info('Saving fluxes to HDF5')
-            self.log.info(self.flux_dict)
-            path = '/sim_{}'.format(self.id[0:10])
-            tup = ('create_flux_table', (self.flux_dict, path, 'fluxes'),
-                   {'createparents': True,
-                    'expectedrows': len(list(self.conf['Layers'].keys()))})
-            self.q.put(tup, block=True)
+                if compression: 
+                    self.hdf5.create_carray(gpath, name, createparents=True,
+                                       atom=tb.Atom.from_dtype(arr.dtype),
+                                       obj=arr, filters=filter_obj)
+                else:
+                    self.hdf5.create_array(gpath, name, createparents=True,
+                                      atom=tb.Atom.from_dtype(arr.dtype),
+                                      obj=arr)
+            table = self.hdf5.create_table(gpath, 'fluxes', description=LayerFlux, 
+                                      expectedrows=len(list(self.conf['Layers'].keys())),
+                                      createparents=True)
+            row = table.row
+            for layer, (forward, backward) in self.flux_dict.iteritems():
+                row['layer'] = layer
+                row['forward'] = forward
+                row['backward'] = backward
+                row.append()
+            table.flush()
+                    # # Save the field arrays
+                    # self.log.info('Saving fields to HDF5')
+                    # path = '/sim_'+self.id[0:10]
+                    # for name, arr in self.data.iteritems():
+            #     self.log.debug("Saving array %s", name)
+            #     tup = ('create_array', (path, name),
+            #            {'compression': self.conf['General']['compression'],
+            #             'createparents': True, 'obj': arr,
+            #             'atom': tb.Atom.from_dtype(arr.dtype)})
+            #     self.q.put(tup, block=True)
+            # # Save the flux dict to a table
+            # self.log.info('Saving fluxes to HDF5')
+            # self.log.info(self.flux_dict)
+            # tup = ('create_flux_table', (self.flux_dict, path, 'fluxes'),
+            #        {'createparents': True,
+            #         'expectedrows': len(list(self.conf['Layers'].keys()))})
+            # self.q.put(tup, block=True)
         else:
             raise ValueError('Invalid file type specified in config')
 
@@ -383,9 +416,16 @@ class Simulator():
             self.log.info('Saving conf to HDF5 file')
             self.conf.write(os.path.join(self.dir, 'sim_conf.yml'))
             path = '/sim_{}'.format(self.id[0:10])
-            attr_name = 'conf'
-            tup = ('save_attr', (self.conf.dump(), path, attr_name), {})
-            self.q.put(tup, block=True)
+            try:
+                node = self.hdf5.get_node(path)
+            except tb.NoSuchNodeError:
+                self.log.warning('You need to create the group for this '
+                'simulation before you can set attributes on it. Creating now')
+                node = self.hdf5.create_group(path)
+            node._v_attrs['conf'] = self.conf.dump()
+            # attr_name = 'conf'
+            # tup = ('save_attr', (self.conf.dump(), path, attr_name), {})
+            # self.q.put(tup, block=True)
         else:
             raise ValueError('Invalid file type specified in config')
 
@@ -401,9 +441,16 @@ class Simulator():
         elif self.conf['General']['save_as'] == 'hdf5':
             self.log.info('Saving runtime to HDF5 file')
             path = '/sim_{}'.format(self.id[0:10])
-            attr_name = 'runtime'
-            tup = ('save_attr', (self.runtime, path, attr_name), {})
-            self.q.put(tup, block=True)
+            try:
+                node = self.hdf5.get_node(path)
+            except tb.NoSuchNodeError:
+                self.log.warning('You need to create the group for this '
+                'simulation before you can set attributes on it. Creating now')
+                node = self.hdf5.create_group(path)
+            node._v_attrs['runtime'] = self.runtime
+            # attr_name = 'runtime'
+            # tup = ('save_attr', (self.runtime, path, attr_name), {})
+            # self.q.put(tup, block=True)
         else:
             raise ValueError('Invalid file type specified in config')
 
@@ -489,11 +536,14 @@ class Simulator():
             self.update_thicknesses()
         self.get_field()
         self.get_fluxes()
+        self.open_hdf5()
         self.save_data()
         self.save_conf()
         end = time.time()
         self.runtime = end - start
         self.save_time()
+        self.hdf5.flush()
+        self.hdf5.close()
         self.log.info('Simulation {} completed in {:.2}'
                       ' seconds!'.format(self.id[0:10], self.runtime))
         return

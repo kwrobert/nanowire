@@ -95,10 +95,15 @@ class Processor(object):
                                    sim_obj.conf['General']['sim_dir'])
                     failed_sims.append(sim_obj)
         elif ftype == 'hdf5':
-            sim_groups = [group for group in self.hdf5.iter_nodes('/', classname="Group")
+            sim_groups = [group for group in self.hdf5.iter_nodes('/', classname="ExternalLink")
                           if 'sim_' in group._v_name]
-
             for group in sim_groups:
+                # print(group._v_attrs)
+                print(group)
+                print(group.target)
+                print(group()._v_name)
+                # print(group._v_path)
+                quit()
                 if 'conf' in group._v_attrs:
                     conf_str = group._v_attrs['conf']
                     sim_obj = Simulation(Config(raw_text=conf_str))
@@ -1445,7 +1450,7 @@ def main():
         plt.style.use('ggplot')
     # Collect the sims once up here and reuse them later
     proc = Processor(conf)
-    print('Collecting sims')
+    logger.info('Collecting sims')
     sims, failed_sims = proc.collect_sims()
     # First we need to group against if specified. Grouping against corresponds
     # to "leaves" in the tree

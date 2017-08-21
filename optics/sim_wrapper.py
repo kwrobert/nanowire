@@ -8,6 +8,7 @@ import os
 import copy
 #  import hashlib
 import multiprocessing as mp
+import subprocess
 import threading
 import Queue
 #import pandas
@@ -57,6 +58,8 @@ def run_sim(conf, q=None):
             pass
         log.info('Executing sim %s'%sim.id[0:10])
         sim.save_all()
+        path = os.path.join(os.path.basename(sim.dir), 'sim.hdf5')
+        sim.q.put(path, block=True)
         # sim.mode_solve()
     else:
         log.info('Computing a thickness sweep at %s' % sim.id[0:10])
@@ -87,6 +90,8 @@ def run_sim(conf, q=None):
         subpath = os.path.join(orig_id, sim.id[0:10])
         log.info('Computing initial thickness at %s', subpath)
         sim.save_all()
+        # path = os.path.join(sim.dir, 'data.hdf5')
+        # sim.q.put(path, block=True)
         # Now we can repeat the same exact process, but instead of rebuilding
         # the device we just update the thicknesses
         for combo in combos:
@@ -98,6 +103,8 @@ def run_sim(conf, q=None):
             log.info('Computing additional thickness at %s', subpath)
             os.makedirs(sim.dir)
             sim.save_all(update=True)
+            # path = os.path.join(sim.dir, 'data.hdf5')
+            # sim.q.put(path, block=True)
     end = time.time()
     runtime = end - start
     log.info('Simulation %s completed in %.2f seconds!', sim.id[0:10], runtime)
@@ -109,6 +116,49 @@ class LayerFlux(tb.IsDescription):
     layer = tb.StringCol(60, pos=0)
     forward = tb.ComplexCol(pos=1, itemsize=8)
     backward = tb.ComplexCol(pos=2, itemsize=8)
+
+
+class FileMerger(threading.Thread):
+
+    def __init__(self, q, write_dir='', group=None, target=None, name=None):
+        super(FileMerger, self).__init__(group=group, target=target, name=name)
+        self.q = q
+        outpath = os.path.join(write_dir, 'data.hdf5')
+        print('Main file is %s' % outpath)
+        self.hdf5 = tb.open_file(outpath, 'w')
+         
+    def run(self):
+        while True:
+            # print('QSIZE: %i'%self.q.qsize())
+            try:
+                path = self.q.get(False)
+            except Queue.Empty:
+                time.sleep(.1)
+                continue
+            else:
+                if path is None:
+                    self.hdf5.close()
+                    break
+                subfile = tb.open_file(path, 'r')
+                # assert subfile != self.hdf5
+                # # Path is the string to the file we want to merge
+                # # self.hdf5.copy_children(subfile.root, self.hdf5.root,
+                # #                         recursive=True, overwrite=True)
+                # # subfile.copy_children(subfile.root, self.hdf5.root,
+                # #                       recursive=True)
+                for group in subfile.iter_nodes('/', classname='Group'):
+                    # abssubdir, subfname = os.path.split(path)
+                    # subdir = os.path.basename(abssubdir)
+                    # where = '{}:{}'.format(os.path.join(subdir, subfname),
+                    #                        group._v_name)
+                    # print('Saving here', where)
+                    self.hdf5.create_external_link('/', group._v_name, group)
+                subfile.close()
+                #     print('Copying group ', group)
+                #     # self.hdf5.copy_node(group, newparent=self.hdf5.root,
+                #     #                   recursive=True)
+                #     group._f_copy(newparent=self.hdf5.root, recursive=True)
+        return
 
 
 class FileWriter(threading.Thread):
@@ -262,7 +312,8 @@ class SimulationManager:
         if self.write_queue is None:
             self.make_queue()
         basedir = self.gconf['General']['base_dir']
-        self.reader = FileWriter(self.write_queue, write_dir=basedir)
+        self.reader = FileMerger(self.write_queue, write_dir=basedir)
+        # self.reader = FileWriter(self.write_queue, write_dir=basedir)
         self.reader.start()
 
     def make_confs(self):
@@ -306,6 +357,9 @@ class SimulationManager:
             for conf in self.sim_confs:
                 run_sim(conf, q=self.write_queue)
             self.write_queue.put(None, block=True)
+            if self.reader is not None:
+                self.log.info('Joining FileWriter thread')
+                self.reader.join()
         elif self.gconf['General']['execution'] == 'parallel':
             if self.gconf['General']['save_as'] == 'hdf5':
                 self.make_listener()

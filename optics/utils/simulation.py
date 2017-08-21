@@ -156,7 +156,9 @@ class HDF5DataManager(DataManager):
 
         nodepath = os.path.join(self.gpath, key)
         try:
-            node = self._dfile.get_node(nodepath)
+            # Because everything here is an external link we need to
+            # "dereference", i.e just call the external link object
+            node = self._dfile.get_node(nodepath)()
         except tb.NoSuchNodeError:
             # Maybe we just haven't computed transmission data yet
             if key == 'transmission_data':

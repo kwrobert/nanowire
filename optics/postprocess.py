@@ -8,6 +8,7 @@ import multiprocessing.dummy as mpd
 from utils.config import Config
 from utils.simulation import Simulation, SimulationGroup
 from utils.utils import configure_logger, cmp_dicts
+from itertools import repeat
 
 # Configure module level logger if not running as main process
 if not __name__ == '__main__':
@@ -23,6 +24,68 @@ def counted(fn):
     wrapper.__name__ = fn.__name__
     return wrapper
 
+def _crunch_local(sim, gconf):
+    sim = Simulation(Config(sim))
+    _process(sim, "Cruncher", gconf)
+    sim.write_data()
+    sim.clear_data()
+
+def _plot_local(sim, gconf):
+    sim = Simulation(Config(sim))
+    _process(sim, "Plotter", gconf)
+    sim.clear_data()
+
+def _crunch_global(sim_group, gconf):
+    sims = [Simulation(Config(path)) for path in sim_group]
+    sim_group = SimulationGroup(sims)
+    _process(sim_group, "Global_Cruncher", gconf)
+    for sim in sim_group.sims:
+        sim.clear_data()
+
+def _plot_global(sim_group, gconf):
+    sims = [Simulation(Config(path)) for path in sim_group]
+    sim_group = SimulationGroup(sims)
+    _process(sim_group, "Global_Plotter", gconf)
+    for sim in sim_group.sims:
+        sim.clear_data()
+
+def _call_func(quantity, obj, args):
+    """
+    Calls an instance method of an object with args
+    """
+
+    try:
+        result = getattr(obj, quantity)(*args)
+    except KeyError:
+        print("Unable to call the following function: %s", quantity)
+        raise
+    return result
+
+def _process(obj, process, gconf):
+    """
+    Calls a process on an object. The object could be a Simulation object,
+    or a SimulationGroup object. It just loops through the functions
+    defined in the process subsection of the Postprocessing section in the
+    config file, and uses call_func to call the object's method with the
+    names defined in the config.
+    """
+
+    to_compute = {quant: data for quant, data in
+                  gconf['Postprocessing'][process].items() if
+                  data['compute']}
+    for quant, data in to_compute.items():
+        argsets = data['args']
+        if argsets and isinstance(argsets[0], list):
+            for argset in argsets:
+                if argset:
+                    _call_func(quant, obj, argset)
+                else:
+                    _call_func(quant, obj, [])
+        else:
+            if argsets:
+                _call_func(quant, obj, argsets)
+            else:
+                _call_func(quant, obj, [])
 
 class Processor(object):
     """
@@ -180,6 +243,9 @@ class Processor(object):
                         pass
             for sim in group:
                 sim.conf['General']['results_dir'] = path
+                outpath = os.path.join(sim.conf['General']['sim_dir'],
+                                       'sim_conf.yml')
+                sim.conf.write(outpath)
         # Sort the groups in increasing order of the provided sort key
         if sort_key:
             sim_groups.sort(key=lambda group: group[0].conf[key])
@@ -216,6 +282,19 @@ class Processor(object):
         groups = [SimulationGroup(sims) for sims in groups]
         self.sim_groups = groups
         return groups
+
+    def replace(self):
+        for i, sim in enumerate(self.sims):
+            path = os.path.join(sim.conf['General']['sim_dir'], 'sim_conf.yml')
+            self.sims[i] = path
+
+        for i, group in enumerate(self.sim_groups):
+            new_group = []
+            for sim in group.sims:
+                new_group.append(os.path.join(sim.conf['General']['sim_dir'],
+                                              'sim_conf.yml'))
+
+            self.sim_groups[i] = new_group
 
     def call_func(self, quantity, obj, args):
         """
@@ -260,65 +339,73 @@ class Processor(object):
                     self.call_func(quant, obj, [])
 
     def crunch_local(self, sim):
-        self._process(sim, "Cruncher")
-        sim.write_data()
-        sim.clear_data()
+        _crunch_local(sim, self.gconf)
 
     def crunch_local_all(self):
         self.log.info('Beginning data crunch for all sims ...')
         if not self.gconf['General']['post_parallel']:
             for sim in self.sims:
-                self.crunch_local(sim)
+                _crunch_local(sim, self.gconf)
         else:
-            num_procs = mp.cpu_count() - self.gconf['General']['reserved_cores']
+            num_procs = self.gconf['General']['num_cores']
             self.log.info('Crunching sims in parallel using %s cores ...', str(num_procs))
-            pool = mpd.Pool(processes=num_procs)
-            pool.map(self.crunch_local, self.sims)
-
-    def crunch_global(self, sim_group):
-        self._process(sim_group, "Global_Cruncher")
-
-    def crunch_global_all(self):
-        self.log.info('Beginning global data crunch for all sim groups ...')
-        if not self.gconf['General']['post_parallel']:
-            for group in self.sim_groups:
-                self.crunch_global(group)
-        else:
-            num_procs = mp.cpu_count() - self.gconf['General']['reserved_cores']
-            self.log.info('Crunching sim groups in parallel using %s cores ...', str(num_procs))
-            pool = mpd.Pool(processes=num_procs)
-            pool.map(self.crunch_global, self.sim_groups)
-
+            args_list = list(zip(self.sims, repeat(self.gconf)))
+            pool = mp.Pool(processes=num_procs)
+            pool.starmap(_crunch_local, args_list)
+            pool.close()
+            pool.join()
 
     def plot_local(self, sim):
-        self._process(sim, "Plotter")
-        sim.clear_data()
+        _plot_local(sim, self.gconf)
 
     def plot_local_all(self):
         self.log.info('Beginning local plotting for all sims ...')
         if not self.gconf['General']['post_parallel']:
             for sim in self.sims:
-                self.plot_local(sim)
+                _plot_local(sim, self.gconf)
         else:
-            num_procs = mp.cpu_count() - self.gconf['General']['reserved_cores']
+            num_procs = self.gconf['General']['num_cores']
             self.log.info('Plotting sims in parallel using %s cores ...', str(num_procs))
-            pool = mpd.Pool(processes=num_procs)
-            pool.map(self.plot_local, self.sims)
+            pool = mp.Pool(processes=num_procs)
+            args_list = list(zip(self.sims, repeat(self.gconf)))
+            pool.starmap(_plot_local, args_list)
+            pool.close()
+            pool.join()
+
+    def crunch_global(self, sim_group):
+        _process(sim_group, "Global_Cruncher", self.gconf)
+
+    def crunch_global_all(self):
+        self.log.info('Beginning global data crunch for all sim groups ...')
+        if not self.gconf['General']['post_parallel']:
+            for group in self.sim_groups:
+                _crunch_global(group, self.gconf)
+        else:
+            num_procs = self.gconf['General']['num_cores']
+            self.log.info('Crunching sim groups in parallel using %s cores ...', str(num_procs))
+            pool = mp.Pool(processes=num_procs)
+            args_list = list(zip(self.sim_groups, repeat(self.gconf)))
+            pool.starmap(_crunch_global, args_list)
+            pool.close()
+            pool.join()
 
     def plot_global(self, sim_group):
-        self._process(sim_group, "Global_Plotter")
-
+        _process(sim_group, "Global_Plotter", self.gconf)
 
     def plot_global_all(self):
         self.log.info('Beginning global data plot for all sim groups ...')
         if not self.gconf['General']['post_parallel']:
             for group in self.sim_groups:
-                self.plot_global(group)
+                _plot_global(group, self.gconf)
         else:
-            num_procs = mp.cpu_count() - self.gconf['General']['reserved_cores']
+            num_procs = self.gconf['General']['num_cores']
             self.log.info('Plotting sim groups in parallel using %s cores ...', str(num_procs))
-            pool = mpd.Pool(processes=num_procs)
-            pool.map(self.plot_global, self.sim_groups)
+            pool = mp.Pool(processes=num_procs)
+            args_list = list(zip(self.sim_groups, repeat(self.gconf)))
+            pool.starmap(_plot_global, args_list)
+            pool.close()
+            pool.join()
+
 
 def main():
     parser = ap.ArgumentParser(description="""A wrapper around s4_sim.py to automate parameter
@@ -386,6 +473,7 @@ def main():
             filt_dict[par] = vals
         logger.info('Here is the filter dictionary: %s', filt_dict)
         proc.filter_by_param(filt_dict)
+    proc.replace()
     # Now do all the work
     if not args.no_crunch:
         proc.crunch_local_all()

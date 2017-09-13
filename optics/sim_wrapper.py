@@ -59,7 +59,7 @@ def run_sim(conf, q=None):
         log.info('Executing sim %s'%sim.id[0:10])
         sim.save_all()
         path = os.path.join(os.path.basename(sim.dir), 'sim.hdf5')
-        sim.q.put(path, block=True)
+        # sim.q.put(path, block=True)
         # sim.mode_solve()
     else:
         log.info('Computing a thickness sweep at %s' % sim.id[0:10])
@@ -350,21 +350,21 @@ class SimulationManager:
             self.log.info('Executing sims serially')
             # Make the write queue, then instanstiate and run the thread that
             # pulls data from the queue and writes to the HDF5 file
-            if self.gconf['General']['save_as'] == 'hdf5':
-                self.make_listener()
-            else:
-                self.make_queue()
+            # if self.gconf['General']['save_as'] == 'hdf5':
+            #     self.make_listener()
+            # else:
+            #     self.make_queue()
             for conf in self.sim_confs:
                 run_sim(conf, q=self.write_queue)
-            self.write_queue.put(None, block=True)
-            if self.reader is not None:
-                self.log.info('Joining FileWriter thread')
-                self.reader.join()
+            # self.write_queue.put(None, block=True)
+            # if self.reader is not None:
+            #     self.log.info('Joining FileWriter thread')
+            #     self.reader.join()
         elif self.gconf['General']['execution'] == 'parallel':
-            if self.gconf['General']['save_as'] == 'hdf5':
-                self.make_listener()
-            else:
-                self.make_queue()
+            # if self.gconf['General']['save_as'] == 'hdf5':
+            #     self.make_listener()
+            # else:
+            #     self.make_queue()
             # All this crap is necessary for killing the parent and all child
             # processes with CTRL-C
             num_procs = self.gconf['General']['num_cores']
@@ -416,18 +416,18 @@ class SimulationManager:
                     del results[ind]
                     self.log.debug('Cleaned results: %s',
                                    str(list(results.keys())))
-                    self.log.debug('Number of items in queue: %i',
-                                   self.write_queue.qsize())
+                    # self.log.debug('Number of items in queue: %i',
+                    #                self.write_queue.qsize())
                 self.log.debug('Finished waiting')
                 pool.close()
             except KeyboardInterrupt:
                 pool.terminate()
             self.log.debug('Joining pool')
             pool.join()
-            self.write_queue.put(None, block=True)
-            if self.reader is not None:
-                self.log.info('Joining FileWriter thread')
-                self.reader.join()
+            # self.write_queue.put(None, block=True)
+            # if self.reader is not None:
+            #     self.log.info('Joining FileWriter thread')
+            #     self.reader.join()
             # for res in results:
             #     print(res)
             #     print(res.get())

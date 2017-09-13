@@ -59,7 +59,7 @@ string that was matched</p>
 
 <dl class="class">
 <dt id="utils.config.Config">
-<em class="property">class </em><code class="descclassname">utils.config.</code><code class="descname">Config</code><span class="sig-paren">(</span><em>path=None</em>, <em>data=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/config.html#Config"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.config.Config" title="Permalink to this definition">¶</a></dt>
+<em class="property">class </em><code class="descclassname">utils.config.</code><code class="descname">Config</code><span class="sig-paren">(</span><em>path=None</em>, <em>data=None</em>, <em>raw_text=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/config.html#Config"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.config.Config" title="Permalink to this definition">¶</a></dt>
 <dd><p>Bases: <code class="xref py py-class docutils literal"><span class="pre">_abcoll.MutableMapping</span></code></p>
 <p>An object to represent the simulation config that behaves like a dict.
 It can be initialized with a path, or an actual python data structure as
@@ -174,39 +174,71 @@ directory set up and parameter resolution</p>
 <div class="section" id="module-utils.simulation">
 <span id="utils-simulation-module"></span><h2>utils.simulation module<a class="headerlink" href="#module-utils.simulation" title="Permalink to this headline">¶</a></h2>
 <dl class="class">
+<dt id="utils.simulation.DataManager">
+<em class="property">class </em><code class="descclassname">utils.simulation.</code><code class="descname">DataManager</code><span class="sig-paren">(</span><em>conf</em>, <em>log</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#DataManager"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.DataManager" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal"><span class="pre">_abcoll.MutableMapping</span></code></p>
+<p>The base class for all <a href="#id1"><span class="problematic" id="id2">*</span></a>DataManager objects. This purpose of this object is
+to manage retrieving data from some on-disk format and storing it in a
+dictionary for later retrieval (the _data dict). This object behaves like a
+dict, and overrides all the key dictionary special methods.</p>
+<p>Lazy-loading logic is implemented. When initialized, this object should
+populate the keys of _data with all data items available on disk without
+loading them, instead storing None as the value. An item is only actually
+retrieved from the on-disk format when it is requested.</p>
+<p>Lazy writing is implemented as well. The value corresponding to a given key
+is updated if and only if the attempted assignment value differs from the
+existing value. If so, the _updated dict stores True to indicate that data
+value has been updated. Upon writing, only update values are written to
+disk. DISCLAIMER: This doesn’t actually work for the NPZ backend because
+IDK how to modify individual arrays within the archive.</p>
+<p>We don’t use the object dict (i.e __dict__) to store the simulation
+data because I dont want to worry about having keys for certain pieces of
+data conflict with some attributes I might want to set on this object. It’s
+slightly less memory efficient but not in a significant way.</p>
+</dd></dl>
+
+<dl class="class">
+<dt id="utils.simulation.HDF5DataManager">
+<em class="property">class </em><code class="descclassname">utils.simulation.</code><code class="descname">HDF5DataManager</code><span class="sig-paren">(</span><em>conf</em>, <em>log</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#HDF5DataManager"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.HDF5DataManager" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#utils.simulation.DataManager" title="utils.simulation.DataManager"><code class="xref py py-class docutils literal"><span class="pre">utils.simulation.DataManager</span></code></a></p>
+<p>Data manager class for the HDF5 storage backend</p>
+<dl class="method">
+<dt id="utils.simulation.HDF5DataManager.write_data">
+<code class="descname">write_data</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#HDF5DataManager.write_data"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.HDF5DataManager.write_data" title="Permalink to this definition">¶</a></dt>
+<dd><p>Writes all necessary data out to the HDF5 file</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="class">
+<dt id="utils.simulation.NPZDataManager">
+<em class="property">class </em><code class="descclassname">utils.simulation.</code><code class="descname">NPZDataManager</code><span class="sig-paren">(</span><em>conf</em>, <em>log</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#NPZDataManager"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.NPZDataManager" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#utils.simulation.DataManager" title="utils.simulation.DataManager"><code class="xref py py-class docutils literal"><span class="pre">utils.simulation.DataManager</span></code></a></p>
+<dl class="method">
+<dt id="utils.simulation.NPZDataManager.write_data">
+<code class="descname">write_data</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#NPZDataManager.write_data"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.NPZDataManager.write_data" title="Permalink to this definition">¶</a></dt>
+<dd><p>Writes all the data in the _data dict to disk. Unfortunately numpy npz
+archives don’t support setting individual items in the NPZArchive
+object (i.e _dfile) and only writing the changes, so if any data key
+has been updated we need to write the entire dict for now</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="class">
 <dt id="utils.simulation.Simulation">
 <em class="property">class </em><code class="descclassname">utils.simulation.</code><code class="descname">Simulation</code><span class="sig-paren">(</span><em>conf</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation" title="Permalink to this definition">¶</a></dt>
-<dd><p>Bases: <code class="xref py py-class docutils literal"><span class="pre">object</span></code></p>
-<p>An object that represents a simulation. It contains the data for the
-sim, the data file headers, and its configuration object as attributes.
-This object contains all the information about a simulation, but DOES NOT
-perform any actions on that data. That job is relegated to the various
-processor objects</p>
-<dl class="method">
-<dt id="utils.simulation.Simulation.load_npz">
-<code class="descname">load_npz</code><span class="sig-paren">(</span><em>path</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.load_npz"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.load_npz" title="Permalink to this definition">¶</a></dt>
-<dd><p>Load all field data for this simulation from an npz file</p>
-</dd></dl>
-
-<dl class="method">
-<dt id="utils.simulation.Simulation.get_data">
-<code class="descname">get_data</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.get_data"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.get_data" title="Permalink to this definition">¶</a></dt>
-<dd><p>Loads all the data contained in the npz file into a self.data
-dictionary attribute</p>
-</dd></dl>
-
-<dl class="method">
-<dt id="utils.simulation.Simulation.get_avgs">
-<code class="descname">get_avgs</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.get_avgs"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.get_avgs" title="Permalink to this definition">¶</a></dt>
-<dd><p>Load all averages</p>
-</dd></dl>
-
+<dd><p>An object that represents a simulation. It stores a DataManager object for
+managing the reading and writing of all data as an attribute. It also
+stores a Config object, which is a dict-like object representing the
+configuration for the simulation, as an attribute. Many of the methods are
+for performing calculations on the data.</p>
 <dl class="method">
 <dt id="utils.simulation.Simulation.write_data">
 <code class="descname">write_data</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.write_data"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.write_data" title="Permalink to this definition">¶</a></dt>
-<dd><p>Writes the data. All writes have been wrapped with an atomic context
-manager than ensures all writes are atomic and do not corrupt data
-files if they are interrupted for any reason</p>
+<dd><p>Writes the data. This is a simple wrapper around the write_data()
+method of the DataManager object, with some code to compute the time it
+took to perform the write operation</p>
 </dd></dl>
 
 <dl class="method">
@@ -238,8 +270,316 @@ dict</td>
 <dl class="method">
 <dt id="utils.simulation.Simulation.extend_data">
 <code class="descname">extend_data</code><span class="sig-paren">(</span><em>quantity</em>, <em>new_data</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.extend_data"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.extend_data" title="Permalink to this definition">¶</a></dt>
-<dd><p>Adds a new column of data to the field arrays, or updates it if it
-already exists</p>
+<dd><p>Adds a new key, value pair to the DataManager object</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.get_line">
+<code class="descname">get_line</code><span class="sig-paren">(</span><em>quantity</em>, <em>line_dir</em>, <em>c1</em>, <em>c2</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.get_line"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.get_line" title="Permalink to this definition">¶</a></dt>
+<dd><p>Gets data along a line through the 3D data array for the given quantity
+along a given direction</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>line_dir</strong> (<em>str</em>) – Any of ‘x’, ‘y’, or ‘z’. Determines the direction</td>
+</tr>
+</tbody>
+</table>
+<p>along which the line cut is taken, the other two coordinates remain
+fixed and are specified by c1 and c2.
+:param int c1: The integer index for the first fixed coordinate.
+Indexes are in x,y, z order so if line_dir=’z’ then c1 corresponds to x
+:param int c2: The integer index for the second coordinate.
+:param str quantity: The quantity whose data array you wish to take a
+line cut through</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.get_plane">
+<code class="descname">get_plane</code><span class="sig-paren">(</span><em>quantity</em>, <em>plane</em>, <em>pval</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.get_plane"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.get_plane" title="Permalink to this definition">¶</a></dt>
+<dd><p>Gets data along a 2D plane/slice through the 3D data array for a given
+quantity</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>plane</strong> (<em>str</em>) – Any of ‘xy’, ‘yz’, or ‘xz’. Determines the plane</td>
+</tr>
+</tbody>
+</table>
+<p>along which the slice is taken
+:param int pval: The index along the final unspecified direction. If
+plane=’xy’ then index would index along the z direction.
+:param str quantity: The quantity whose data array you wish to take a
+line cut through</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.normE">
+<code class="descname">normE</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.normE"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.normE" title="Permalink to this definition">¶</a></dt>
+<dd><p>Calculates the norm of E. Adds it to the data dict for the simulation
+and also returns a 3D array
+:return: A 3D numpy array containing normE</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.normEsquared">
+<code class="descname">normEsquared</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.normEsquared"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.normEsquared" title="Permalink to this definition">¶</a></dt>
+<dd><p>Calculates and returns normE squared. Adds it to the data dict for
+the simulation and also returns a 3D array
+:return: A 3D numpy array containing normE squared</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.normH">
+<code class="descname">normH</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.normH"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.normH" title="Permalink to this definition">¶</a></dt>
+<dd><p>Calculate and returns the norm of H</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.normHsquared">
+<code class="descname">normHsquared</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.normHsquared"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.normHsquared" title="Permalink to this definition">¶</a></dt>
+<dd><p>Calculates and returns the norm of H squared</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.get_nk">
+<code class="descname">get_nk</code><span class="sig-paren">(</span><em>path</em>, <em>freq</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.get_nk"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.get_nk" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns n and k, the real and imaginary components of the index of refraction at a given
+frequency
+:param str path: A path to a text file containing the n and k data. The
+first column should be the frequency in Hertz, the second column the n
+values, and the third column the k values. Columns must be delimited
+by whitespace.
+:param float freq: The desired frequency in Hertz</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.genRate">
+<code class="descname">genRate</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.genRate"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.genRate" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes and returns the 3D matrix containing the generation rate.
+Returns in units of cm^-3</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.angularAvg">
+<code class="descname">angularAvg</code><span class="sig-paren">(</span><em>quantity</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.angularAvg"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.angularAvg" title="Permalink to this definition">¶</a></dt>
+<dd><p>Perform an angular average of some quantity for either the E or H field</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.transmissionData">
+<code class="descname">transmissionData</code><span class="sig-paren">(</span><em>port=’Substrate’</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.transmissionData"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.transmissionData" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes reflection, transmission, and absorbance</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>port</strong> (<em>str</em>) – Name of the location at which you would like to place the
+transmission port (i.e where you would like to compute
+transmission). This must correspond to one of the keys placed in
+the fluxes dict located at self.data[‘fluxes’]</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.integrated_absorbtion">
+<code class="descname">integrated_absorbtion</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.integrated_absorbtion"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.integrated_absorbtion" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the absorption of a layer by using the volume integral of
+the product of the imaginary part of the relative permittivity and the
+norm squared of the E field</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.draw_geometry_2d">
+<code class="descname">draw_geometry_2d</code><span class="sig-paren">(</span><em>plane</em>, <em>pval</em>, <em>ax_hand</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.draw_geometry_2d"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.draw_geometry_2d" title="Permalink to this definition">¶</a></dt>
+<dd><p>This function draws the layer boundaries and in-plane geometry on 2D
+heatmaps</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.heatmap2d">
+<code class="descname">heatmap2d</code><span class="sig-paren">(</span><em>x</em>, <em>y</em>, <em>cs</em>, <em>labels</em>, <em>ptype</em>, <em>pval</em>, <em>save_path=None</em>, <em>show=False</em>, <em>draw=False</em>, <em>fixed=None</em>, <em>colorsMap=’jet’</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.heatmap2d"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.heatmap2d" title="Permalink to this definition">¶</a></dt>
+<dd><p>A general utility method for plotting a 2D heat map</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.plane_2d">
+<code class="descname">plane_2d</code><span class="sig-paren">(</span><em>quantity</em>, <em>plane</em>, <em>pval</em>, <em>draw=False</em>, <em>fixed=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.plane_2d"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.plane_2d" title="Permalink to this definition">¶</a></dt>
+<dd><p>Plots a heatmap of a fixed 2D plane</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.scatter3d">
+<code class="descname">scatter3d</code><span class="sig-paren">(</span><em>x</em>, <em>y</em>, <em>z</em>, <em>cs</em>, <em>labels</em>, <em>ptype</em>, <em>colorsMap=’jet’</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.scatter3d"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.scatter3d" title="Permalink to this definition">¶</a></dt>
+<dd><p>A general utility method for scatter plots in 3D</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.full_3d">
+<code class="descname">full_3d</code><span class="sig-paren">(</span><em>quantity</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.full_3d"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.full_3d" title="Permalink to this definition">¶</a></dt>
+<dd><p>Generates a full 3D plot of a specified scalar quantity</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.planes_3d">
+<code class="descname">planes_3d</code><span class="sig-paren">(</span><em>quantity</em>, <em>xplane</em>, <em>yplane</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.planes_3d"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.planes_3d" title="Permalink to this definition">¶</a></dt>
+<dd><p>Plots some scalar quantity in 3D but only along specified x-z and y-z planes</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.line_plot">
+<code class="descname">line_plot</code><span class="sig-paren">(</span><em>x</em>, <em>y</em>, <em>ptype</em>, <em>labels</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.line_plot"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.line_plot" title="Permalink to this definition">¶</a></dt>
+<dd><p>Make a simple line plot</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.Simulation.fixed_line">
+<code class="descname">fixed_line</code><span class="sig-paren">(</span><em>quantity</em>, <em>direction</em>, <em>coord1</em>, <em>coord2</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#Simulation.fixed_line"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.Simulation.fixed_line" title="Permalink to this definition">¶</a></dt>
+<dd><p>Plot a scalar quantity on a line along a the z direction at some pair of
+coordinates in the plane perpendicular to that direction</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="class">
+<dt id="utils.simulation.SimulationGroup">
+<em class="property">class </em><code class="descclassname">utils.simulation.</code><code class="descname">SimulationGroup</code><span class="sig-paren">(</span><em>sims</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#SimulationGroup"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.SimulationGroup" title="Permalink to this definition">¶</a></dt>
+<dd><p>A group of simulations. Takes a list of Simulation objects as an argument.
+This class is not responsible for grouping Simulation objects by some
+criteria, it just expects a list of already grouped Simulation objects.</p>
+<p>Provides methods for calculating things on a group of simulations. The
+results of these methods might not be sensible for some groupings. For
+example, calculating the convergence of a group that is group against
+frequency doesn’t make any sense. Similiarly, calculating Jsc of a group
+that is grouped against number of basis terms also doesn’t make sense.</p>
+<dl class="method">
+<dt id="utils.simulation.SimulationGroup.get_plane">
+<code class="descname">get_plane</code><span class="sig-paren">(</span><em>scalar</em>, <em>plane</em>, <em>pval</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#SimulationGroup.get_plane"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.SimulationGroup.get_plane" title="Permalink to this definition">¶</a></dt>
+<dd><p>Gets data along a 2D plane/slice through the 3D data array for a given
+quantity</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>plane</strong> (<em>str</em>) – Any of ‘xy’, ‘yz’, or ‘xz’. Determines the plane</td>
+</tr>
+</tbody>
+</table>
+<p>along which the slice is taken
+:param int pval: The index along the final unspecified direction. If
+plane=’xy’ then index would index along the z direction.
+:param str quantity: The quantity whose data array you wish to take a
+line cut through</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.SimulationGroup.diff_sq">
+<code class="descname">diff_sq</code><span class="sig-paren">(</span><em>x</em>, <em>y</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#SimulationGroup.diff_sq"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.SimulationGroup.diff_sq" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the magnitude of the difference vector squared between two vector fields at each
+point in space</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.SimulationGroup.get_slice">
+<code class="descname">get_slice</code><span class="sig-paren">(</span><em>sim</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#SimulationGroup.get_slice"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.SimulationGroup.get_slice" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns indices for data that strip out air and substrate regions</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.SimulationGroup.get_comp_vec">
+<code class="descname">get_comp_vec</code><span class="sig-paren">(</span><em>sim</em>, <em>field</em>, <em>start</em>, <em>end</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#SimulationGroup.get_comp_vec"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.SimulationGroup.get_comp_vec" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the comparison vector</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.SimulationGroup.local_error">
+<code class="descname">local_error</code><span class="sig-paren">(</span><em>field</em>, <em>exclude=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#SimulationGroup.local_error"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.SimulationGroup.local_error" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the average of the local error between the vector fields of two simulations at
+each point in space</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.SimulationGroup.global_error">
+<code class="descname">global_error</code><span class="sig-paren">(</span><em>field</em>, <em>exclude=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#SimulationGroup.global_error"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.SimulationGroup.global_error" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the global error between the vector fields of two simulations. This is the sum
+of the magnitude squared of the difference vectors divided by the sum of the magnitude
+squared of the comparison efield vector over the desired section of the simulation cell</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.SimulationGroup.adjacent_error">
+<code class="descname">adjacent_error</code><span class="sig-paren">(</span><em>field</em>, <em>exclude=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#SimulationGroup.adjacent_error"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.SimulationGroup.adjacent_error" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the global error between the vector fields of two simulations. This is the sum
+of the magnitude squared of the difference vectors divided by the sum of the magnitude
+squared of the comparison efield vector over the desired section of the simulation cell.
+This computes error between adjacent sims in a sweep through basis terms.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.SimulationGroup.scalar_reduce">
+<code class="descname">scalar_reduce</code><span class="sig-paren">(</span><em>quantity</em>, <em>avg=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#SimulationGroup.scalar_reduce"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.SimulationGroup.scalar_reduce" title="Permalink to this definition">¶</a></dt>
+<dd><p>Combine a scalar quantity across all simulations in each group. If
+avg=False then a direct sum is computed, otherwise an average is
+computed</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.SimulationGroup.fractional_absorbtion">
+<code class="descname">fractional_absorbtion</code><span class="sig-paren">(</span><em>port=’Substrate’</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#SimulationGroup.fractional_absorbtion"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.SimulationGroup.fractional_absorbtion" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes the fraction of the incident spectrum that is absorbed by
+the device. This is a unitless number, and its interpretation somewhat
+depends on the units you express the incident spectrum in. If you
+expressed your incident spectrum in photon number, this can be
+interpreted as the fraction of incident photons that were absorbed. If
+you expressed your incident spectrum in terms of power per unit area,
+then this can be interpreted as the fraction of incident power per unit
+area that gets absorbed. In summary, its the fraction of whatever you
+put in that is being absorbed by the device.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.SimulationGroup.Jsc">
+<code class="descname">Jsc</code><span class="sig-paren">(</span><em>port=’Substrate’</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#SimulationGroup.Jsc"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.SimulationGroup.Jsc" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes photocurrent density. This is just the integrated
+absorption scaled by a unitful factor. Assuming perfect carrier
+collection, meaning every incident photon gets converted to 1 collected
+electron, this factor is q/(hbar*c) which converts to a current per
+unit area</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.SimulationGroup.Jsc_integrated">
+<code class="descname">Jsc_integrated</code><span class="sig-paren">(</span><em>port=’Substrate’</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#SimulationGroup.Jsc_integrated"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.SimulationGroup.Jsc_integrated" title="Permalink to this definition">¶</a></dt>
+<dd><p>Compute te photocurrent density by performing a volume integral of the
+generation rate</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.SimulationGroup.weighted_transmissionData">
+<code class="descname">weighted_transmissionData</code><span class="sig-paren">(</span><em>port=’Substrate’</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#SimulationGroup.weighted_transmissionData"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.SimulationGroup.weighted_transmissionData" title="Permalink to this definition">¶</a></dt>
+<dd><p>Computes spectrally weighted absorption,transmission, and reflection</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.SimulationGroup.convergence">
+<code class="descname">convergence</code><span class="sig-paren">(</span><em>quantity</em>, <em>err_type=’global’</em>, <em>scale=’linear’</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#SimulationGroup.convergence"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.SimulationGroup.convergence" title="Permalink to this definition">¶</a></dt>
+<dd><p>Plots the convergence of a field across all available simulations</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.SimulationGroup.plot_scalar_reduce">
+<code class="descname">plot_scalar_reduce</code><span class="sig-paren">(</span><em>quantity</em>, <em>plane</em>, <em>pval</em>, <em>draw=False</em>, <em>fixed=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#SimulationGroup.plot_scalar_reduce"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.SimulationGroup.plot_scalar_reduce" title="Permalink to this definition">¶</a></dt>
+<dd><p>Plot the result of a particular scalar reduction for each group</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulation.SimulationGroup.transmission_data">
+<code class="descname">transmission_data</code><span class="sig-paren">(</span><em>absorbance</em>, <em>reflectance</em>, <em>transmission</em>, <em>port=’Substrate’</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulation.html#SimulationGroup.transmission_data"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulation.SimulationGroup.transmission_data" title="Permalink to this definition">¶</a></dt>
+<dd><p>Plot transmissions, absorption, and reflectance assuming leaves are frequency</p>
 </dd></dl>
 
 </dd></dl>
@@ -249,8 +589,13 @@ already exists</p>
 <span id="utils-simulator-module"></span><h2>utils.simulator module<a class="headerlink" href="#module-utils.simulator" title="Permalink to this headline">¶</a></h2>
 <dl class="class">
 <dt id="utils.simulator.Simulator">
-<em class="property">class </em><code class="descclassname">utils.simulator.</code><code class="descname">Simulator</code><span class="sig-paren">(</span><em>conf</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator" title="Permalink to this definition">¶</a></dt>
+<em class="property">class </em><code class="descclassname">utils.simulator.</code><code class="descname">Simulator</code><span class="sig-paren">(</span><em>conf</em>, <em>q=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator" title="Permalink to this definition">¶</a></dt>
 <dd><dl class="method">
+<dt id="utils.simulator.Simulator.open_hdf5">
+<code class="descname">open_hdf5</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.open_hdf5"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.open_hdf5" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
 <dt id="utils.simulator.Simulator.clean_sim">
 <code class="descname">clean_sim</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.clean_sim"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.clean_sim" title="Permalink to this definition">¶</a></dt>
 <dd></dd></dl>
@@ -314,15 +659,7 @@ fundamental efficiency of the RCWA solver</p>
 <dl class="method">
 <dt id="utils.simulator.Simulator.get_field">
 <code class="descname">get_field</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.get_field"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.get_field" title="Permalink to this definition">¶</a></dt>
-<dd><p>Constructs and returns a 2D numpy array of the vector electric
-field. The field components are complex numbers</p>
-</dd></dl>
-
-<dl class="method">
-<dt id="utils.simulator.Simulator.save_field">
-<code class="descname">save_field</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.save_field"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.save_field" title="Permalink to this definition">¶</a></dt>
-<dd><p>Saves the fields throughout the device to an npz file</p>
-</dd></dl>
+<dd></dd></dl>
 
 <dl class="method">
 <dt id="utils.simulator.Simulator.get_fluxes">
@@ -336,9 +673,22 @@ component second. The components are complex numbers</p>
 </dd></dl>
 
 <dl class="method">
-<dt id="utils.simulator.Simulator.save_fluxes">
-<code class="descname">save_fluxes</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.save_fluxes"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.save_fluxes" title="Permalink to this definition">¶</a></dt>
-<dd><p>Saves the fluxes at layer interfaces to a file</p>
+<dt id="utils.simulator.Simulator.save_data">
+<code class="descname">save_data</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.save_data"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.save_data" title="Permalink to this definition">¶</a></dt>
+<dd><p>Saves the self.data dictionary to an npz file. This dictionary
+contains all the fields and the fluxes dictionary</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulator.Simulator.save_conf">
+<code class="descname">save_conf</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.save_conf"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.save_conf" title="Permalink to this definition">¶</a></dt>
+<dd><p>Saves the simulation config object to a file</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="utils.simulator.Simulator.save_time">
+<code class="descname">save_time</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.save_time"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.save_time" title="Permalink to this definition">¶</a></dt>
+<dd><p>Saves the run time for the simulation</p>
 </dd></dl>
 
 <dl class="method">
@@ -365,8 +715,8 @@ currently can’t really make any sense of this output</p>
 </dd></dl>
 
 <dl class="method">
-<dt id="utils.simulator.Simulator.get_data">
-<code class="descname">get_data</code><span class="sig-paren">(</span><em>update=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.get_data"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.get_data" title="Permalink to this definition">¶</a></dt>
+<dt id="utils.simulator.Simulator.save_all">
+<code class="descname">save_all</code><span class="sig-paren">(</span><em>update=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/simulator.html#Simulator.save_all"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.simulator.Simulator.save_all" title="Permalink to this definition">¶</a></dt>
 <dd><p>Gets all the data for this similation by calling the relevant class
 methods. Basically just a convenient wrapper to execute all the
 functions defined above</p>
@@ -443,29 +793,35 @@ possible. The file will not be moved to destination in case of an exception.</p>
 <dt id="utils.utils.configure_logger">
 <code class="descclassname">utils.utils.</code><code class="descname">configure_logger</code><span class="sig-paren">(</span><em>level=’info’</em>, <em>name=None</em>, <em>console=False</em>, <em>logfile=None</em>, <em>propagate=True</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/utils.html#configure_logger"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.utils.configure_logger" title="Permalink to this definition">¶</a></dt>
 <dd><p>Creates a logger providing some arguments to make it more configurable.</p>
-<dl class="docutils">
-<dt>name <span class="classifier-delimiter">:</span> <span class="classifier">string</span></dt>
-<dd>Name of logger to be created. Defaults to the root logger</dd>
-<dt>level <span class="classifier-delimiter">:</span> <span class="classifier">string</span></dt>
-<dd>The log level of the logger, defaults to INFO. One of: [‘debug’, ‘info’,
-‘warning’, ‘error’, ‘critical’]</dd>
-<dt>console <span class="classifier-delimiter">:</span> <span class="classifier">bool</span></dt>
-<dd>Add a stream handler to send messages to the console. Generally
-only necessary for the root logger.</dd>
-<dt>logfile <span class="classifier-delimiter">:</span> <span class="classifier">string</span></dt>
-<dd>Path to a file. If specified, will create a simple file handler and send
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first last simple">
+<li><strong>name</strong> (<em>str</em>) – Name of logger to be created. Defaults to the root logger</li>
+<li><strong>level</strong> (<em>str</em>) – The log level of the logger, defaults to INFO. One of: [‘debug’, ‘info’,
+‘warning’, ‘error’, ‘critical’]</li>
+<li><strong>console</strong> (<em>bool</em>) – Add a stream handler to send messages to the console. Generally
+only necessary for the root logger.</li>
+<li><strong>logfile</strong> (<em>str</em>) – Path to a file. If specified, will create a simple file handler and send
 messages to the specified file. The parent dirs to the location will
-be created automatically if they don’t already exist.</dd>
-</dl>
+be created automatically if they don’t already exist.</li>
+</ul>
+</td>
+</tr>
+</tbody>
+</table>
 </dd></dl>
 
 <dl class="function">
 <dt id="utils.utils.make_hash">
 <code class="descclassname">utils.utils.</code><code class="descname">make_hash</code><span class="sig-paren">(</span><em>o</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/utils/utils.html#make_hash"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#utils.utils.make_hash" title="Permalink to this definition">¶</a></dt>
-<dd><p>Makes a hash from the dict representing the Simulation config. It is
-consistent across runs and handles arbitrary nesting. Right now it ignores
-any settings in the General section because those aren’t really important
-when it comes to differentiating simulations</p>
+<dd><p>A recursive function for hasing any python built-in data type. Probably
+won’t work on custom objects. It is consistent across runs and handles
+arbitrary nesting. Mainly intended for computing the hash of config
+dictionarys to establish a unique ID. Right now it ignores any settings in
+the General section because those aren’t really important when it comes to
+differentiating simulations</p>
 </dd></dl>
 
 <dl class="function">

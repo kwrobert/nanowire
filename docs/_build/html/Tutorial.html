@@ -415,9 +415,9 @@ frequency, or maybe incident angle). There are two ways to specify this:</p>
 </pre></div>
 </div>
 <p>This says start at START and sweep up to END (inclusive of END) in 20 equally
-equally spaced steps. The <cite>itertype: ‘numsteps’</cite> param tells the <cite>sim_wrapper.py</cite> script to
+spaced steps. The <code class="docutils literal"><span class="pre">itertype:</span> <span class="pre">'numsteps'</span></code> param tells the <code class="docutils literal"><span class="pre">sim_wrapper.py</span></code> script to
 interpret the ‘step’ parameter as the number of steps to take. This is the
-equivalent of numpy/matlab’s  <cite>linspace</cite></p>
+equivalent of numpy/matlab’s  <code class="docutils literal"><span class="pre">linspace</span></code></p>
 <p>The other way to specify a variable parameter is:</p>
 <div class="highlight-yaml"><div class="highlight"><pre><span></span><span class="l l-Scalar l-Scalar-Plain">frequency</span><span class="p p-Indicator">:</span>
     <span class="l l-Scalar l-Scalar-Plain">type</span><span class="p p-Indicator">:</span> <span class="s">&#39;variable&#39;</span>
@@ -428,7 +428,7 @@ equivalent of numpy/matlab’s  <cite>linspace</cite></p>
 </pre></div>
 </div>
 <p>This says sweep from START to END (inclusive) in steps of size 20.</p>
-<p>You can specify multiple variable parameters. The <cite>sim_wrapper</cite> script will
+<p>You can specify multiple variable parameters. The <code class="docutils literal"><span class="pre">sim_wrapper</span></code> script will
 automatically generate every possible unique parameter combination and run a
 simulation for each one it generates.</p>
 </div>
@@ -462,9 +462,9 @@ example:</p>
 <div class="highlight-yaml"><div class="highlight"><pre><span></span><span class="l l-Scalar l-Scalar-Plain">max_depth</span><span class="p p-Indicator">:</span> <span class="s">&#39;%(Layers.Air.params.thickness.value)s&#39;</span>
 </pre></div>
 </div>
-<p>The thing inside the <cite>()</cite> is a dot-separated path to some location in the
+<p>The thing inside the <code class="docutils literal"><span class="pre">()</span></code> is a dot-separated path to some location in the
 config file. In this case, the value of the thickness of the air layer. The
-<cite>%()s</cite> is what tells the <cite>Config</cite> object to run a substitution. Always enclose
+<code class="docutils literal"><span class="pre">%()s</span></code> is what tells the <code class="docutils literal"><span class="pre">Config</span></code> object to run a substitution. Always enclose
 you substitions in quotes or things will break.</p>
 </div>
 <div class="section" id="parameter-evaluation">
@@ -500,7 +500,18 @@ shell_radius = core_radius + 30 nm)</p>
 <h3>Environment Variables<a class="headerlink" href="#environment-variables" title="Permalink to this headline">¶</a></h3>
 <p>You can reference environment variables in the config using the familiar
 $VARIABLE bash syntax. This can be useful for specifying the location of your
-$HOME directory, or some other variables you may have set in your config file.</p>
+$HOME directory, or some other variables you may have set in your config
+file. For example, when referencing some input files you could do:</p>
+<div class="highlight-yaml"><div class="highlight"><pre><span></span><span class="l l-Scalar l-Scalar-Plain">Materials</span><span class="p p-Indicator">:</span>
+    <span class="l l-Scalar l-Scalar-Plain">ITO</span><span class="p p-Indicator">:</span> <span class="s">&#39;$HOME/software/nanowire/NK/008_ITO_nk_Hz.txt&#39;</span>
+    <span class="l l-Scalar l-Scalar-Plain">Cyclotene</span><span class="p p-Indicator">:</span> <span class="s">&#39;$HOME/software/nanowire/NK/007_Cyclotrene_nk_Hz.txt&#39;</span>
+    <span class="l l-Scalar l-Scalar-Plain">GaAs</span><span class="p p-Indicator">:</span> <span class="s">&#39;$HOME/software/nanowire/NK/006_GaAs_nk_Walker_modified_Hz.txt&#39;</span>
+    <span class="l l-Scalar l-Scalar-Plain">AlInP</span><span class="p p-Indicator">:</span> <span class="s">&#39;$HOME/software/nanowire/NK/009_AlInP_nk_Hz.txt&#39;</span>
+</pre></div>
+</div>
+<p>This is super handy when you work on multiple servers, perhaps with different
+home directories. You no longer have to change your config files when moving
+them across servers, you can just use the proper environment variables.</p>
 </div>
 <div class="section" id="postprocessing">
 <h3>Postprocessing<a class="headerlink" href="#postprocessing" title="Permalink to this headline">¶</a></h3>

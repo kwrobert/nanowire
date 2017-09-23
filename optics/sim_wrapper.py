@@ -69,13 +69,13 @@ def run_sim(conf, q=None):
         # Update base directory to new sub directory
         sim.conf['General']['base_dir'] = sim.dir
         # Set things up for the first combo
-        combo = combos.pop()
+        first_combo = combos.pop()
         # First update all the thicknesses in the config. We make a copy of the
         # list because it gets continually updated in the config object
         var_thickness = sim.conf.variable_thickness
-        for i, combo in enumerate(combo):
+        for i, param_val in enumerate(first_combo):
             keyseq = var_thickness[i]
-            sim.conf[keyseq] = {'type': 'fixed', 'value': float(combo)}
+            sim.conf[keyseq] = {'type': 'fixed', 'value': float(param_val)}
         # With all the params updated we can now run substutions and
         # evaluations in the config that make have referred to some thickness
         # data, then make the subdir from the sim id and get the data
@@ -95,9 +95,9 @@ def run_sim(conf, q=None):
         # Now we can repeat the same exact process, but instead of rebuilding
         # the device we just update the thicknesses
         for combo in combos:
-            for i, combo in enumerate(combo):
+            for i, param_val in enumerate(combo):
                 keyseq = var_thickness[i]
-                sim.conf[keyseq] = {'type': 'fixed', 'value': float(combo)}
+                sim.conf[keyseq] = {'type': 'fixed', 'value': float(param_val)}
             sim.update_id()
             subpath = os.path.join(orig_id, sim.id[0:10])
             log.info('Computing additional thickness at %s', subpath)

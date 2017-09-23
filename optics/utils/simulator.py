@@ -8,7 +8,6 @@ import scipy.integrate as intg
 import scipy.constants as constants
 import S4
 import argparse as ap
-#  import profilehooks as ph
 
 import tables as tb
 from itertools import chain, product

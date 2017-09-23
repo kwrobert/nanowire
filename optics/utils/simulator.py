@@ -363,7 +363,7 @@ class Simulator():
         elif self.conf['General']['save_as'] == 'hdf5':
             compression = self.conf['General']['compression']
             if compression:
-                filter_obj = tb.Filters(complevel=4, complib='blosc')
+                filter_obj = tb.Filters(complevel=8, complib='blosc')
             gpath = '/sim_'+self.id[0:10]
             for name, arr in self.data.iteritems():
                 self.log.debug("Saving array %s", name)

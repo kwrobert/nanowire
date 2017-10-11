@@ -33,7 +33,8 @@ class Simulator():
         sim_dir = os.path.join(self.conf['General']['base_dir'], self.id[0:10])
         self.conf['General']['sim_dir'] = sim_dir
         self.dir = sim_dir
-        self.s4 = S4.New(Lattice=((period, 0), (0, period)), NumBasis=numbasis)
+        self.s4 = S4.New(Lattice=((period, 0), (0, period)),
+                         NumBasis=int(round(numbasis)))
         self.data = {}
         self.flux_dict = {}
         self.hdf5 = None
@@ -121,31 +122,56 @@ class Simulator():
         inds = np.where((left < freq_vec) & (freq_vec < right))[0]
         # Check for edge cases
         if len(inds) == 0:
-            raise ValueError('Your bins are smaller than NRELs!')
-        if inds[0] == 0:
+            # It is unphysical to claim that an input wave of a single
+            # frequency can contain any power. If we're simulating at a single
+            # frequency, just assume the wave has the power contained within
+            # the NREL bin surrounding that frequency
+            self.log.warning('Your bins are smaller than NRELs! Using NREL'
+                             ' bin size')
+            closest_ind = np.argmin(np.abs(freq_vec - freq))
+            # Is the closest one to the left or the right?
+            if freq_vec[closest_ind] > freq:
+                other_ind = closest_ind - 1
+                left = freq_vec[other_ind]
+                left_power = p_vec[other_ind]
+                right = freq_vec[closest_ind]
+                right_power = p_vec[closest_ind]
+            else:
+                other_ind = closest_ind + 1
+                right = freq_vec[other_ind]
+                right_power = p_vec[other_ind]
+                left = freq_vec[closest_ind]
+                left_power = p_vec[closest_ind]
+        elif inds[0] == 0:
             raise ValueError('Your leftmost bin edge lies outside the'
                              ' range provided by NREL')
-        if inds[-1] == len(freq_vec):
+        elif inds[-1] == len(freq_vec):
             raise ValueError('Your rightmost bin edge lies outside the'
                              ' range provided by NREL')
-        # A simple linear interpolation given two pairs of data points, and the
-        # desired x point
-
-        def lin_interp(x1, x2, y1, y2, x):
-            return ((y2 - y1) / (x2 - x1)) * (x - x2) + y2
-        # If the left or right edge lies between NREL data points, we do a
-        # linear interpolation to get the irradiance values at the bin edges
-        left_power = lin_interp(freq_vec[inds[0] - 1], freq_vec[inds[0]],
-                                p_vec[inds[0] - 1], p_vec[inds[0]], left)
-        right_power = lin_interp(freq_vec[inds[-1]], freq_vec[inds[-1] + 1],
-                                 p_vec[inds[-1]], p_vec[inds[-1] + 1], right)
+        else:
+            # A simple linear interpolation given two pairs of data points, and the
+            # desired x point
+            def lin_interp(x1, x2, y1, y2, x):
+                return ((y2 - y1) / (x2 - x1)) * (x - x2) + y2
+            # If the left or right edge lies between NREL data points, we do a
+            # linear interpolation to get the irradiance values at the bin edges.
+            # If the left of right edge happens to be directly on an NREL bin edge
+            # (unlikely) the linear interpolation will just return the value at the
+            # NREL bin. Also the selection of inds above excluded the case of left
+            # or right being equal to an NREL bin, 
+            left_power = lin_interp(freq_vec[inds[0] - 1], freq_vec[inds[0]],
+                                    p_vec[inds[0] - 1], p_vec[inds[0]], left)
+            right_power = lin_interp(freq_vec[inds[-1]], freq_vec[inds[-1] + 1],
+                                     p_vec[inds[-1]], p_vec[inds[-1] + 1], right)
         # All the frequency values within the bin and including the bin edges
         freqs = [left]+list(freq_vec[inds])+[right]
         # All the power values
         power_values = [left_power]+list(p_vec[inds])+[right_power]
+        self.log.info(freqs)
+        self.log.info(power_values)
         # Just use a trapezoidal method to integrate the spectrum
         power = intg.trapz(power_values, x=freqs)
-        self.log.info('Incident Power: {}'.format(power))
+        self.log.info('Incident Power: %s', str(power))
         # We need to reduce total incident power depending on incident polar
         # angle
         # E = np.sqrt(constants.c*constants.mu_0*f_p(freq))*np.cos(polar_angle)
@@ -325,6 +351,33 @@ class Simulator():
             self.data['fluxes'] = self.flux_dict
         self.log.info('Finished computing fluxes!')
         return self.flux_dict
+
+    def get_dielectric_profile(self):
+        """
+        Gets the dielectric profile throughout the device. This is useful for
+        determining the resolution of the dielectric profile used by S4. It uses
+        the same number of sampling points as specified in the config file for
+        retrieiving field data.
+        """
+        period =  self.conf['Simulation']['params']['array_period']['value']
+        x_samp = self.conf['Simulation']['x_samples']
+        y_samp = self.conf['Simulation']['y_samples']
+        z_samp = self.conf['Simulation']['z_samples']
+        height = self.get_height()
+        x_vec = np.linspace(0, period, x_samp)
+        y_vec = np.linspace(0, period, y_samp)
+        z_vec = np.linspace(0, height, z_samp)
+        xv, yv, zv = np.meshgrid(x_vec, y_vec, z_vec, indexing='ij')
+        eps_mat = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
+        # eps_mat = np.zeros((z_samp, x_samp, y_samp))
+        for ix in range(x_samp):
+            for iy in range(y_samp):
+                for iz in range(z_samp):
+                    eps_val =  self.s4.GetEpsilon(xv[ix, iy, iz],
+                                                  yv[ix, iy, iz],
+                                                  zv[ix, iy, iz])
+                    eps_mat[iz, ix, iy] = eps_val
+        self.data.update({'dielectric_profile': eps_mat})
 
     # def get_integrals(self):
     #     self.log.info('Computing volume integrals')
@@ -536,6 +589,7 @@ class Simulator():
             self.update_thicknesses()
         self.get_field()
         self.get_fluxes()
+        self.get_dielectric_profile()
         self.open_hdf5()
         self.save_data()
         self.save_conf()

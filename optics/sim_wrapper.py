@@ -58,7 +58,7 @@ def run_sim(conf, q=None):
             pass
         log.info('Executing sim %s'%sim.id[0:10])
         sim.save_all()
-        path = os.path.join(os.path.basename(sim.dir), 'sim.hdf5')
+        # path = os.path.join(os.path.basename(sim.dir), 'sim.hdf5')
         # sim.q.put(path, block=True)
         # sim.mode_solve()
     else:
@@ -336,9 +336,13 @@ class SimulationManager:
                                                         'value': float(combo),
                                                         'bin_size': bin_size}
                 else:
-                    sim_conf[self.gconf.variable[i]] = {
-                        'type': 'fixed', 'value': float(combo)}
+                    sim_conf[self.gconf.variable[i]] = {'type': 'fixed',
+                                                        'value': float(combo)}
+                    sim_conf[('Simulation','params','frequency')].update({'bin_size':
+                                                                    0})
             self.sim_confs.append(sim_conf)
+        if not combos[0]:
+            sim_conf[('Simulation', 'params', 'frequency')].update({'bin_size': 0})
 
     def execute_jobs(self):
         """Given a list of configuration dictionaries, run them either serially or in
@@ -615,20 +619,17 @@ class SimulationManager:
         self.write_queue.put(None, block=True)
         return opt_val.x
 
-
     def run(self):
         """
         The main run methods that decides what kind of simulation to run based on the
         provided config objects
         """
 
-        basedir = self.gconf['General']['base_dir']
         if not self.gconf.optimized:
             # Get all the sims
             self.make_confs()
             self.log.info("Executing job campaign")
             self.execute_jobs()
-        # If we have variable params, do a parameter sweep
         elif self.gconf.optimized:
             self.run_optimization()
         else:

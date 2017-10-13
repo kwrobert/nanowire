@@ -116,7 +116,7 @@ class Simulator():
         bin_size = self.conf['Simulation']['params']['frequency']['bin_size']
         # Get NREL AM1.5 data
         freq_vec, p_vec = np.loadtxt(path, unpack=True, delimiter=',')
-        # Get all available power values within this bin
+        # Get all available intensity values within this bin
         left = freq - bin_size / 2.0
         right = freq + bin_size / 2.0
         inds = np.where((left < freq_vec) & (freq_vec < right))[0]
@@ -124,7 +124,7 @@ class Simulator():
         if len(inds) == 0:
             # It is unphysical to claim that an input wave of a single
             # frequency can contain any power. If we're simulating at a single
-            # frequency, just assume the wave has the power contained within
+            # frequency, just assume the wave has the intensity contained within
             # the NREL bin surrounding that frequency
             self.log.warning('Your bins are smaller than NRELs! Using NREL'
                              ' bin size')
@@ -133,15 +133,15 @@ class Simulator():
             if freq_vec[closest_ind] > freq:
                 other_ind = closest_ind - 1
                 left = freq_vec[other_ind]
-                left_power = p_vec[other_ind]
+                left_intensity = p_vec[other_ind]
                 right = freq_vec[closest_ind]
-                right_power = p_vec[closest_ind]
+                right_intensity = p_vec[closest_ind]
             else:
                 other_ind = closest_ind + 1
                 right = freq_vec[other_ind]
-                right_power = p_vec[other_ind]
+                right_intensity = p_vec[other_ind]
                 left = freq_vec[closest_ind]
-                left_power = p_vec[closest_ind]
+                left_intensity = p_vec[closest_ind]
         elif inds[0] == 0:
             raise ValueError('Your leftmost bin edge lies outside the'
                              ' range provided by NREL')
@@ -159,23 +159,23 @@ class Simulator():
             # (unlikely) the linear interpolation will just return the value at the
             # NREL bin. Also the selection of inds above excluded the case of left
             # or right being equal to an NREL bin, 
-            left_power = lin_interp(freq_vec[inds[0] - 1], freq_vec[inds[0]],
+            left_intensity = lin_interp(freq_vec[inds[0] - 1], freq_vec[inds[0]],
                                     p_vec[inds[0] - 1], p_vec[inds[0]], left)
-            right_power = lin_interp(freq_vec[inds[-1]], freq_vec[inds[-1] + 1],
+            right_intensity = lin_interp(freq_vec[inds[-1]], freq_vec[inds[-1] + 1],
                                      p_vec[inds[-1]], p_vec[inds[-1] + 1], right)
         # All the frequency values within the bin and including the bin edges
         freqs = [left]+list(freq_vec[inds])+[right]
-        # All the power values
-        power_values = [left_power]+list(p_vec[inds])+[right_power]
+        # All the intensity values
+        intensity_values = [left_intensity]+list(p_vec[inds])+[right_intensity]
         self.log.info(freqs)
-        self.log.info(power_values)
+        self.log.info(intensity_values)
         # Just use a trapezoidal method to integrate the spectrum
-        power = intg.trapz(power_values, x=freqs)
-        self.log.info('Incident Power: %s', str(power))
-        # We need to reduce total incident power depending on incident polar
-        # angle
+        intensity = intg.trapz(intensity_values, x=freqs)
+        self.log.info('Incident Intensity: %s', str(intensity))
+        # We need to reduce amplitude of the incident wave depending on 
+        #  incident polar angle
         # E = np.sqrt(constants.c*constants.mu_0*f_p(freq))*np.cos(polar_angle)
-        E = np.sqrt(constants.c * constants.mu_0 * power)
+        E = np.sqrt(constants.c * constants.mu_0 * intensity)
         return E
 
     def set_excitation(self):
@@ -359,6 +359,7 @@ class Simulator():
         the same number of sampling points as specified in the config file for
         retrieiving field data.
         """
+        self.log.info('Computing dielectric profile ...')
         period =  self.conf['Simulation']['params']['array_period']['value']
         x_samp = self.conf['Simulation']['x_samples']
         y_samp = self.conf['Simulation']['y_samples']
@@ -378,6 +379,7 @@ class Simulator():
                                                   zv[ix, iy, iz])
                     eps_mat[iz, ix, iy] = eps_val
         self.data.update({'dielectric_profile': eps_mat})
+        self.log.info('Finished computing dielectric profile!')
 
     # def get_integrals(self):
     #     self.log.info('Computing volume integrals')
@@ -580,6 +582,9 @@ class Simulator():
         """Gets all the data for this similation by calling the relevant class
         methods. Basically just a convenient wrapper to execute all the
         functions defined above"""
+        # TODO: Split this into a get_all and save_all function. Will give more
+        # granular sense of timing and also all getting data without having to
+        # save
         start = time.time()
         if not update:
             self.configure()
@@ -589,7 +594,8 @@ class Simulator():
             self.update_thicknesses()
         self.get_field()
         self.get_fluxes()
-        self.get_dielectric_profile()
+        if self.conf['General']['dielectric_profile']:
+            self.get_dielectric_profile()
         self.open_hdf5()
         self.save_data()
         self.save_conf()

@@ -39,6 +39,7 @@ class Simulator():
         self.flux_dict = {}
         self.hdf5 = None
         self.runtime = 0
+        self.period = period
 
     def __del__(self):
         """
@@ -108,6 +109,23 @@ class Simulator():
         epsilon = complex(epsilon_real, epsilon_imag)
         return epsilon
 
+    def _get_incident_amplitude_anna(self):
+        freq = self.conf['Simulation']['params']['frequency']['value']
+        path = '/home/krobert/software/nanowire/Input_sun_power.txt'
+        freq_vec, p_vec = np.loadtxt(path, unpack=True)
+        p_of_f = spi.interp1d(freq_vec, p_vec)
+        intensity = p_of_f(freq)
+        self.log.info('Incident Intensity: %s', str(intensity))
+        area = self.period*self.period
+        power = intensity*area
+        self.log.info('Incident Power: %s', str(power))
+        # We need to reduce amplitude of the incident wave depending on 
+        #  incident polar angle
+        # E = np.sqrt(constants.c*constants.mu_0*f_p(freq))*np.cos(polar_angle)
+        E = np.sqrt(constants.c * constants.mu_0 * intensity)
+        self.log.info('Incident Amplitude: %s', str(E))
+        return E
+
     def _get_incident_amplitude(self):
         """Returns the incident amplitude of a wave depending on frequency"""
         freq = self.conf['Simulation']['params']['frequency']['value']
@@ -172,10 +190,14 @@ class Simulator():
         # Just use a trapezoidal method to integrate the spectrum
         intensity = intg.trapz(intensity_values, x=freqs)
         self.log.info('Incident Intensity: %s', str(intensity))
+        area = self.period*self.period
+        power = intensity*area
+        self.log.info('Incident Power: %s', str(power))
         # We need to reduce amplitude of the incident wave depending on 
         #  incident polar angle
         # E = np.sqrt(constants.c*constants.mu_0*f_p(freq))*np.cos(polar_angle)
         E = np.sqrt(constants.c * constants.mu_0 * intensity)
+        self.log.info('Incident Amplitude: %s', str(E))
         return E
 
     def set_excitation(self):
@@ -186,6 +208,7 @@ class Simulator():
         f_conv = f_phys / c_conv
         self.s4.SetFrequency(f_conv)
         E_mag = self._get_incident_amplitude()
+        # E_mag = self._get_incident_amplitude_anna()
         polar = self.conf['Simulation']['params']['polar_angle']['value']
         azimuth = self.conf['Simulation']['params']['azimuthal_angle']['value']
         # To define circularly polarized light, basically just stick a j

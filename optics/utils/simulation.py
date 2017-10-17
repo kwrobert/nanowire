@@ -1,9 +1,9 @@
 import os
 import matplotlib
-try:
-    os.environ['DISPLAY']
-except KeyError:
-    matplotlib.use('Agg')
+# try:
+#     os.environ['DISPLAY']
+# except KeyError:
+#     matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 # plt.style.use(['ggplot', 'paper'])
 from mpl_toolkits.mplot3d import Axes3D
@@ -466,8 +466,8 @@ class Simulation:
         # Get the magnitude of E and add it to our data
         E_mag = np.zeros_like(self.data['Ex'], dtype=np.float64)
         for comp in ('Ex', 'Ey', 'Ez'):
-            E_mag += np.absolute(self.data[comp])
-        self.extend_data('normE', E_mag)
+            E_mag += np.absolute(self.data[comp])**2
+        self.extend_data('normE', np.sqrt(E_mag))
         return E_mag
 
     def normEsquared(self):

@@ -1,9 +1,9 @@
 import os
 import matplotlib
-try:
-    os.environ['DISPLAY']
-except KeyError:
-    matplotlib.use('Agg')
+# try:
+#     os.environ['DISPLAY']
+# except KeyError:
+#     matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 # plt.style.use(['ggplot', 'paper'])
 from mpl_toolkits.mplot3d import Axes3D
@@ -17,6 +17,7 @@ import tables as tb
 import numpy as np
 from collections import MutableMapping
 from .utils import open_atomic
+import copy
 import time
 import glob
 import logging
@@ -88,6 +89,7 @@ class DataManager(MutableMapping):
         key has been updated in the _updated dict so we know to write it later
         on
         """
+
         # np.array_equal is necessary in case we are dealing with numpy arrays
         # Elementwise comparison of arrays of different shape throws a
         # deprecation warning, and array_equal works on dicts and lists
@@ -341,6 +343,7 @@ class Simulation:
         self.dx = self.period / self.x_samples
         self.dy = self.period / self.y_samples
         self.id = os.path.basename(conf['General']['sim_dir'])
+        self.dir = conf['General']['sim_dir']
 
     def _get_data_manager(self):
         """
@@ -463,8 +466,8 @@ class Simulation:
         # Get the magnitude of E and add it to our data
         E_mag = np.zeros_like(self.data['Ex'], dtype=np.float64)
         for comp in ('Ex', 'Ey', 'Ez'):
-            E_mag += np.absolute(self.data[comp])
-        self.extend_data('normE', E_mag)
+            E_mag += np.absolute(self.data[comp])**2
+        self.extend_data('normE', np.sqrt(E_mag))
         return E_mag
 
     def normEsquared(self):
@@ -803,12 +806,12 @@ class Simulation:
         self.log.info('Total = %f' % tot)
         assert(reflectance >= 0)
         assert(transmission >= 0)
-        # assert(absorbance >= 0)
+        assert(absorbance >= 0)
         # assert(delta < .00001)
         if 'transmission_data' in self.data:
-            self.data['transmission_data'].update({port: (reflectance,
-                                                          transmission,
-                                                          absorbance)})
+            new = copy.deepcopy(self.data['transmission_data'])
+            new.update({port: (reflectance, transmission, absorbance)})
+            self.data['transmission_data'] = new
         else:
             self.data['transmission_data'] = {port: (reflectance,
                                                      transmission,
@@ -842,6 +845,122 @@ class Simulation:
         #     row.append()
         #     table.flush()
         return reflectance, transmission, absorbance
+
+    def _get_incident_amplitude(self):
+        """Returns the incident amplitude of a wave depending on frequency"""
+        freq = self.conf['Simulation']['params']['frequency']['value']
+        polar_angle = self.conf['Simulation']['params']['polar_angle']['value']
+        path = self.conf['Simulation']['input_power']
+        bin_size = self.conf['Simulation']['params']['frequency']['bin_size']
+        # Get NREL AM1.5 data
+        freq_vec, p_vec = np.loadtxt(path, unpack=True, delimiter=',')
+        # Get all available power values within this bin
+        left = freq - bin_size / 2.0
+        right = freq + bin_size / 2.0
+        inds = np.where((left < freq_vec) & (freq_vec < right))[0]
+        # Check for edge cases
+        if len(inds) == 0:
+            # It is unphysical to claim that an input wave of a single
+            # frequency can contain any power. If we're simulating at a single
+            # frequency, just assume the wave has the power contained within
+            # the NREL bin surrounding that frequency
+            self.log.warning('Your bins are smaller than NRELs! Using NREL'
+                             ' bin size')
+            closest_ind = np.argmin(np.abs(freq_vec - freq))
+            # Is the closest one to the left or the right?
+            if freq_vec[closest_ind] > freq:
+                other_ind = closest_ind - 1
+                left = freq_vec[other_ind]
+                left_power = p_vec[other_ind]
+                right = freq_vec[closest_ind]
+                right_power = p_vec[closest_ind]
+            else:
+                other_ind = closest_ind + 1
+                right = freq_vec[other_ind]
+                right_power = p_vec[other_ind]
+                left = freq_vec[closest_ind]
+                left_power = p_vec[closest_ind]
+        elif inds[0] == 0:
+            raise ValueError('Your leftmost bin edge lies outside the'
+                             ' range provided by NREL')
+        elif inds[-1] == len(freq_vec):
+            raise ValueError('Your rightmost bin edge lies outside the'
+                             ' range provided by NREL')
+        else:
+            # A simple linear interpolation given two pairs of data points, and the
+            # desired x point
+            def lin_interp(x1, x2, y1, y2, x):
+                return ((y2 - y1) / (x2 - x1)) * (x - x2) + y2
+            # If the left or right edge lies between NREL data points, we do a
+            # linear interpolation to get the irradiance values at the bin edges.
+            # If the left of right edge happens to be directly on an NREL bin edge
+            # (unlikely) the linear interpolation will just return the value at the
+            # NREL bin. Also the selection of inds above excluded the case of left
+            # or right being equal to an NREL bin, 
+            left_power = lin_interp(freq_vec[inds[0] - 1], freq_vec[inds[0]],
+                                    p_vec[inds[0] - 1], p_vec[inds[0]], left)
+            right_power = lin_interp(freq_vec[inds[-1]], freq_vec[inds[-1] + 1],
+                                     p_vec[inds[-1]], p_vec[inds[-1] + 1], right)
+        # All the frequency values within the bin and including the bin edges
+        freqs = [left]+list(freq_vec[inds])+[right]
+        # All the power values
+        power_values = [left_power]+list(p_vec[inds])+[right_power]
+        self.log.info(freqs)
+        self.log.info(power_values)
+        # Just use a trapezoidal method to integrate the spectrum
+        power = intg.trapz(power_values, x=freqs)
+        self.log.info('Incident Power: %s', str(power))
+        return power
+
+    def jsc_contrib(self, port='Substrate_bottom'):
+        self.log.info('Computing Jsc contrib')
+        wv_fact = c.e / (c.c * c.h * 10)
+        # Unpack data for the port we passed in as an argument
+        try:
+            ref, trans, absorb = self.data['transmission_data'][port]
+        except KeyError:
+            ref, trans, absorb = self.transmissionData(port=port)
+        freq = self.conf['Simulation']['params']['frequency']['value']
+        wvlgth = c.c / freq
+        wvlgth_nm = wvlgth * 1e9
+        # Get solar power from chosen spectrum
+        sun_pow = self._get_incident_amplitude()
+        # This is our integrand
+        val = absorb * wvlgth * sun_pow
+        # val = absorb * wvlgth
+        # test = absorb * sun_pow * wvlgth_nm * wv_fact * delta_wv
+        # self.log.info('Sim %s Jsc Integrand: %f', self.id, test)
+        # Use Trapezoid rule to perform the integration. Note all the
+        # necessary factors of the wavelength have already been included
+        # above
+        Jsc = wv_fact * val
+        outf = os.path.join(self.dir, 'jsc_contrib.dat')
+        with open(outf, 'w') as out:
+            out.write('%f\n' % Jsc)
+        self.log.info('Jsc contrib = %f', Jsc)
+        return Jsc
+
+    def jsc_integrated_contrib(self):
+        self.log.info('Computing integrated Jsc contribution')
+        try:
+            genRate = self.data['genRate']
+        except KeyError:
+            genRate = self.genRate()
+        # Gen rate in cm^-3. Gotta convert lengths here from um to cm
+        z_vals = np.linspace(0, self.height*1e-4, self.z_samples)
+        x_vals = np.linspace(0, self.period*1e-4, self.x_samples)
+        y_vals = np.linspace(0, self.period*1e-4, self.y_samples)
+        z_integral = intg.trapz(genRate, x=z_vals, axis=0)
+        x_integral = intg.trapz(z_integral, x=x_vals, axis=0)
+        y_integral = intg.trapz(x_integral, x=y_vals, axis=0)
+        # Convert period to cm and current to mA
+        sun_pow = self._get_incident_amplitude()
+        Jsc = 1000*(c.e/(self.period*1e-4)**2)*y_integral
+        outf = os.path.join(self.dir, 'jsc_integrated_contrib.dat')
+        with open(outf, 'w') as out:
+            out.write('%f\n' % Jsc)
+        self.log.info('Jsc_integrated contrib = %f', Jsc)
+        return Jsc
 
     def integrated_absorbtion(self):
         """
@@ -976,9 +1095,20 @@ class Simulation:
                   show=False, draw=False, fixed=None, colorsMap='jet'):
         """A general utility method for plotting a 2D heat map"""
         cm = plt.get_cmap(colorsMap)
+        if np.iscomplexobj(cs):
+            self.log.warning('Plotting only real part of %s in heatmap',
+                             labels[2])
+            cs = cs.real
         if fixed:
-            cNorm = matplotlib.colors.Normalize(
-                vmin=np.amin(5.0), vmax=np.amax(100.0))
+            if 'dielectric_profile' in save_path:
+                cNorm = matplotlib.colors.Normalize(
+                    vmin=np.amin(0), vmax=np.amax(16))
+            else:
+                pass
+                cNorm = matplotlib.colors.Normalize(
+                    vmin=np.amin(cs), vmax=np.amax(cs))
+                # cNorm = matplotlib.colors.Normalize(
+                #     vmin=np.amin(0), vmax=np.amax(2.5))
         else:
             cNorm = matplotlib.colors.Normalize(
                 vmin=np.amin(cs), vmax=np.amax(cs))
@@ -1134,6 +1264,7 @@ class Simulation:
         plt.xlabel(labels[0])
         plt.ylabel(labels[1])
         plt.title(labels[2])
+        # plt.ylim([0, 16])
         if self.conf['General']['save_plots']:
             name = labels[1] + '_' + ptype + '.pdf'
             path = os.path.join(self.conf['General']['sim_dir'], name)
@@ -1143,8 +1274,25 @@ class Simulation:
         plt.close(fig)
 
     def fixed_line(self, quantity, direction, coord1, coord2):
-        """Plot a scalar quantity on a line along a the z direction at some pair of
-        coordinates in the plane perpendicular to that direction"""
+        """
+        Plot a scalar quantity on a line along a given direction at some pair
+        of coordinates in the plane perpendicular to that direction. The
+        remaining coordinates are specified in x, y, z order. So for example if
+        direction='z' then coord1 corresponds to x and coord2 corresponds to y.
+        If direction='y' then coord1 corresponds to x and coord2 corresponds to
+        z.
+        :param str direction: The direction along which to plot the line. Must
+        be one of 'x', 'y', or 'z'. 
+        :param str direction: The direction along which you wish to plot a
+        line. Must be one of 'x', 'y', or 'z'. The other two coordinates remain
+        fixed and are specified by coord1 and coord2.
+        :param int coord1: The integer index for the first fixed coordinate.
+        Indexes are in x,y, z order so if line_dir='z' then c1 corresponds to x
+        :param int coord2: The integer index for the second coordinate.
+        :param str quantity: The quantity whose data array you wish to take a
+        line cut through
+        """
+
         coord1 = int(coord1)
         coord2 = int(coord2)
         # Get the scalar values
@@ -1168,6 +1316,10 @@ class Simulation:
             freq, wvlgth)
         labels = ('Z [um]', quantity, title)
         ptype = "%s_line_plot_%i_%i" % (direction, coord1, coord2)
+        if np.iscomplexobj(data):
+            self.log.warning('Plotting only real component of %s in line plot',
+                             quantity)
+            data = data.real
         self.line_plot(pos_data, data, ptype, labels)
 
 class SimulationGroup:
@@ -1471,7 +1623,6 @@ class SimulationGroup:
         wvlgths = wvlgths[::-1]
         vals = vals[::-1]
         spectra = spectra[::-1]
-        #Jsc = intg.simps(Jsc_vals,x=wvlgths,even='avg')
         integrated_absorbtion = intg.trapz(vals, x=wvlgths * 1e9)
         power = intg.trapz(spectra, x=wvlgths * 1e9)
         # factor of 1/10 to convert A*m^-2 to mA*cm^-2
@@ -1497,6 +1648,7 @@ class SimulationGroup:
         freqs = np.zeros(self.num_sims)
         wvlgths = np.zeros(self.num_sims)
         spectra = np.zeros(self.num_sims)
+        wv_fact = c.e / (c.c * c.h * 10)
         # Assuming the sims have been grouped by frequency, sum over all of
         # them
         for i, sim in enumerate(self.sims):
@@ -1517,6 +1669,8 @@ class SimulationGroup:
             spectra[i] = sun_pow * wvlgth_nm
             # This is our integrand
             vals[i] = absorb * sun_pow * wvlgth_nm
+            # test = absorb * sun_pow * wvlgth_nm * wv_fact * delta_wv
+            # self.log.info('Sim %s Jsc Integrand: %f', sim.id, test)
             sim.clear_data()
         # Use Trapezoid rule to perform the integration. Note all the
         # necessary factors of the wavelength have already been included
@@ -1525,8 +1679,8 @@ class SimulationGroup:
         vals = vals[::-1]
         spectra = spectra[::-1]
         integrated_absorbtion = intg.trapz(vals, x=wvlgths)
+        # integrated_absorbtion = intg.simps(vals, x=wvlgths)
         # factor of 1/10 to convert A*m^-2 to mA*cm^-2
-        wv_fact = c.e / (c.c * c.h * 10)
         Jsc = wv_fact * integrated_absorbtion
         outf = os.path.join(base, 'jsc.dat')
         with open(outf, 'w') as out:
@@ -1534,7 +1688,28 @@ class SimulationGroup:
         self.log.info('Jsc = %f', Jsc)
         return Jsc
 
-    def Jsc_integrated(self, port='Substrate'):
+    def Jsc_integrated_persim(self):
+        for i, sim in enumerate(self.sims):
+            try:
+                genRate = sim.data['genRate']
+            except FileNotFoundError:
+                genRate = sim.genRate()
+            # Gen rate in cm^-3. Gotta convert lengths here from um to cm
+            z_vals = np.linspace(0, sim.height*1e-4, sim.z_samples)
+            x_vals = np.linspace(0, sim.period*1e-4, sim.x_samples)
+            y_vals = np.linspace(0, sim.period*1e-4, sim.y_samples)
+            z_integral = intg.trapz(genRate, x=z_vals, axis=0)
+            x_integral = intg.trapz(z_integral, x=x_vals, axis=0)
+            y_integral = intg.trapz(x_integral, x=y_vals, axis=0)
+            # z_integral = intg.simps(genRate, x=z_vals, axis=0)
+            # x_integral = intg.simps(z_integral, x=x_vals, axis=0)
+            # y_integral = intg.simps(x_integral, x=y_vals, axis=0)
+            # Convert period to cm and current to mA
+            Jsc = 1000*(c.e/(sim.period*1e-4)**2)*y_integral
+            self.log.info('Sim %s Jsc Integrate Value: %f', sim.id, Jsc)
+
+
+    def Jsc_integrated(self):
         """
         Compute te photocurrent density by performing a volume integral of the
         generation rate
@@ -1555,6 +1730,9 @@ class SimulationGroup:
         z_integral = intg.trapz(genRate, x=z_vals, axis=0)
         x_integral = intg.trapz(z_integral, x=x_vals, axis=0)
         y_integral = intg.trapz(x_integral, x=y_vals, axis=0)
+        # z_integral = intg.simps(genRate, x=z_vals, axis=0)
+        # x_integral = intg.simps(z_integral, x=x_vals, axis=0)
+        # y_integral = intg.simps(x_integral, x=y_vals, axis=0)
         # Convert period to cm and current to mA
         Jsc = 1000*(c.e/(self.sims[0].period*1e-4)**2)*y_integral
         outf = os.path.join(base, 'jsc_integrated.dat')

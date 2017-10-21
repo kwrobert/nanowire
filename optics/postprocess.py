@@ -219,7 +219,7 @@ class Processor(object):
             # Sort the individual sims within a group in increasing order of
             # the parameter we are grouping against a
             group.sort(key=lambda sim: sim.conf[key])
-            path = '{}/grouped_against_{}'.format(group[0].conf['General']['treebase'],
+            path = '{}/grouped_against_{}'.format(group[0].conf['General']['base_dir'],
                                                   ag_key[-1])
             # If the only variable param is the one we grouped against, make
             # the top dir

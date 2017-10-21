@@ -27,7 +27,7 @@ def get_combos(conf, keysets):
     # log.info("Constructing dictionary of options and their values ...")
     # Get the list of values from all our variable keysets
     optionValues = OrderedDict()
-    bin_size = None
+    bin_size = 0
     for keyset in keysets:
         par = '.'.join(keyset)
         pdict = conf[keyset]

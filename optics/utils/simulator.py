@@ -206,8 +206,8 @@ class Simulator():
         c_conv = constants.c / self.conf['Simulation']['base_unit']
         f_conv = f_phys / c_conv
         self.s4.SetFrequency(f_conv)
-        E_mag = self._get_incident_amplitude()
-        # E_mag = self._get_incident_amplitude_anna()
+        # E_mag = self._get_incident_amplitude()
+        E_mag = self._get_incident_amplitude_anna()
         polar = self.conf['Simulation']['params']['polar_angle']['value']
         azimuth = self.conf['Simulation']['params']['azimuthal_angle']['value']
         # To define circularly polarized light, basically just stick a j

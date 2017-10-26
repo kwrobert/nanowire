@@ -2,7 +2,8 @@ Introduction
 ============
 
 Hello there! If you are reading this, you're probably trying to figure out how
-to use my code. Good luck, cuz this shit is a mess! :p
+to use my code. Hopefully, this documentation will be helpful, but it is still
+a work in progress as is the actual code.
 
 I'll be continually adding features to the development branch. I'll only merge
 those changes into the master branch when things are stable. However, I can't

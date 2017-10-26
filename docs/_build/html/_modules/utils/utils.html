@@ -178,19 +178,20 @@
     <span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Creates a logger providing some arguments to make it more configurable.</span>
 
-<span class="sd">    name : string</span>
+<span class="sd">    :param str name:</span>
 <span class="sd">        Name of logger to be created. Defaults to the root logger</span>
-<span class="sd">    level : string</span>
+<span class="sd">    :param str level:</span>
 <span class="sd">        The log level of the logger, defaults to INFO. One of: [&#39;debug&#39;, &#39;info&#39;,</span>
 <span class="sd">        &#39;warning&#39;, &#39;error&#39;, &#39;critical&#39;]</span>
-<span class="sd">    console : bool</span>
+<span class="sd">    :param bool console:</span>
 <span class="sd">        Add a stream handler to send messages to the console. Generally</span>
 <span class="sd">        only necessary for the root logger.</span>
-<span class="sd">    logfile : string</span>
+<span class="sd">    :param str logfile:</span>
 <span class="sd">        Path to a file. If specified, will create a simple file handler and send</span>
 <span class="sd">        messages to the specified file. The parent dirs to the location will</span>
 <span class="sd">        be created automatically if they don&#39;t already exist.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
+
     <span class="c1"># Get numeric level safely</span>
     <span class="n">numeric_level</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">logging</span><span class="p">,</span> <span class="n">level</span><span class="o">.</span><span class="n">upper</span><span class="p">(),</span> <span class="kc">None</span><span class="p">)</span>
     <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">numeric_level</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
@@ -236,10 +237,15 @@
 
 
 <div class="viewcode-block" id="make_hash"><a class="viewcode-back" href="../../utils.html#utils.utils.make_hash">[docs]</a><span class="k">def</span> <span class="nf">make_hash</span><span class="p">(</span><span class="n">o</span><span class="p">):</span>
-    <span class="sd">&quot;&quot;&quot;Makes a hash from the dict representing the Simulation config. It is</span>
-<span class="sd">    consistent across runs and handles arbitrary nesting. Right now it ignores</span>
-<span class="sd">    any settings in the General section because those aren&#39;t really important</span>
-<span class="sd">    when it comes to differentiating simulations&quot;&quot;&quot;</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    A recursive function for hasing any python built-in data type. Probably</span>
+<span class="sd">    won&#39;t work on custom objects. It is consistent across runs and handles</span>
+<span class="sd">    arbitrary nesting. Mainly intended for computing the hash of config</span>
+<span class="sd">    dictionarys to establish a unique ID. Right now it ignores any settings in</span>
+<span class="sd">    the General section because those aren&#39;t really important when it comes to</span>
+<span class="sd">    differentiating simulations</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
     <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">o</span><span class="p">,</span> <span class="p">(</span><span class="nb">set</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">,</span> <span class="nb">list</span><span class="p">)):</span>
         <span class="k">return</span> <span class="nb">tuple</span><span class="p">([</span><span class="n">make_hash</span><span class="p">(</span><span class="n">e</span><span class="p">)</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">o</span><span class="p">])</span>
     <span class="k">elif</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">o</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
@@ -254,7 +260,8 @@
     <span class="n">out</span> <span class="o">=</span> <span class="nb">repr</span><span class="p">(</span><span class="nb">tuple</span><span class="p">(</span><span class="nb">frozenset</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="n">new_o</span><span class="o">.</span><span class="n">items</span><span class="p">()))))</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">md5</span><span class="p">(</span><span class="n">out</span><span class="p">)</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()</span></div>
 
-<div class="viewcode-block" id="cmp_dicts"><a class="viewcode-back" href="../../utils.html#utils.utils.cmp_dicts">[docs]</a><span class="k">def</span> <span class="nf">cmp_dicts</span><span class="p">(</span><span class="n">d1</span><span class="p">,</span><span class="n">d2</span><span class="p">):</span>
+
+<div class="viewcode-block" id="cmp_dicts"><a class="viewcode-back" href="../../utils.html#utils.utils.cmp_dicts">[docs]</a><span class="k">def</span> <span class="nf">cmp_dicts</span><span class="p">(</span><span class="n">d1</span><span class="p">,</span> <span class="n">d2</span><span class="p">):</span>
     <span class="sd">&quot;&quot;&quot;Recursively compares two dictionaries&quot;&quot;&quot;</span>
     <span class="c1"># First test the keys</span>
     <span class="k">for</span> <span class="n">k1</span> <span class="ow">in</span> <span class="n">d1</span><span class="o">.</span><span class="n">keys</span><span class="p">():</span>
@@ -267,46 +274,14 @@
     <span class="c1"># each recursive comparison in a list and assert that they all must be True</span>
     <span class="c1"># at the end</span>
     <span class="n">comps</span> <span class="o">=</span> <span class="p">[]</span>
-    <span class="k">for</span> <span class="n">k1</span><span class="p">,</span><span class="n">v1</span> <span class="ow">in</span> <span class="n">d1</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+    <span class="k">for</span> <span class="n">k1</span><span class="p">,</span> <span class="n">v1</span> <span class="ow">in</span> <span class="n">d1</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
         <span class="n">v2</span> <span class="o">=</span> <span class="n">d2</span><span class="p">[</span><span class="n">k1</span><span class="p">]</span>
-        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">v1</span><span class="p">,</span><span class="nb">dict</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">v2</span><span class="p">,</span><span class="nb">dict</span><span class="p">):</span>
-            <span class="n">comps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">cmp_dicts</span><span class="p">(</span><span class="n">v1</span><span class="p">,</span><span class="n">v2</span><span class="p">))</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">v1</span><span class="p">,</span> <span class="nb">dict</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">v2</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+            <span class="n">comps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">cmp_dicts</span><span class="p">(</span><span class="n">v1</span><span class="p">,</span> <span class="n">v2</span><span class="p">))</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="k">if</span> <span class="n">v1</span> <span class="o">!=</span> <span class="n">v2</span><span class="p">:</span>
                 <span class="k">return</span> <span class="kc">False</span>
     <span class="k">return</span> <span class="nb">all</span><span class="p">(</span><span class="n">comps</span><span class="p">)</span></div>
-
-<span class="c1">#  def configure_logger(level,logger_name,log_dir,logfile):</span>
-<span class="c1">#      # Get numeric level safely</span>
-<span class="c1">#      numeric_level = getattr(logging, level.upper(), None)</span>
-<span class="c1">#      if not isinstance(numeric_level, int):</span>
-<span class="c1">#          raise ValueError(&#39;Invalid log level: %s&#39; % level)</span>
-<span class="c1">#      # Set formatting</span>
-<span class="c1">#      formatter = logging.Formatter(&#39;%(asctime)s [%(levelname)s] - %(message)s&#39;,datefmt=&#39;%m/%d/%Y %I:%M:%S %p&#39;)</span>
-<span class="c1">#      # Get logger with name</span>
-<span class="c1">#      logger = logging.getLogger(logger_name)</span>
-<span class="c1">#      logger.setLevel(numeric_level)</span>
-<span class="c1">#      # Set up file handler</span>
-<span class="c1">#      try:</span>
-<span class="c1">#          os.makedirs(log_dir)</span>
-<span class="c1">#      except OSError:</span>
-<span class="c1">#          # Log dir already exists</span>
-<span class="c1">#          pass</span>
-<span class="c1">#      output_file = os.path.join(log_dir,logfile)</span>
-<span class="c1">#      #out = open(output_file,&#39;a&#39;)</span>
-<span class="c1">#      fhandler = logging.FileHandler(output_file)</span>
-<span class="c1">#      fhandler.setFormatter(formatter)</span>
-<span class="c1">#      logger.addHandler(fhandler)</span>
-<span class="c1">#      #sl = StreamToLogger(logger,logging.INFO)</span>
-<span class="c1">#      #sys.stdout = sl</span>
-<span class="c1">#      #sl = StreamToLogger(logger,logging.ERROR)</span>
-<span class="c1">#      #sys.stderr = sl</span>
-<span class="c1">#      ## Duplicate this new log file descriptor to system stdout so we can</span>
-<span class="c1">#      ## intercept output from external S4 C library</span>
-<span class="c1">#      ## TODO: Make this go through the logger instead of directly to the file</span>
-<span class="c1">#      ## right now entries aren&#39;t properly formatted</span>
-<span class="c1">#      #os.dup2(out.fileno(),1)</span>
-<span class="c1">#      return logger</span>
 </pre></div>
 
           </div>

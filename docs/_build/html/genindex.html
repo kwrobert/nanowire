@@ -76,9 +76,9 @@
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="postprocess.html#postprocess.Global_Cruncher.adjacent_error">adjacent_error() (postprocess.Global_Cruncher method)</a>
+      <li><a href="utils.html#utils.simulation.SimulationGroup.adjacent_error">adjacent_error() (utils.simulation.SimulationGroup method)</a>
 </li>
-      <li><a href="postprocess.html#postprocess.Cruncher.angularAvg">angularAvg() (postprocess.Cruncher method)</a>
+      <li><a href="utils.html#utils.simulation.Simulation.angularAvg">angularAvg() (utils.simulation.Simulation method)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -100,12 +100,8 @@
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="utils.html#utils.simulator.Simulator.calc_diff">calc_diff() (utils.simulator.Simulator method)</a>
 </li>
-      <li><a href="postprocess.html#postprocess.Cruncher.calculate">calculate() (postprocess.Cruncher method)</a>
-
-      <ul>
-        <li><a href="postprocess.html#postprocess.Global_Cruncher.calculate">(postprocess.Global_Cruncher method)</a>
+      <li><a href="postprocess.html#postprocess.Processor.call_func">call_func() (postprocess.Processor method)</a>
 </li>
-      </ul></li>
       <li><a href="utils.html#utils.simulator.Simulator.clean_sim">clean_sim() (utils.simulator.Simulator method)</a>
 </li>
       <li><a href="utils.html#utils.simulation.Simulation.clear_data">clear_data() (utils.simulation.Simulation method)</a>
@@ -114,21 +110,27 @@
 </li>
       <li><a href="postprocess.html#postprocess.Processor.collect_sims">collect_sims() (postprocess.Processor method)</a>
 </li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="utils.html#utils.config.Config">Config (class in utils.config)</a>
 </li>
       <li><a href="utils.html#utils.simulator.Simulator.configure">configure() (utils.simulator.Simulator method)</a>
 </li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="utils.html#utils.utils.configure_logger">configure_logger() (in module utils.utils)</a>
 </li>
-      <li><a href="postprocess.html#postprocess.Global_Plotter.convergence">convergence() (postprocess.Global_Plotter method)</a>
+      <li><a href="utils.html#utils.simulation.SimulationGroup.convergence">convergence() (utils.simulation.SimulationGroup method)</a>
 </li>
       <li><a href="utils.html#utils.config.Config.copy">copy() (utils.config.Config method)</a>
 </li>
       <li><a href="postprocess.html#postprocess.counted">counted() (in module postprocess)</a>
 </li>
-      <li><a href="postprocess.html#postprocess.Cruncher">Cruncher (class in postprocess)</a>
+      <li><a href="postprocess.html#postprocess.Processor.crunch_global">crunch_global() (postprocess.Processor method)</a>
+</li>
+      <li><a href="postprocess.html#postprocess.Processor.crunch_global_all">crunch_global_all() (postprocess.Processor method)</a>
+</li>
+      <li><a href="postprocess.html#postprocess.Processor.crunch_local">crunch_local() (postprocess.Processor method)</a>
+</li>
+      <li><a href="postprocess.html#postprocess.Processor.crunch_local_all">crunch_local_all() (postprocess.Processor method)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -136,13 +138,15 @@
 <h2 id="D">D</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="utils.html#utils.config.Config.delfromseq">delfromseq() (utils.config.Config method)</a>
+      <li><a href="utils.html#utils.simulation.DataManager">DataManager (class in utils.simulation)</a>
 </li>
-      <li><a href="postprocess.html#postprocess.Global_Cruncher.diff_sq">diff_sq() (postprocess.Global_Cruncher method)</a>
+      <li><a href="utils.html#utils.config.Config.delfromseq">delfromseq() (utils.config.Config method)</a>
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="postprocess.html#postprocess.Plotter.draw_geometry_2d">draw_geometry_2d() (postprocess.Plotter method)</a>
+      <li><a href="utils.html#utils.simulation.SimulationGroup.diff_sq">diff_sq() (utils.simulation.SimulationGroup method)</a>
+</li>
+      <li><a href="utils.html#utils.simulation.Simulation.draw_geometry_2d">draw_geometry_2d() (utils.simulation.Simulation method)</a>
 </li>
       <li><a href="utils.html#utils.config.Config.dump">dump() (utils.config.Config method)</a>
 </li>
@@ -153,8 +157,6 @@
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="utils.html#utils.config.Config.evaluate">evaluate() (utils.config.Config method)</a>
-</li>
-      <li><a href="sim_wrapper.html#sim_wrapper.execute_jobs">execute_jobs() (in module sim_wrapper)</a>
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
@@ -170,15 +172,15 @@
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="postprocess.html#postprocess.Processor.filter_by_param">filter_by_param() (postprocess.Processor method)</a>
 </li>
-      <li><a href="postprocess.html#postprocess.Plotter.fixed_line">fixed_line() (postprocess.Plotter method)</a>
+      <li><a href="utils.html#utils.simulation.Simulation.fixed_line">fixed_line() (utils.simulation.Simulation method)</a>
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="utils.html#utils.utils.StreamToLogger.flush">flush() (utils.utils.StreamToLogger method)</a>
 </li>
-      <li><a href="postprocess.html#postprocess.Global_Cruncher.fractional_absorbtion">fractional_absorbtion() (postprocess.Global_Cruncher method)</a>
+      <li><a href="utils.html#utils.simulation.SimulationGroup.fractional_absorbtion">fractional_absorbtion() (utils.simulation.SimulationGroup method)</a>
 </li>
-      <li><a href="postprocess.html#postprocess.Plotter.full_3d">full_3d() (postprocess.Plotter method)</a>
+      <li><a href="utils.html#utils.simulation.Simulation.full_3d">full_3d() (utils.simulation.Simulation method)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -186,28 +188,12 @@
 <h2 id="G">G</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="sim_wrapper.html#sim_wrapper.gc3_submit">gc3_submit() (in module sim_wrapper)</a>
-</li>
-      <li><a href="postprocess.html#postprocess.Global_Plotter.gen_plot">gen_plot() (postprocess.Global_Plotter method)</a>
-
-      <ul>
-        <li><a href="postprocess.html#postprocess.Plotter.gen_plot">(postprocess.Plotter method)</a>
-</li>
-      </ul></li>
-      <li><a href="postprocess.html#postprocess.Cruncher.genRate">genRate() (postprocess.Cruncher method)</a>
-</li>
-      <li><a href="utils.html#utils.simulation.Simulation.get_avgs">get_avgs() (utils.simulation.Simulation method)</a>
+      <li><a href="utils.html#utils.simulation.Simulation.genRate">genRate() (utils.simulation.Simulation method)</a>
 </li>
       <li><a href="utils.html#utils.utils.get_combos">get_combos() (in module utils.utils)</a>
 </li>
-      <li><a href="postprocess.html#postprocess.Global_Cruncher.get_comp_vec">get_comp_vec() (postprocess.Global_Cruncher method)</a>
+      <li><a href="utils.html#utils.simulation.SimulationGroup.get_comp_vec">get_comp_vec() (utils.simulation.SimulationGroup method)</a>
 </li>
-      <li><a href="utils.html#utils.simulation.Simulation.get_data">get_data() (utils.simulation.Simulation method)</a>
-
-      <ul>
-        <li><a href="utils.html#utils.simulator.Simulator.get_data">(utils.simulator.Simulator method)</a>
-</li>
-      </ul></li>
       <li><a href="utils.html#utils.config.get_env_variable">get_env_variable() (in module utils.config)</a>
 </li>
       <li><a href="utils.html#utils.simulator.Simulator.get_field">get_field() (utils.simulator.Simulator method)</a>
@@ -220,27 +206,27 @@
         <li><a href="utils.html#utils.simulator.Simulator.get_height">(utils.simulator.Simulator method)</a>
 </li>
       </ul></li>
+      <li><a href="utils.html#utils.simulation.Simulation.get_line">get_line() (utils.simulation.Simulation method)</a>
+</li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="postprocess.html#postprocess.Processor.get_line">get_line() (postprocess.Processor method)</a>
-</li>
-      <li><a href="postprocess.html#postprocess.Cruncher.get_nk">get_nk() (postprocess.Cruncher method)</a>
+      <li><a href="utils.html#utils.simulation.Simulation.get_nk">get_nk() (utils.simulation.Simulation method)</a>
 </li>
       <li><a href="postprocess.html#postprocess.Processor.get_param_vals">get_param_vals() (postprocess.Processor method)</a>
 </li>
-      <li><a href="postprocess.html#postprocess.Processor.get_plane">get_plane() (postprocess.Processor method)</a>
+      <li><a href="utils.html#utils.simulation.Simulation.get_plane">get_plane() (utils.simulation.Simulation method)</a>
+
+      <ul>
+        <li><a href="utils.html#utils.simulation.SimulationGroup.get_plane">(utils.simulation.SimulationGroup method)</a>
 </li>
+      </ul></li>
       <li><a href="utils.html#utils.simulation.Simulation.get_scalar_quantity">get_scalar_quantity() (utils.simulation.Simulation method)</a>
 </li>
-      <li><a href="postprocess.html#postprocess.Global_Cruncher.get_slice">get_slice() (postprocess.Global_Cruncher method)</a>
+      <li><a href="utils.html#utils.simulation.SimulationGroup.get_slice">get_slice() (utils.simulation.SimulationGroup method)</a>
 </li>
       <li><a href="utils.html#utils.config.Config.getfromseq">getfromseq() (utils.config.Config method)</a>
 </li>
-      <li><a href="postprocess.html#postprocess.Global_Cruncher">Global_Cruncher (class in postprocess)</a>
-</li>
-      <li><a href="postprocess.html#postprocess.Global_Cruncher.global_error">global_error() (postprocess.Global_Cruncher method)</a>
-</li>
-      <li><a href="postprocess.html#postprocess.Global_Plotter">Global_Plotter (class in postprocess)</a>
+      <li><a href="utils.html#utils.simulation.SimulationGroup.global_error">global_error() (utils.simulation.SimulationGroup method)</a>
 </li>
       <li><a href="postprocess.html#postprocess.Processor.group_against">group_against() (postprocess.Processor method)</a>
 </li>
@@ -252,7 +238,11 @@
 <h2 id="H">H</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="postprocess.html#postprocess.Plotter.heatmap2d">heatmap2d() (postprocess.Plotter method)</a>
+      <li><a href="utils.html#utils.simulation.HDF5DataManager">HDF5DataManager (class in utils.simulation)</a>
+</li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="utils.html#utils.simulation.Simulation.heatmap2d">heatmap2d() (utils.simulation.Simulation method)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -260,7 +250,7 @@
 <h2 id="I">I</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="postprocess.html#postprocess.Cruncher.integrated_absorbtion">integrated_absorbtion() (postprocess.Cruncher method)</a>
+      <li><a href="utils.html#utils.simulation.Simulation.integrated_absorbtion">integrated_absorbtion() (utils.simulation.Simulation method)</a>
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
@@ -272,7 +262,11 @@
 <h2 id="J">J</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="postprocess.html#postprocess.Global_Cruncher.Jsc">Jsc() (postprocess.Global_Cruncher method)</a>
+      <li><a href="utils.html#utils.simulation.SimulationGroup.Jsc">Jsc() (utils.simulation.SimulationGroup method)</a>
+</li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="utils.html#utils.simulation.SimulationGroup.Jsc_integrated">Jsc_integrated() (utils.simulation.SimulationGroup method)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -280,13 +274,11 @@
 <h2 id="L">L</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="postprocess.html#postprocess.Plotter.line_plot">line_plot() (postprocess.Plotter method)</a>
+      <li><a href="utils.html#utils.simulation.Simulation.line_plot">line_plot() (utils.simulation.Simulation method)</a>
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="utils.html#utils.simulation.Simulation.load_npz">load_npz() (utils.simulation.Simulation method)</a>
-</li>
-      <li><a href="postprocess.html#postprocess.Global_Cruncher.local_error">local_error() (postprocess.Global_Cruncher method)</a>
+      <li><a href="utils.html#utils.simulation.SimulationGroup.local_error">local_error() (utils.simulation.SimulationGroup method)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -297,15 +289,11 @@
       <li><a href="postprocess.html#postprocess.main">main() (in module postprocess)</a>
 
       <ul>
-        <li><a href="sim_wrapper.html#sim_wrapper.main">(in module sim_wrapper)</a>
-</li>
         <li><a href="utils.html#utils.simulator.main">(in module utils.simulator)</a>
 </li>
       </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="sim_wrapper.html#sim_wrapper.make_confs">make_confs() (in module sim_wrapper)</a>
-</li>
       <li><a href="utils.html#utils.utils.make_hash">make_hash() (in module utils.utils)</a>
 </li>
       <li><a href="utils.html#utils.simulator.Simulator.make_logger">make_logger() (utils.simulator.Simulator method)</a>
@@ -320,15 +308,17 @@
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="utils.html#utils.rcwa_app.SimWrapper.new_tasks">new_tasks() (utils.rcwa_app.SimWrapper method)</a>
 </li>
-      <li><a href="postprocess.html#postprocess.Cruncher.normE">normE() (postprocess.Cruncher method)</a>
+      <li><a href="utils.html#utils.simulation.Simulation.normE">normE() (utils.simulation.Simulation method)</a>
+</li>
+      <li><a href="utils.html#utils.simulation.Simulation.normEsquared">normEsquared() (utils.simulation.Simulation method)</a>
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="postprocess.html#postprocess.Cruncher.normEsquared">normEsquared() (postprocess.Cruncher method)</a>
+      <li><a href="utils.html#utils.simulation.Simulation.normH">normH() (utils.simulation.Simulation method)</a>
 </li>
-      <li><a href="postprocess.html#postprocess.Cruncher.normH">normH() (postprocess.Cruncher method)</a>
+      <li><a href="utils.html#utils.simulation.Simulation.normHsquared">normHsquared() (utils.simulation.Simulation method)</a>
 </li>
-      <li><a href="postprocess.html#postprocess.Cruncher.normHsquared">normHsquared() (postprocess.Cruncher method)</a>
+      <li><a href="utils.html#utils.simulation.NPZDataManager">NPZDataManager (class in utils.simulation)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -339,45 +329,33 @@
       <li><a href="utils.html#utils.utils.open_atomic">open_atomic() (in module utils.utils)</a>
 </li>
   </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="utils.html#utils.simulator.Simulator.open_hdf5">open_hdf5() (utils.simulator.Simulator method)</a>
+</li>
+  </ul></td>
 </tr></table>
 
 <h2 id="P">P</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="sim_wrapper.html#sim_wrapper.parse_file">parse_file() (in module sim_wrapper)</a>
+      <li><a href="utils.html#utils.simulation.Simulation.plane_2d">plane_2d() (utils.simulation.Simulation method)</a>
 </li>
-      <li><a href="postprocess.html#postprocess.Plotter.plane_2d">plane_2d() (postprocess.Plotter method)</a>
+      <li><a href="utils.html#utils.simulation.Simulation.planes_3d">planes_3d() (utils.simulation.Simulation method)</a>
 </li>
-      <li><a href="postprocess.html#postprocess.Plotter.planes_3d">planes_3d() (postprocess.Plotter method)</a>
+      <li><a href="postprocess.html#postprocess.Processor.plot_global">plot_global() (postprocess.Processor method)</a>
 </li>
-      <li><a href="postprocess.html#postprocess.Plotter">Plotter (class in postprocess)</a>
+      <li><a href="postprocess.html#postprocess.Processor.plot_global_all">plot_global_all() (postprocess.Processor method)</a>
+</li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="postprocess.html#postprocess.Processor.plot_local">plot_local() (postprocess.Processor method)</a>
+</li>
+      <li><a href="postprocess.html#postprocess.Processor.plot_local_all">plot_local_all() (postprocess.Processor method)</a>
+</li>
+      <li><a href="utils.html#utils.simulation.SimulationGroup.plot_scalar_reduce">plot_scalar_reduce() (utils.simulation.SimulationGroup method)</a>
 </li>
       <li><a href="postprocess.html#module-postprocess">postprocess (module)</a>
 </li>
-      <li><a href="sim_wrapper.html#sim_wrapper.pre_check">pre_check() (in module sim_wrapper)</a>
-</li>
-      <li><a href="postprocess.html#postprocess.Cruncher.process">process() (postprocess.Cruncher method)</a>
-
-      <ul>
-        <li><a href="postprocess.html#postprocess.Plotter.process">(postprocess.Plotter method)</a>
-</li>
-        <li><a href="postprocess.html#postprocess.Processor.process">(postprocess.Processor method)</a>
-</li>
-      </ul></li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="postprocess.html#postprocess.Cruncher.process_all">process_all() (postprocess.Cruncher method)</a>
-
-      <ul>
-        <li><a href="postprocess.html#postprocess.Global_Cruncher.process_all">(postprocess.Global_Cruncher method)</a>
-</li>
-        <li><a href="postprocess.html#postprocess.Global_Plotter.process_all">(postprocess.Global_Plotter method)</a>
-</li>
-        <li><a href="postprocess.html#postprocess.Plotter.process_all">(postprocess.Plotter method)</a>
-</li>
-        <li><a href="postprocess.html#postprocess.Processor.process_all">(postprocess.Processor method)</a>
-</li>
-      </ul></li>
       <li><a href="postprocess.html#postprocess.Processor">Processor (class in postprocess)</a>
 </li>
   </ul></td>
@@ -388,55 +366,43 @@
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="utils.html#utils.rcwa_app.RCWA_App">RCWA_App (class in utils.rcwa_app)</a>
 </li>
-      <li><a href="sim_wrapper.html#sim_wrapper.run">run() (in module sim_wrapper)</a>
-</li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="sim_wrapper.html#sim_wrapper.run_optimization">run_optimization() (in module sim_wrapper)</a>
-</li>
-      <li><a href="sim_wrapper.html#sim_wrapper.run_sim">run_sim() (in module sim_wrapper)</a>
-</li>
   </ul></td>
 </tr></table>
 
 <h2 id="S">S</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="utils.html#utils.simulator.Simulator.save_field">save_field() (utils.simulator.Simulator method)</a>
+      <li><a href="utils.html#utils.simulator.Simulator.save_all">save_all() (utils.simulator.Simulator method)</a>
 </li>
-      <li><a href="utils.html#utils.simulator.Simulator.save_fluxes">save_fluxes() (utils.simulator.Simulator method)</a>
+      <li><a href="utils.html#utils.simulator.Simulator.save_conf">save_conf() (utils.simulator.Simulator method)</a>
 </li>
-      <li><a href="postprocess.html#postprocess.Global_Cruncher.scalar_reduce">scalar_reduce() (postprocess.Global_Cruncher method)</a>
-
-      <ul>
-        <li><a href="postprocess.html#postprocess.Global_Plotter.scalar_reduce">(postprocess.Global_Plotter method)</a>
+      <li><a href="utils.html#utils.simulator.Simulator.save_data">save_data() (utils.simulator.Simulator method)</a>
 </li>
-      </ul></li>
-      <li><a href="postprocess.html#postprocess.Plotter.scatter3d">scatter3d() (postprocess.Plotter method)</a>
+      <li><a href="utils.html#utils.simulator.Simulator.save_time">save_time() (utils.simulator.Simulator method)</a>
+</li>
+      <li><a href="utils.html#utils.simulation.SimulationGroup.scalar_reduce">scalar_reduce() (utils.simulation.SimulationGroup method)</a>
+</li>
+      <li><a href="utils.html#utils.simulation.Simulation.scatter3d">scatter3d() (utils.simulation.Simulation method)</a>
 </li>
       <li><a href="utils.html#utils.simulator.Simulator.set_basis">set_basis() (utils.simulator.Simulator method)</a>
 </li>
       <li><a href="utils.html#utils.simulator.Simulator.set_excitation">set_excitation() (utils.simulator.Simulator method)</a>
 </li>
-      <li><a href="utils.html#utils.simulator.Simulator.set_lattice">set_lattice() (utils.simulator.Simulator method)</a>
-</li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="utils.html#utils.simulator.Simulator.set_lattice">set_lattice() (utils.simulator.Simulator method)</a>
+</li>
       <li><a href="utils.html#utils.config.Config.setfromseq">setfromseq() (utils.config.Config method)</a>
 </li>
-      <li><a href="sim_wrapper.html#module-sim_wrapper">sim_wrapper (module)</a>
-</li>
       <li><a href="utils.html#utils.simulation.Simulation">Simulation (class in utils.simulation)</a>
+</li>
+      <li><a href="utils.html#utils.simulation.SimulationGroup">SimulationGroup (class in utils.simulation)</a>
 </li>
       <li><a href="utils.html#utils.simulator.Simulator">Simulator (class in utils.simulator)</a>
 </li>
       <li><a href="utils.html#utils.rcwa_app.SimWrapper">SimWrapper (class in utils.rcwa_app)</a>
 </li>
-      <li><a href="postprocess.html#postprocess.Processor.sort_sims">sort_sims() (postprocess.Processor method)</a>
-</li>
       <li><a href="utils.html#utils.config.Config.sorted_dict">sorted_dict() (utils.config.Config method)</a>
-</li>
-      <li><a href="sim_wrapper.html#sim_wrapper.spectral_wrapper">spectral_wrapper() (in module sim_wrapper)</a>
 </li>
       <li><a href="utils.html#utils.utils.StreamToLogger">StreamToLogger (class in utils.utils)</a>
 </li>
@@ -450,9 +416,9 @@
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="postprocess.html#postprocess.Global_Plotter.transmission_data">transmission_data() (postprocess.Global_Plotter method)</a>
+      <li><a href="utils.html#utils.simulation.SimulationGroup.transmission_data">transmission_data() (utils.simulation.SimulationGroup method)</a>
 </li>
-      <li><a href="postprocess.html#postprocess.Cruncher.transmissionData">transmissionData() (postprocess.Cruncher method)</a>
+      <li><a href="utils.html#utils.simulation.Simulation.transmissionData">transmissionData() (utils.simulation.Simulation method)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -484,7 +450,7 @@
 <h2 id="W">W</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="postprocess.html#postprocess.Global_Cruncher.weighted_transmissionData">weighted_transmissionData() (postprocess.Global_Cruncher method)</a>
+      <li><a href="utils.html#utils.simulation.SimulationGroup.weighted_transmissionData">weighted_transmissionData() (utils.simulation.SimulationGroup method)</a>
 </li>
       <li><a href="utils.html#utils.config.Config.write">write() (utils.config.Config method)</a>
 
@@ -494,8 +460,14 @@
       </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="utils.html#utils.simulation.Simulation.write_data">write_data() (utils.simulation.Simulation method)</a>
+      <li><a href="utils.html#utils.simulation.HDF5DataManager.write_data">write_data() (utils.simulation.HDF5DataManager method)</a>
+
+      <ul>
+        <li><a href="utils.html#utils.simulation.NPZDataManager.write_data">(utils.simulation.NPZDataManager method)</a>
 </li>
+        <li><a href="utils.html#utils.simulation.Simulation.write_data">(utils.simulation.Simulation method)</a>
+</li>
+      </ul></li>
   </ul></td>
 </tr></table>
 

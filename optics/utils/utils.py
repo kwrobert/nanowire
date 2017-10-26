@@ -27,7 +27,7 @@ def get_combos(conf, keysets):
     # log.info("Constructing dictionary of options and their values ...")
     # Get the list of values from all our variable keysets
     optionValues = OrderedDict()
-    bin_size = None
+    bin_size = 0
     for keyset in keysets:
         par = '.'.join(keyset)
         pdict = conf[keyset]
@@ -133,19 +133,20 @@ def configure_logger(level='info', name=None, console=False, logfile=None,
     """
     Creates a logger providing some arguments to make it more configurable.
 
-    name : string
+    :param str name:
         Name of logger to be created. Defaults to the root logger
-    level : string
+    :param str level:
         The log level of the logger, defaults to INFO. One of: ['debug', 'info',
         'warning', 'error', 'critical']
-    console : bool
+    :param bool console:
         Add a stream handler to send messages to the console. Generally
         only necessary for the root logger.
-    logfile : string
+    :param str logfile:
         Path to a file. If specified, will create a simple file handler and send
         messages to the specified file. The parent dirs to the location will
         be created automatically if they don't already exist.
     """
+
     # Get numeric level safely
     numeric_level = getattr(logging, level.upper(), None)
     if not isinstance(numeric_level, int):
@@ -191,10 +192,15 @@ def configure_logger(level='info', name=None, console=False, logfile=None,
 
 
 def make_hash(o):
-    """Makes a hash from the dict representing the Simulation config. It is
-    consistent across runs and handles arbitrary nesting. Right now it ignores
-    any settings in the General section because those aren't really important
-    when it comes to differentiating simulations"""
+    """
+    A recursive function for hasing any python built-in data type. Probably
+    won't work on custom objects. It is consistent across runs and handles
+    arbitrary nesting. Mainly intended for computing the hash of config
+    dictionarys to establish a unique ID. Right now it ignores any settings in
+    the General section because those aren't really important when it comes to
+    differentiating simulations
+    """
+
     if isinstance(o, (set, tuple, list)):
         return tuple([make_hash(e) for e in o])
     elif not isinstance(o, dict):
@@ -209,7 +215,8 @@ def make_hash(o):
     out = repr(tuple(frozenset(sorted(new_o.items())))).encode('utf-8')
     return hashlib.md5(out).hexdigest()
 
-def cmp_dicts(d1,d2):
+
+def cmp_dicts(d1, d2):
     """Recursively compares two dictionaries"""
     # First test the keys
     for k1 in d1.keys():
@@ -222,43 +229,11 @@ def cmp_dicts(d1,d2):
     # each recursive comparison in a list and assert that they all must be True
     # at the end
     comps = []
-    for k1,v1 in d1.items():
+    for k1, v1 in d1.items():
         v2 = d2[k1]
-        if isinstance(v1,dict) and isinstance(v2,dict):
-            comps.append(cmp_dicts(v1,v2))
+        if isinstance(v1, dict) and isinstance(v2, dict):
+            comps.append(cmp_dicts(v1, v2))
         else:
             if v1 != v2:
                 return False
     return all(comps)
-
-#  def configure_logger(level,logger_name,log_dir,logfile):
-#      # Get numeric level safely
-#      numeric_level = getattr(logging, level.upper(), None)
-#      if not isinstance(numeric_level, int):
-#          raise ValueError('Invalid log level: %s' % level)
-#      # Set formatting
-#      formatter = logging.Formatter('%(asctime)s [%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
-#      # Get logger with name
-#      logger = logging.getLogger(logger_name)
-#      logger.setLevel(numeric_level)
-#      # Set up file handler
-#      try:
-#          os.makedirs(log_dir)
-#      except OSError:
-#          # Log dir already exists
-#          pass
-#      output_file = os.path.join(log_dir,logfile)
-#      #out = open(output_file,'a')
-#      fhandler = logging.FileHandler(output_file)
-#      fhandler.setFormatter(formatter)
-#      logger.addHandler(fhandler)
-#      #sl = StreamToLogger(logger,logging.INFO)
-#      #sys.stdout = sl
-#      #sl = StreamToLogger(logger,logging.ERROR)
-#      #sys.stderr = sl
-#      ## Duplicate this new log file descriptor to system stdout so we can
-#      ## intercept output from external S4 C library
-#      ## TODO: Make this go through the logger instead of directly to the file
-#      ## right now entries aren't properly formatted
-#      #os.dup2(out.fileno(),1)
-#      return logger

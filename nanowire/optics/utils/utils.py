@@ -128,6 +128,36 @@ class StreamToLogger(object):
         self.level(sys.stderr)
 
 
+class IdFilter(logging.Filter):
+    """
+    A filter to either only pass log records with a matching ID, or reject all
+    log records with an ID attribute. This is configurable via a kwarg to the
+    init method
+    """
+
+    def __init__(self, ID=None, name="", reject=False):
+        super(IdFilter, self).__init__(name=name)
+        self.ID = ID
+        if reject:
+            self.filter = self.reject_filter
+        else:
+            self.filter = self.pass_filter
+
+    def pass_filter(self, record):
+        if not hasattr(record, 'ID'):
+            return 0
+        if record.ID == self.ID:
+            return 1
+        else:
+            return 0
+
+    def reject_filter(self, record):
+        if hasattr(record, 'ID'):
+            return 0
+        else:
+            return 1
+
+
 def configure_logger(level='info', name=None, console=False, logfile=None,
                      propagate=True):
     """

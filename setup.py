@@ -26,7 +26,8 @@ setup(
     maintainer_email='kyle.wesley@me.com',
     url='https://github.com/kwrobert/nanowire',
     license='MIT/Apache-2.0',
-    scripts=['nanowire/optics/scripts/run_optics'],
+    scripts=['nanowire/optics/scripts/run_optics', 
+             'nanowire/optics/scripts/process_optics'],
     keywords=[
         '',
     ],

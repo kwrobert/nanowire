@@ -5,8 +5,8 @@ import logging
 import multiprocessing as mp
 
 from .simulation import Simulation, SimulationGroup
-from utils.config import Config
-from utils.utils import configure_logger, cmp_dicts
+from .utils.config import Config
+from .utils.utils import configure_logger, cmp_dicts
 from itertools import repeat
 
 # Configure module level logger if not running as main process

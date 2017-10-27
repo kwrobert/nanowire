@@ -6,17 +6,19 @@ import copy
 from multiprocessing.pool import Pool
 import multiprocessing as mp
 import threading
-import Queue
+try:
+    import Queue
+except:
+    import queue as Queue
 import numpy as np
 import scipy.optimize as optz
-import postprocess as pp
 import tables as tb
 # from tables.node import filenode
 import time
 import ruamel.yaml as yaml
 import logging
 import traceback
-import logging_tree
+# import logging_tree
 import S4
 import scipy.interpolate as spi
 import scipy.integrate as intg
@@ -25,8 +27,9 @@ import scipy.constants as constants
 # from gc3libs.core import Core, Engine
 
 # get our custom config object and the logger function
-from utils.utils import make_hash, get_combos
-from utils.config import Config
+from . import postprocess as pp
+from .utils.utils import make_hash, get_combos
+from .utils.config import Config
 
 # from rcwa_app import RCWA_App
 class RejectSimFilter(logging.Filter):
@@ -321,7 +324,7 @@ class FileWriter(threading.Thread):
                                        classname='Table')
             table.remove_rows(0)
         row = table.row
-        for layer, (forward, backward) in flux_dict.iteritems():
+        for layer, (forward, backward) in flux_dict.items():
             row['layer'] = layer
             row['forward'] = forward
             row['backward'] = backward
@@ -985,7 +988,7 @@ class Simulator():
         self.log.debug(intensity_values)
         # Just use a trapezoidal method to integrate the spectrum
         intensity = intg.trapz(intensity_values, x=freqs)
-        self.log.debug('Incident Intensity: %s', str(intensity))
+        self.log.info('Incident Intensity: %s', str(intensity))
         area = self.period*self.period
         power = intensity*area
         self.log.debug('Incident Power: %s', str(power))
@@ -1062,7 +1065,7 @@ class Simulator():
             base_mat = ldata['base_material']
             layer_t = ldata['params']['thickness']['value']
             self.s4.AddLayer(Name=layer, Thickness=layer_t,
-                             S4_Material=base_mat)
+                             Material=base_mat)
             if 'geometry' in ldata:
                 self.log.debug('Building geometry in layer: {}'.format(layer))
                 for shape, sdata in sorted(ldata['geometry'].items(), key=lambda tup: tup[1]['order']):
@@ -1073,7 +1076,7 @@ class Simulator():
                         rad = sdata['radius']
                         cent = sdata['center']
                         coord = (cent['x'], cent['y'])
-                        self.s4.SetRegionCircle(S4_Layer=layer, S4_Material=shape_mat, Center=coord,
+                        self.s4.SetRegionCircle(Layer=layer, Material=shape_mat, Center=coord,
                                                 Radius=rad)
                     else:
                         raise NotImplementedError(
@@ -1104,7 +1107,7 @@ class Simulator():
         fundamental efficiency of the RCWA solver"""
         for layer, ldata in self.conf['Layers'].items():
             thickness = ldata['params']['thickness']['value']
-            self.s4.SetLayerThickness(S4_Layer=layer, Thickness=thickness)
+            self.s4.SetLayerThickness(Layer=layer, Thickness=thickness)
 
     #  @ph.timecall
     def _compute_fields(self):
@@ -1159,11 +1162,11 @@ class Simulator():
         for layer, ldata in self.conf['Layers'].items():
             self.log.debug('Computing fluxes through layer: %s' % layer)
             # This gets flux at top of layer
-            forw, back = self.s4.GetPowerFlux(S4_Layer=layer)
+            forw, back = self.s4.GetPowerFlux(Layer=layer)
             self.flux_dict[layer] = (forw, back)
             # This gets flux at the bottom
             offset = ldata['params']['thickness']['value']
-            forw, back = self.s4.GetPowerFlux(S4_Layer=layer, zOffset=offset)
+            forw, back = self.s4.GetPowerFlux(Layer=layer, zOffset=offset)
             key = layer + '_bottom'
             self.flux_dict[key] = (forw, back)
         if self.conf['General']['save_as'] == 'npz':
@@ -1205,7 +1208,7 @@ class Simulator():
     #     integrals = {}
     #     for layer, ldata in self.conf['Layers'].items():
     #         self.log.debug('Computing integral through layer: %s' % layer)
-    #         result = self.s4.GetLayerVolumeIntegral(S4_Layer=layer, Quantity='E')
+    #         result = self.s4.GetLayerVolumeIntegral(Layer=layer, Quantity='E')
     #         self.log.debug('Integral = %s', str(result))
     #         integrals[layer] = result
     #     print(integrals)
@@ -1239,7 +1242,7 @@ class Simulator():
             if compression:
                 filter_obj = tb.Filters(complevel=8, complib='blosc')
             gpath = '/sim_'+self.id[0:10]
-            for name, arr in self.data.iteritems():
+            for name, arr in self.data.items():
                 self.log.debug("Saving array %s", name)
                 if compression:
                     self.hdf5.create_carray(gpath, name, createparents=True,
@@ -1253,7 +1256,7 @@ class Simulator():
                                       expectedrows=len(list(self.conf['Layers'].keys())),
                                       createparents=True)
             row = table.row
-            for layer, (forward, backward) in self.flux_dict.iteritems():
+            for layer, (forward, backward) in self.flux_dict.items():
                 row['layer'] = layer
                 row['forward'] = forward
                 row['backward'] = backward
@@ -1262,7 +1265,7 @@ class Simulator():
                     # # Save the field arrays
                     # self.log.debug('Saving fields to HDF5')
                     # path = '/sim_'+self.id[0:10]
-                    # for name, arr in self.data.iteritems():
+                    # for name, arr in self.data.items():
             #     self.log.debug("Saving array %s", name)
             #     tup = ('create_array', (path, name),
             #            {'compression': self.conf['General']['compression'],

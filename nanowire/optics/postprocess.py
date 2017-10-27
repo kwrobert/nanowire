@@ -3,10 +3,9 @@ import os
 import copy
 import logging
 import multiprocessing as mp
-import multiprocessing.dummy as mpd
 
+from .simulation import Simulation, SimulationGroup
 from utils.config import Config
-from utils.simulation import Simulation, SimulationGroup
 from utils.utils import configure_logger, cmp_dicts
 from itertools import repeat
 

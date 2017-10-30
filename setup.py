@@ -1,6 +1,42 @@
 from io import open
 
 from setuptools import find_packages, setup
+from setuptools.command.install import install
+from setuptools.command.develop import develop
+import subprocess
+import os
+
+class CustomInstall(install):
+    """
+    Extends the setuptools install command to compile S4 and its python
+    extension before beginning the usual install procedure
+    """
+    def run(self):
+        print("Running S4 install process")
+        os.chdir('S4')
+        print(os.getcwd())
+        print('Building S4')
+        subprocess.check_call('make', shell=True)
+        print('Building S4 python extension')
+        subprocess.check_call('make S4_pyext', shell=True)
+        os.chdir('../')
+        install.run(self)
+
+class CustomDevelop(develop):
+    """
+    Extends the setuptools install command to compile S4 and its python
+    extension before beginning the usual install procedure
+    """
+    def run(self):
+        print("Running S4 install process")
+        os.chdir('S4')
+        print(os.getcwd())
+        print('Building S4')
+        subprocess.check_call('make', shell=True)
+        print('Building S4 python extension')
+        subprocess.check_call('make S4_pyext', shell=True)
+        os.chdir('../')
+        develop.run(self)
 
 with open('nanowire/__init__.py', 'r') as f:
     for line in f:
@@ -16,6 +52,7 @@ with open('README.rst', 'r', encoding='utf-8') as f:
 REQUIRES = []
 
 setup(
+    cmdclass={"install": CustomInstall, "develop": CustomDevelop},
     name='nanowire',
     version=version,
     description='',

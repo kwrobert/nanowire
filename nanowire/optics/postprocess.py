@@ -116,6 +116,7 @@ class Simulation:
         self.period = conf['Simulation']['params']['array_period']['value']
         self.dx = self.period / self.x_samples
         self.dy = self.period / self.y_samples
+        self.layers = {}
 
     def _get_data_manager(self):
         """
@@ -176,6 +177,21 @@ class Simulation:
         else:
             self.log.debug('Adding %s to data dict', str(quantity))
             self.data[quantity] = new_data
+
+    def get_layers(self):
+        """
+        Populates the self.layers list with layer objects
+        """
+
+        ordered_layers = self.conf.sorted_dict(self.conf['Layers'])
+        start = 0
+        layers = {}
+        for layer, ldata in ordered_layers.items():
+            layer_t = ldata['params']['thickness']['value']
+            end = start + layer_t
+            layers[layer] = Layer(layer, start, end, self.dz)
+        self.layers = layers
+        return layers
 
     def get_line(self, quantity, line_dir, c1, c2):
         """

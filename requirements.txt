@@ -1,6 +1,7 @@
 -e ./
 cycler==0.10.0
 matplotlib==2.1.0
+mpmath==1.0.0
 numexpr==2.6.4
 numpy==1.13.3
 psutil==5.4.0
@@ -10,4 +11,5 @@ pytz==2017.2
 ruamel.yaml==0.15.34
 scipy==1.0.0
 six==1.11.0
+sympy==1.1.1
 tables==3.4.2

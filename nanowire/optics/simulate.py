@@ -792,6 +792,7 @@ class Simulator():
                          NumBasis=int(round(numbasis)))
         self.data = {}
         self.flux_dict = {}
+        self.coeff_dict = {}
         self.hdf5 = None
         self.runtime = 0
         self.period = period
@@ -802,19 +803,19 @@ class Simulator():
         this instance attached to the module level logger. If we don't, we'll
         eventually use up all the available file descriptors on the system
         """
-        # Sometimes we hit an error before the log object gets created and
-        # assigned as an attribute. Without the try, except we would get an
-        # attribute error which makes error messages confusing and useless
         self._clean_logger()
 
     def _clean_logger(self):
         """
         Cleans up all the logging stuff associated with this instance
         """
+        # Sometimes we hit an error before the log object gets created and
+        # assigned as an attribute. Without the try, except we would get an
+        # attribute error which makes error messages confusing and useless
         try:
             self.fhandler.close()
             module_logger = logging.getLogger(__name__)
-            module_logger.removeHandler(module_logger)
+            module_logger.removeHandler(self.fhandler)
         except AttributeError:
             pass
 
@@ -829,6 +830,23 @@ class Simulator():
             del self.s4
         except AttributeError:
             pass
+
+    def make_logger(self, log_level='info'):
+        """Makes the logger for this simulation"""
+        self._clean_logger()
+        # Add the file handler for this instance's log file and attach it to
+        # the module level logger
+        self.fhandler = logging.FileHandler(os.path.join(self.dir, 'sim.log'))
+        self.fhandler.addFilter(IdFilter(ID=self.id))
+        formatter = logging.Formatter('%(asctime)s [%(name)s:%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
+        self.fhandler.setFormatter(formatter)
+        log = logging.getLogger(__name__)
+        log.addHandler(self.fhandler)
+        # Store the logger adapter to the module level logger as an attribute.
+        # We use this to log in any methods, and the sim_id of this instance
+        # will get stored in the log record
+        self.log = logging.LoggerAdapter(log, {'ID': self.id})
+        self.log.debug('Logger initialized')
 
     def evaluate_config(self):
         """
@@ -848,23 +866,6 @@ class Simulator():
             os.makedirs(sim_dir)
         except OSError:
             pass
-
-    def make_logger(self, log_level='info'):
-        """Makes the logger for this simulation"""
-        self._clean_logger()
-        # Add the file handler for this instance's log file and attach it to
-        # the module level logger
-        self.fhandler = logging.FileHandler(os.path.join(self.dir, 'sim.log'))
-        self.fhandler.addFilter(IdFilter(ID=self.id))
-        formatter = logging.Formatter('%(asctime)s [%(name)s:%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
-        self.fhandler.setFormatter(formatter)
-        log = logging.getLogger(__name__)
-        log.addHandler(self.fhandler)
-        # Store the logger adapter to the module level logger as an attribute.
-        # We use this to log in any methods, and the sim_id of this instance
-        # will get stored in the log record
-        self.log = logging.LoggerAdapter(log, {'ID': self.id})
-        self.log.debug('Logger initialized')
 
     def configure(self):
         """Configure options for the RCWA solver"""
@@ -1185,6 +1186,29 @@ class Simulator():
         self.data.update({'dielectric_profile': eps_mat})
         self.log.debug('Finished computing dielectric profile!')
 
+    def get_fourier_coefficients(self, offset=0.):
+        """
+        Return a list of the Fourier coefficients used to approximate the
+        fields
+        """
+        self.log.info('Retrieving Fourier coefficients')
+        coeff_dict = {}
+        for layer, ldata in self.conf['Layers'].items():
+            self.log.debug("Layer: {}".format(layer))
+            if offset == 0.:
+                self.log.debug('Offset zero, not using that arg to avoid bug')
+                res = self.s4.GetAmplitudes(Layer=layer)
+            else:
+                self.log.debug('Using offset')
+                res = self.s4.GetAmplitudes(Layer=layer, zOffset=offset)
+            forw = np.array(res[0])
+            backw = np.array(res[1])
+            coeff_dict[layer] = np.row_stack((forw, backw)) 
+        self.coeff_dict = coeff_dict
+        if self.conf['General']['save_as'] == 'npz':
+            self.data['amplitudes'] = coeff_dict
+        self.log.info('Finished computing coefficients!')
+        return coeff_dict
     # def get_integrals(self):
     #     self.log.debug('Computing volume integrals')
     #     integrals = {}
@@ -1200,6 +1224,8 @@ class Simulator():
         """Saves the self.data dictionary to an npz file. This dictionary
         contains all the fields and the fluxes dictionary"""
 
+        if self.hdf5 is None:
+            self.open_hdf5()
         if self.conf['General']['save_as'] == 'npz':
             self.log.debug('Saving fields to NPZ')
             if self.conf['General']['adaptive_convergence']:
@@ -1224,6 +1250,7 @@ class Simulator():
             if compression:
                 filter_obj = tb.Filters(complevel=8, complib='blosc')
             gpath = '/sim_'+self.id[0:10]
+            # Save all the 3D field arrays
             for name, arr in self.data.items():
                 self.log.debug("Saving array %s", name)
                 if compression:
@@ -1234,6 +1261,19 @@ class Simulator():
                     self.hdf5.create_array(gpath, name, createparents=True,
                                       atom=tb.Atom.from_dtype(arr.dtype),
                                       obj=arr)
+            # Save the Fourier amplitudes
+            for layer, arr in self.coeff_dict.items():
+                self.log.debug("Saving coefficients for layer %s", layer)
+                arr_path = gpath + '/{}'.format(layer)
+                if compression:
+                    self.hdf5.create_carray(arr_path, 'amplitudes', createparents=True,
+                                       atom=tb.Atom.from_dtype(arr.dtype),
+                                       obj=arr, filters=filter_obj)
+                else:
+                    self.hdf5.create_array(arr_path, 'amplitudes', createparents=True,
+                                      atom=tb.Atom.from_dtype(arr.dtype),
+                                      obj=arr)
+
             table = self.hdf5.create_table(gpath, 'fluxes', description=LayerFlux,
                                       expectedrows=len(list(self.conf['Layers'].keys())),
                                       createparents=True)

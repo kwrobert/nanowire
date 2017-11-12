@@ -1093,9 +1093,13 @@ class Simulator():
             self.s4.SetLayerThickness(Layer=layer, Thickness=thickness)
 
     #  @ph.timecall
-    def _compute_fields(self):
-        """Constructs and returns a 2D numpy array of the vector electric
-        field. The field components are complex numbers"""
+    def compute_fields(self):
+        """
+        Constructs and returns a full 3D numpy array for each vector component
+        of the electric field (return order Ex, Ey, Ez) according to the real
+        space sampling points specified in the config file.
+        """
+
         self.log.debug('Computing fields ...')
         x_samp = self.conf['Simulation']['x_samples']
         y_samp = self.conf['Simulation']['y_samples']
@@ -1103,7 +1107,7 @@ class Simulator():
         max_depth = self.conf['Simulation']['max_depth']
         if max_depth:
             self.log.debug('Computing up to depth of {} '
-                          'microns'.format(max_depth))
+                           'microns'.format(max_depth))
             zvec = np.linspace(0, max_depth, z_samp)
         else:
             self.log.debug('Computing for entire device')
@@ -1123,20 +1127,47 @@ class Simulator():
         self.log.debug('Finished computing fields!')
         return Ex, Ey, Ez
 
+    def compute_fields_at_point(self, x, y, z):
+        """
+        Compute the electric field at a specific point within the device and
+        return a tuple of the components Ex, Ey, Ez
+        """
+
+        E, H = self.s4.GetFields(x, y, z)
+        return E
+
+    def compute_fields_on_plane(self, z, xsamples, ysamples):
+        """
+        Compute the electric field on an x-y plane at a given z value with a
+        given number of samples in the x and y directions and return a tuple
+        containg the 2D arrays of the fields components in (Ex, Ey, Ez) order
+        """
+        E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(xsamples, ysamples), 
+                                       Format='Array')
+        Ex = 0j*np.zeros((xsamples, ysamples))
+        Ey = 0j*np.zeros((xsamples, ysamples))
+        Ez = 0j*np.zeros((xsamples, ysamples))
+        for xcount, xval in enumerate(E):
+            for ycount, yval in enumerate(xval):
+                Ex[xcount, ycount] = yval[0]
+                Ey[xcount, ycount] = yval[1]
+                Ez[xcount, ycount] = yval[2]
+        return (Ex, Ey, Ez)
+
     def get_field(self):
         if self.conf['General']['adaptive_convergence']:
             Ex, Ey, Ez, numbasis, conv = self.adaptive_convergence()
             self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez})
             self.converged = (conv, numbasis)
         else:
-            Ex, Ey, Ez = self._compute_fields()
+            Ex, Ey, Ez = self.compute_fields()
             self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez})
 
     def get_fluxes(self):
         """
         Get the fluxes at the top and bottom of each layer. This is a surface
         integral of the component of the Poynting flux perpendicular to this
-        x-y plane of the interface, and have forward and backward componenets.
+        x-y plane of the interface, and have forward and backward components.
         Returns a dict where the keys are the layer name and the values are a
         length 2 tuple with the forward component first and the backward
         component second. The components are complex numbers
@@ -1382,7 +1413,7 @@ class Simulator():
         self.log.debug('Beginning adaptive convergence procedure')
         start_basis = self.conf['Simulation']['params']['numbasis']['value']
         basis_step = self.conf['General']['basis_step']
-        ex, ey, ez = self._compute_fields()
+        ex, ey, ez = self.compute_fields()
         max_diff = self.conf['General']['max_diff']
         max_iter = self.conf['General']['max_iter']
         percent_diff = 100
@@ -1394,7 +1425,7 @@ class Simulator():
             self.set_basis(new_basis)
             self.build_device()
             self.set_excitation()
-            ex2, ey2, ez2 = self._compute_fields()
+            ex2, ey2, ez2 = self.compute_fields()
             percent_diff = self.calc_diff([ex, ey, ex], [ex2, ey2, ez2])
             start_basis = new_basis
             ex, ey, ez = ex2, ey2, ez2

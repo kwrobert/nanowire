@@ -18,11 +18,13 @@ import scipy.integrate as intg
 import numpy as np
 
 from mpl_toolkits.mplot3d import Axes3D
+from itertools import repeat
+from collections import OrderedDict
 from scipy import interpolate
 from .utils.config import Config
-from .utils.utils import IdFilter, cmp_dicts, make_hash
+from .utils.utils import IdFilter, cmp_dicts, make_hash, get_nk
 from .data_manager import HDF5DataManager, NPZDataManager
-from itertools import repeat
+from .utils.geometry import Layer, get_mask
 
 # Configure logging for this module
 # Get numeric level safely
@@ -52,7 +54,7 @@ fhandler.addFilter(IdFilter(reject=True))
 logger.addHandler(fhandler)
 # Logging to console
 ch = logging.StreamHandler()
-ch.setLevel(info)
+ch.setLevel(debug)
 ch.setFormatter(formatter)
 ch.addFilter(IdFilter(reject=True))
 logger.addHandler(ch)
@@ -116,7 +118,8 @@ class Simulation:
         self.period = conf['Simulation']['params']['array_period']['value']
         self.dx = self.period / self.x_samples
         self.dy = self.period / self.y_samples
-        self.layers = {}
+        self.layers = OrderedDict()
+        self.get_layers()
 
     def _get_data_manager(self):
         """
@@ -160,7 +163,14 @@ class Simulation:
             return self.data[quantity]
         except KeyError:
             self.log.error('You attempted to retrieve a quantity that does not'
-                           ' exist in the data dict')
+                           ' exist in the data dict. Attempting to calculate')
+        try:
+            result = getattr(self, quantity)()
+            self.extend_data(quantity, result)
+            return self.data[quantity]
+        except:
+            self.log.error('Unable to calculate following quantity: %s',
+                           quantity)
             raise
 
     def clear_data(self):
@@ -180,16 +190,24 @@ class Simulation:
 
     def get_layers(self):
         """
-        Populates the self.layers list with layer objects
+        Populates the self.layers dict with layer objects
         """
 
         ordered_layers = self.conf.sorted_dict(self.conf['Layers'])
         start = 0
-        layers = {}
+        layers = OrderedDict()
+        materials = self.conf['Materials']
         for layer, ldata in ordered_layers.items():
             layer_t = ldata['params']['thickness']['value']
             end = start + layer_t
-            layers[layer] = Layer(layer, start, end, self.dz)
+            if 'geometry' in ldata:
+                g = ldata['geometry']
+            else:
+                g = {}
+            layers[layer] = Layer(layer, start, end, self.period,
+                                  self.x_samples, self.y_samples, self.dz,
+                                  base_material=ldata['base_material'], 
+                                  geometry=g, materials=materials)
         self.layers = layers
         return layers
 
@@ -290,96 +308,6 @@ class Simulation:
         self.extend_data('normHsquared', H_magsq)
         return H_magsq
 
-    def get_nk(self, path, freq):
-        """
-        Returns n and k, the real and imaginary components of the index of
-        refraction at a given frequency :param str path: A path to a text file
-        containing the n and k data. The first column should be the frequency
-        in Hertz, the second column the n values, and the third column the k
-        values. Columns must be delimited by whitespace.  :param float freq:
-        The desired frequency in Hertz
-        """
-
-        # Get data
-        freq_vec, n_vec, k_vec = np.loadtxt(path, unpack=True)
-        # Get n and k at specified frequency via interpolation
-        f_n = interpolate.interp1d(freq_vec, n_vec, kind='linear',
-                                   bounds_error=False,
-                                   fill_value='extrapolate')
-        f_k = interpolate.interp1d(freq_vec, k_vec, kind='linear',
-                                   bounds_error=False,
-                                   fill_value='extrapolate')
-        return f_n(freq), f_k(freq)
-
-    def _get_circle_nk(self, shape, sdata, nk, samps, steps):
-        """
-        Returns a 2D matrix containing the N,K values at each point in space
-        for a circular in-plane geometry
-        :param dict sdata: The dictionary containing the parameters and info
-        about this circle
-        :param dict nk: The dict containing the n and k values for all the
-        materials used in the sim. Keys are material names, values are tuples
-        containing (n, k)
-        :param tup samps: The number of samples taken in the (x, y) directions
-        :param tup steps: The length of the spatial discretization step in the
-        (x, y) directions
-        """
-
-        # Set up the parameters
-        cx, cy = sdata['center']['x'], sdata['center']['y']
-        rad = sdata['radius']
-        rad_sq = rad * rad
-        mat = sdata['material']
-        dx = steps[0]
-        dy = steps[1]
-        # Build the matrix
-        nk_mat = np.full((samps[1], samps[0]), np.nan)
-        for xi in range(samps[0]):
-            for yi in range(samps[1]):
-                dist = ((xi * dx) - cx)**2 + ((yi * dy) - cy)**2
-                if dist <= rad_sq:
-                    nk_mat[yi, xi] = nk[mat][0] * nk[mat][1]
-        return nk_mat
-
-    def _genrate_nk_geometry(self, lname, nk, samps, steps):
-        """
-        Computes the nk profile in a layer with a nontrivial internal geometry.
-        Returns a 2D matrix containing the product of n and k at each point
-        :param str lname: Name of the layer as a string
-        :param dict ldata: This dict containing all the data for this layer
-        :param dict nk: A dictionary with the material name as the key an a
-        tuple containing (n,k) as the value
-        :param tup samps: A tuple/list containing the number of sampling points
-        in each spatial direction in (x,y,z) order
-        :param tup steps: Same as samps but instead contains the step sizes in
-        each direction
-        """
-
-        # Initialize the matrix with values for the base material
-        base_mat = self.conf['Layers'][lname]['base_material']
-        nk_mat = nk[base_mat][0] * nk[base_mat][1] * \
-            np.ones((samps[1], samps[0]))
-        # Get the shapes sorted in increasing order
-        shapes = self.conf.sorted_dict(self.conf['Layers'][lname]['geometry'])
-        # Loop through the shapes. We want them in increasing order so the
-        # smallest shape, which is contained within all the other shapes and
-        # should override their nk values, goes last
-        for shape, sdata in shapes.items():
-            if sdata['type'] == 'circle':
-                update = self._get_circle_nk(shape, sdata, nk, samps, steps)
-            else:
-                raise NotImplementedError('Computing generation rate for '
-                                          'layers with %s shapes is not '
-                                          'currently supported' % sdata['type'])
-            # Update the matrix with the values from this new shape. The update
-            # array will contain nonzero values within the shape, and nan
-            # everywhere else. This line updates the nk_mat with only the
-            # not nans from the update matrix, and leaves all other elements
-            # untouched
-            # nk_mat = np.where(update != 0, update, nk_mat)
-            nk_mat = np.where(np.isnan(update), nk_mat, update)
-        return nk_mat
-
     def genRate(self):
         """
         Computes and returns the 3D matrix containing the generation rate.
@@ -388,76 +316,31 @@ class Simulation:
 
         # We need to compute normEsquared before we can compute the generation
         # rate
-        try:
-            normEsq = self.get_scalar_quantity('normEsquared')
-        except KeyError:
-            normEsq = self.normEsquared()
-            self.extend_data('normEsquared', normEsq)
-            # Make sure we don't compute it twice
-            try:
-                self.conf['Postprocessing']['Cruncher'][
-                    'normEsquared']['compute'] = False
-            except KeyError:
-                pass
+        normEsq = self.get_scalar_quantity('normEsquared')
         # Prefactor for generation rate. Note we gotta convert from m^3 to
         # cm^3, hence 1e6 factor
         fact = c.epsilon_0 / (c.hbar * 1e6)
-        # Get the indices of refraction at this frequency
-        freq = self.conf['Simulation']['params']['frequency']['value']
-        nk = {mat: (self.get_nk(matpath, freq)) for mat, matpath in
-              self.conf['Materials'].items()}
-        nk['vacuum'] = (1, 0)
-        self.log.debug(nk)
-        # Get spatial discretization
-        samps = (self.x_samples, self.y_samples, self.z_samples)
         gvec = np.zeros_like(normEsq)
-        steps = (self.dx, self.dy, self.dz)
         # Main loop to compute generation in each layer
-        boundaries = []
-        count = 0
-        ordered_layers = self.conf.sorted_dict(self.conf['Layers'])
-        for layer, ldata in ordered_layers.items():
-            # Get boundaries between layers and their starting and ending
-            # indices
-            layer_t = ldata['params']['thickness']['value']
-            self.log.debug('LAYER: %s', layer)
-            self.log.debug('LAYER T: %f', layer_t)
-            if count == 0:
-                start = 0
-                end = int(layer_t / self.dz) + 1
-                boundaries.append((layer_t, start, end))
-            else:
-                prev_tup = boundaries[count - 1]
-                dist = prev_tup[0] + layer_t
-                start = prev_tup[2]
-                end = int(dist / self.dz) + 1
-                boundaries.append((dist, start, end))
-            self.log.debug('START: %i', start)
-            self.log.debug('END: %i', end)
-            if 'geometry' in ldata:
-                self.log.debug('HAS GEOMETRY')
-                # This function returns the N,K profile in that layer as a 2D
-                # matrix. Each element contains the product of n and k at that
-                # point, using the NK values for the appropriate material
-                nk_mat = self._genrate_nk_geometry(layer, nk, samps, steps)
-                gvec[start:end, :, :] = fact * \
-                    nk_mat * normEsq[start:end, :, :]
-            else:
-                # Its just a simple slab
-                self.log.debug('NO GEOMETRY')
-                lmat = ldata['base_material']
-                self.log.debug('LAYER MATERIAL: %s', lmat)
-                self.log.debug('MATERIAL n: %s', str(nk[lmat][0]))
-                self.log.debug('MATERIAL k: %s', str(nk[lmat][1]))
-                region = fact * nk[lmat][0] * \
-                    nk[lmat][1] * normEsq[start:end, :, :]
-                self.log.debug('REGION SHAPE: %s', str(region.shape))
-                self.log.debug('REGION: ')
-                self.log.debug(str(region))
-                gvec[start:end, :, :] = region
+        freq = self.conf[('Simulation', 'params', 'frequency', 'value')]
+        for name, layer in self.layers.items():
+            self.log.debug('LAYER: %s', name)
+            self.log.debug('LAYER T: %f', layer.thickness)
+            self.log.debug('START: %i', layer.istart)
+            self.log.debug('END: %i', layer.iend)
+            print('LAYER: %s'% name)
+            print('LAYER T: %f'% layer.thickness)
+            print('START: %i'% layer.istart)
+            print('END: %i'% layer.iend)
+            # Use the layer object to get the nk matrix with correct material
+            # geometry
+            nmat, kmat = layer.get_nk_matrix(freq)
+            gvec[layer.slice] = fact * nmat * kmat * \
+                normEsq[layer.slice]
+            # gvec[layer.istart:layer.iend, :, :] = fact * nmat * kmat * \
+            #     normEsq[layer.istart:layer.iend, :, :]
             self.log.debug('GEN RATE MATRIX: ')
             self.log.debug(str(gvec))
-            count += 1
         self.extend_data('genRate', gvec)
         return gvec
 
@@ -700,6 +583,28 @@ class Simulation:
         power = intg.trapz(power_values, x=freqs)
         self.log.info('Incident Power: %s', str(power))
         return power
+
+    def integrate_quantity(self, q, mask=None):
+        """
+        Compute the full 3D integral of a specified quantity over the entire
+        simulation domain. If a mask is provided, it will multiply the 3D array
+        of the quantity elementwise by the mask. This can be useful if you want
+        to integrate only over a specific region of the device. You would
+        supply a 3D mask that is 1 inside that region, and zero outside that
+        region
+        """
+        qarr = self.get_scalar_quantity(q)
+        if mask is not None:
+            qarr = qarr*mask
+        # Gen rate in cm^-3. Gotta convert lengths here from um to cm
+        z_vals = np.linspace(0, self.height, self.z_samples)
+        x_vals = np.linspace(0, self.period, self.x_samples)
+        y_vals = np.linspace(0, self.period, self.y_samples)
+        z_integral = intg.trapz(qarr, x=z_vals, axis=0)
+        x_integral = intg.trapz(z_integral, x=x_vals, axis=0)
+        y_integral = intg.trapz(x_integral, x=y_vals, axis=0)
+        return y_integral
+
 
     def jsc_contrib(self, port='Substrate_bottom'):
         self.log.info('Computing Jsc contrib')

@@ -8,6 +8,44 @@ import numpy as np
 
 from collections import OrderedDict
 from contextlib import contextmanager
+from scipy import interpolate
+
+
+def setup_sim(sim):
+    """
+    Convenience function for setting up a simulation for execution. Just calls
+    a bunch of methods of the Simulator object
+    """
+
+    sim.evaluate_config()
+    sim.update_id()
+    sim.make_logger()
+    sim.configure()
+    sim.build_device()
+    sim.set_excitation()
+    return sim
+
+
+def get_nk(path, freq):
+    """
+    Returns n and k, the real and imaginary components of the index of
+    refraction at a given frequency :param str path: A path to a text file
+    containing the n and k data. The first column should be the frequency
+    in Hertz, the second column the n values, and the third column the k
+    values. Columns must be delimited by whitespace.  :param float freq:
+    The desired frequency in Hertz
+    """
+
+    # Get data
+    freq_vec, n_vec, k_vec = np.loadtxt(path, unpack=True)
+    # Get n and k at specified frequency via interpolation
+    f_n = interpolate.interp1d(freq_vec, n_vec, kind='linear',
+                               bounds_error=False,
+                               fill_value='extrapolate')
+    f_k = interpolate.interp1d(freq_vec, k_vec, kind='linear',
+                               bounds_error=False,
+                               fill_value='extrapolate')
+    return f_n(freq), f_k(freq)
 
 
 def get_combos(conf, keysets):

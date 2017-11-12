@@ -2,6 +2,7 @@
 
 import os
 import argparse as ap
+import logging
 import logging_tree
 from nanowire.optics.postprocess import Processor
 
@@ -32,6 +33,8 @@ def process_optics():
             you would like to group against, specified as a dot separated path
             to the key in the config as: path.to.key.value""")
     args = parser.parse_args()
+    log = logging.getLogger()
+    log.setLevel(args.log_level.upper())
     if not os.path.isfile(args.config_file):
         raise ValueError("The file you specified does not exist!")
 

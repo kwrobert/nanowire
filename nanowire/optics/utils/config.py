@@ -349,11 +349,10 @@ class Config(MutableMapping):
         Used to sort layers, geometric shapes into their proper physical order.
         Can pass in a kwarg to reverse the order if desired"""
         try:
-            for key, data in adict.items():
-                data['order']
+            sorted_layers = OrderedDict(sorted(adict.items(),
+                                               key=lambda tup: tup[1]['order'],
+                                               reverse=reverse))
         except KeyError:
             raise KeyError('The dictionary you are attempting to sort must '
                            'itself contain a dictionary that has an "order" key')
-        sorted_layers = OrderedDict(sorted(adict.items(), key=lambda tup: tup[1]['order'],
-                                           reverse=reverse))
         return sorted_layers

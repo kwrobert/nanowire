@@ -3,10 +3,10 @@ __pycache__/
 *.zip
 *.png
 *.swp
-*test*/*
-test/*
-*test/
-*test*
+#*test*/*
+#test/*
+#*test/
+#*test*
 *numbasis_convergence*
 sims/*
 comsolcompare/*

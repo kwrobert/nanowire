@@ -10,7 +10,6 @@ __pycache__/
 *numbasis_convergence*
 sims/*
 comsolcompare/*
-*.ipynb
 .ipynb*/
 sanity_check_run/*
 *.pyc

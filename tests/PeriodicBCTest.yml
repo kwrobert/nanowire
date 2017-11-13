@@ -40,7 +40,7 @@ Simulation:
     polarization: 'rhcp'
     x_samples: 20
     y_samples: 20
-    z_samples: 20
+    z_samples: 50
     r_samples : '`int(%(Simulation.params.array_period.value)s*200)`'
     theta_samples : 180
     max_depth: '`%(Layers.Air.params.thickness.value)s+%(Layers.ITO.params.thickness.value)s+%(Layers.NW_SiO2.params.thickness.value)s+%(Layers.NW_AlShell.params.thickness.value)s+%(Layers.Substrate.params.thickness.value)s`'
@@ -68,7 +68,7 @@ Simulation:
             # itertype: 'numsteps'
         numbasis:
             type: 'fixed'
-            value: 20
+            value: 40
             # type: 'variable'
             # start: 200
             # end: 900

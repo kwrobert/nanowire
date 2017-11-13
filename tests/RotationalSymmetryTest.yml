@@ -68,7 +68,7 @@ Simulation:
             # itertype: 'numsteps'
         numbasis:
             type: 'fixed'
-            value: 240
+            value: 400  
             # type: 'variable'
             # start: 200
             # end: 900

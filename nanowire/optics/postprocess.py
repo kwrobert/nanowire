@@ -16,6 +16,7 @@ import matplotlib.patches as mpatches
 import scipy.constants as c
 import scipy.integrate as intg
 import numpy as np
+np.set_printoptions(precision=3, threshold=100000)
 
 from mpl_toolkits.mplot3d import Axes3D
 from itertools import repeat
@@ -199,7 +200,7 @@ class Simulation:
         materials = self.conf['Materials']
         for layer, ldata in ordered_layers.items():
             layer_t = ldata['params']['thickness']['value']
-            end = start + layer_t
+            end = start + layer_t + self.dz
             if 'geometry' in ldata:
                 g = ldata['geometry']
             else:
@@ -208,6 +209,7 @@ class Simulation:
                                   self.x_samples, self.y_samples, self.dz,
                                   base_material=ldata['base_material'], 
                                   geometry=g, materials=materials)
+            start = end
         self.layers = layers
         return layers
 
@@ -328,19 +330,27 @@ class Simulation:
             self.log.debug('LAYER T: %f', layer.thickness)
             self.log.debug('START: %i', layer.istart)
             self.log.debug('END: %i', layer.iend)
-            print('LAYER: %s'% name)
-            print('LAYER T: %f'% layer.thickness)
-            print('START: %i'% layer.istart)
-            print('END: %i'% layer.iend)
+            # print('LAYER: %s'% name)
+            # print('LAYER T: %f'% layer.thickness)
+            # print('START: %i'% layer.istart)
+            # print('END: %i'% layer.iend)
             # Use the layer object to get the nk matrix with correct material
             # geometry
             nmat, kmat = layer.get_nk_matrix(freq)
-            gvec[layer.slice] = fact * nmat * kmat * \
-                normEsq[layer.slice]
+            # print(nmat)
+            # print(kmat)
+            # print(layer.slice)
+            gvec[layer.slice] = fact * nmat * kmat * normEsq[layer.slice]
+            # print(gvec)
+            # print(np.max(gvec))
+            # input('Continue?')
             # gvec[layer.istart:layer.iend, :, :] = fact * nmat * kmat * \
             #     normEsq[layer.istart:layer.iend, :, :]
             self.log.debug('GEN RATE MATRIX: ')
             self.log.debug(str(gvec))
+        air_layer = self.layers['Air']
+        air_sect = gvec[air_layer.slice]
+        # print(np.amax(air_sect))
         self.extend_data('genRate', gvec)
         return gvec
 
@@ -649,6 +659,8 @@ class Simulation:
         y_integral = intg.trapz(x_integral, x=y_vals, axis=0)
         # Convert period to cm and current to mA
         sun_pow = self._get_incident_amplitude()
+        self.log.info('Sun power = %f', sun_pow)
+        self.log.info('Integral = %f', y_integral)
         Jsc = 1000*(c.e/(self.period*1e-4)**2)*y_integral
         outf = os.path.join(self.dir, 'jsc_integrated_contrib.dat')
         with open(outf, 'w') as out:

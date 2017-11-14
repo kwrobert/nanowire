@@ -93,18 +93,17 @@ class Layer:
                             self.y_samples))*nk[self.base_material][0]
         k_matrix = np.ones((self.x_samples,
                             self.y_samples))*nk[self.base_material][1]
-        xcoords = np.arange(0, self.period+self.dx, self.dx)
-        ycoords = np.arange(0, self.period+self.dy, self.dy)
+        xcoords = np.arange(0, self.period, self.dx)
+        ycoords = np.arange(0, self.period, self.dy)
         for name, (shape, mat) in self.shapes.items():
             n = nk[mat][0]
             k = nk[mat][1]
             # Get a mask that is True inside the shape and False outside
             mask = get_mask(shape, xcoords, ycoords)
-            print(mask.shape)
-            print(n_matrix.shape)
-            print(k_matrix.shape)
+            # print(mask)
             shape_nvals = mask*n
             shape_kvals = mask*k
             n_matrix = np.where(mask, shape_nvals, n_matrix)
+            # print(n_matrix)
             k_matrix = np.where(mask, shape_kvals, k_matrix)
         return n_matrix, k_matrix

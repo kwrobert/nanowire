@@ -1127,6 +1127,36 @@ class Simulator():
         self.log.debug('Finished computing fields!')
         return Ex, Ey, Ez
 
+    def compute_fields_by_point(self):
+        self.log.debug('Computing fields ...')
+        x_samp = self.conf['Simulation']['x_samples']
+        y_samp = self.conf['Simulation']['y_samples']
+        z_samp = self.conf['Simulation']['z_samples']
+        max_depth = self.conf['Simulation']['max_depth']
+        if max_depth:
+            self.log.debug('Computing up to depth of {} '
+                           'microns'.format(max_depth))
+            zvec = np.linspace(0, max_depth, z_samp)
+        else:
+            self.log.debug('Computing for entire device')
+            height = self.get_height()
+            zvec = np.linspace(0, height, z_samp)
+        dx = self.period/x_samp
+        dy = self.period/y_samp
+        Ex = 0j*np.zeros((z_samp, x_samp, y_samp))
+        Ey = 0j*np.zeros((z_samp, x_samp, y_samp))
+        Ez = 0j*np.zeros((z_samp, x_samp, y_samp))
+        xcoords = np.arange(0, self.period, dx)
+        ycoords = np.arange(0, self.period, dy)
+        for zcount, z in enumerate(zvec):
+            for i, x in enumerate(xcoords):
+                for j, y in enumerate(ycoords):
+                    E, H = self.s4.GetFields(x, y, z) 
+                    Ex[zcount, i, j] = E[0]
+                    Ey[zcount, i, j] = E[1]
+                    Ez[zcount, i, j] = E[2]
+        return (Ex, Ey, Ez)
+
     def compute_fields_at_point(self, x, y, z):
         """
         Compute the electric field at a specific point within the device and
@@ -1160,7 +1190,7 @@ class Simulator():
             self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez})
             self.converged = (conv, numbasis)
         else:
-            Ex, Ey, Ez = self.compute_fields()
+            Ex, Ey, Ez = self.compute_fields_by_point()
             self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez})
 
     def get_fluxes(self):

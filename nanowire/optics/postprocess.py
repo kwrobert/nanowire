@@ -451,6 +451,55 @@ class Simulation:
         self.data[key] = avgs
         return avgs
 
+    def absorption_per_layer(self):
+        # Method 1: Go through power flux
+        fluxes = self.data['fluxes']
+        absorb_dict = {}
+        for layer, (forw, back) in fluxes.items():
+            if '_bottom' in layer:
+                continue
+            bottom = layer+'_bottom'
+            flux_top = np.absolute(forw+back)
+            flux_bottom = np.absolute(fluxes[bottom][0]+fluxes[bottom][1]) 
+            absorbed = flux_top - flux_bottom
+            absorb_dict[layer] = [absorbed]
+        # Method 2: Go through integral of field intensity
+        # P_{abs} = -.5* \omega * |E|^2 * imag(\epsilon)
+        #         = -.5* \omega * |E|^2 * (2 n k)
+        # Above formula gives absorbed power as function of space, so just
+        # integrate that over entire layer to get total absorbed power in layer
+        try:
+            Esq = self.data['normEsquared']
+        except KeyError:
+            Esq = self.normEsquared()
+        freq = self.conf[('Simulation', 'params', 'frequency', 'value')]        
+        for layer_obj in self.layers:
+            n_mat, k_mat = layer_obj.get_nk_matrix(freq)
+            # n and k could be functions of space, so we need to multiply the
+            # fields by n and k before integrating
+            arr_slice = Esq[layer.slice]*n_mat*k_mat
+            zsamps = layer_obj.iend - layer_obj.istart
+            z_vals = np.linspace(0, layer_obj.thickness*1e-4, zsamps)
+            x_vals = np.linspace(0, self.period*1e-4, self.x_samples)
+            y_vals = np.linspace(0, self.period*1e-4, self.y_samples)
+            z_integral = intg.trapz(arr_slice, x=z_vals, axis=0)
+            x_integral = intg.trapz(z_integral, x=x_vals, axis=0)
+            y_integral = intg.trapz(x_integral, x=y_vals, axis=0)
+            p_abs = -1*freq*y_integral
+            dlist = absorb_dict[layer_obj.name]
+            dlist.append(p_abs)
+            diff = np.abs(p_abs - dlist[0])
+            dlist.append(diff)
+            absorb_dict[layer_obj.name] = dlist
+        self.log.info("Layer absorption dict: %s", str(absorb_dict))
+        outfile = os.path.join(self.dir, 'abs_per_layer.dat')
+        with open(outfile, 'w') as f:
+            f.write('# Layer, Flux_Method, Integrate_Method\n')
+            for layer, dlist in absorb_dict.items():
+                f.write('{}, {}, {}, {}'.format(layer, dlist[0], dlist[1],
+                                                dlist[2])
+        return absorb_dict
+
     def transmissionData(self, port='Substrate'):
         """
         Computes reflection, transmission, and absorbance

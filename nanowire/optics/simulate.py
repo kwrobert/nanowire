@@ -126,11 +126,11 @@ def run_sim(conf, q=None):
         if not sim.conf.variable_thickness:
             sim.evaluate_config()
             sim.update_id()
-            sim.make_logger()
             try:
                 os.makedirs(sim.dir)
             except OSError:
                 pass
+            sim.make_logger()
             log.info('Executing sim %s', sim.id[0:10])
             sim.save_all()
             # path = os.path.join(os.path.basename(sim.dir), 'sim.hdf5')
@@ -156,11 +156,11 @@ def run_sim(conf, q=None):
             # data, then make the subdir from the sim id and get the data
             sim.evaluate_config()
             sim.update_id()
-            sim.make_logger()
             try:
                 os.makedirs(sim.dir)
             except OSError:
                 pass
+            sim.make_logger()
             subpath = os.path.join(orig_id, sim.id[0:10])
             log.info('Computing initial thickness at %s', subpath)
             sim.save_all()
@@ -188,7 +188,12 @@ def run_sim(conf, q=None):
         msg = 'Sim {} raised the following exception:\n{}'.format(sim.id,
                                                                   trace)
         log.error(msg)
-        sim.log.error(trace)
+        # We might encounter an exception before the logger instance for this
+        # sim gets created
+        try:
+            sim.log.error(trace)
+        except AttributeError:
+            pass
         raise
     return None
 
@@ -1191,6 +1196,7 @@ class Simulator():
             self.converged = (conv, numbasis)
         else:
             Ex, Ey, Ez = self.compute_fields_by_point()
+            # Ex, Ey, Ez = self.compute_fields()
             self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez})
 
     def get_fluxes(self):
@@ -1226,14 +1232,21 @@ class Simulator():
         retrieiving field data.
         """
         self.log.debug('Computing dielectric profile ...')
-        period =  self.conf['Simulation']['params']['array_period']['value']
+        period = self.conf['Simulation']['params']['array_period']['value']
         x_samp = self.conf['Simulation']['x_samples']
         y_samp = self.conf['Simulation']['y_samples']
         z_samp = self.conf['Simulation']['z_samples']
-        height = self.get_height()
         x_vec = np.linspace(0, period, x_samp)
         y_vec = np.linspace(0, period, y_samp)
-        z_vec = np.linspace(0, height, z_samp)
+        max_depth = self.conf[('Simulation', 'max_depth')]
+        if max_depth:
+            self.log.debug('Computing up to depth of {} '
+                           'microns'.format(max_depth))
+            zmax = max_depth
+        else:
+            self.log.debug('Computing for entire device')
+            zmax = self.get_height()
+        z_vec = np.linspace(0, zmax, z_samp)
         xv, yv, zv = np.meshgrid(x_vec, y_vec, z_vec, indexing='ij')
         eps_mat = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
         # eps_mat = np.zeros((z_samp, x_samp, y_samp))

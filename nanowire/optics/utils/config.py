@@ -4,6 +4,7 @@ import ruamel.yaml as yaml
 import re
 from collections import MutableMapping, OrderedDict
 from copy import deepcopy
+import pprint
 
 
 def get_env_variable(match):
@@ -113,6 +114,17 @@ class Config(MutableMapping):
         # First we find all the references and the exact location(s) in the config
         # that each reference ocurrs at
         self._find_references()
+        # Next we determine if any of the things we refer to in the dependency
+        # graph have backticks, meaning they must be evaluated before the
+        # things that refer to them actually resolve their value
+        for path in self.dep_graph.keys():
+            key_seq = path.split('.')
+            val = self.getfromseq(key_seq)
+            if isinstance(val, str) and (val[0] == '`' and val[-1] == '`'):
+                self.dep_graph[path].update({'evaluated': False})
+            else:
+                self.dep_graph[path].update({'evaluated': True})
+                
         # Now we build out the "refers_to" entry for each reference to see if a
         # reference at one place in the table refers to some other value
         # For each reference we found
@@ -131,6 +143,8 @@ class Config(MutableMapping):
                             data['ref_to'].append(other_ref)
                         else:
                             data['ref_to'] = [other_ref]
+            # Nothing has been resolved at this poing
+            data['resolved'] = False
 
     def _resolve(self, ref):
         ref_data = self.dep_graph[ref]
@@ -156,10 +170,14 @@ class Config(MutableMapping):
         """Checks if a list of references have all been resolved"""
         bools = []
         for ref in refs:
-            if 'resolved' in self.dep_graph[ref]:
-                bools.append(self.dep_graph[ref]['resolved'])
-            else:
-                bools.append(False)
+            bools.append(self.dep_graph[ref]['resolved'])
+        return all(bools)
+
+    def _check_evaled(self, refs):
+        """Checks if a list of references have all been evaluated"""
+        bools = []
+        for ref in refs:
+            bools.append(self.dep_graph[ref]['evaluated'])
         return all(bools)
 
     def interpolate(self):
@@ -170,28 +188,50 @@ class Config(MutableMapping):
         config_resolved = False
         while not config_resolved:
             # self.log.debug('CONFIG NOT RESOLVED, MAKING PASS')
-            # Now we can actually perform any resolution
+            # Now we can actually perform any resolutions
             for ref, ref_data in self.dep_graph.items():
-                # If the actual location of this references doesn't itself refer to
-                # something else, we can safely resolve it because we know it has a
-                # value
-                if 'resolved' in ref_data:
-                    is_resolved = ref_data['resolved']
-                else:
-                    is_resolved = False
+                # Has this config item already been resolved?
+                is_resolved = ref_data['resolved']
                 if not is_resolved:
                     if 'ref_to' not in ref_data:
                         # self.log.debug('NO REFERENCES, RESOLVING')
+                        # Before resolving all the places in the config
+                        # that where this reference occurs, we first need
+                        # to evaluate value at this path so we don't
+                        # resolve references to this path with a string
+                        # surrounded in backticks
+                        evaled = ref_data['evaluated']
+                        if not evaled:
+                            key_seq = ref.split('.')
+                            val = self.getfromseq(key_seq)
+                            res = self.eval_expr(val)
+                            self.setfromseq(key_seq, res)
+                            self.dep_graph[ref]['evaluated'] = True
                         self._resolve(ref)
                         self.dep_graph[ref]['resolved'] = True
                     else:
-                        # self.log.debug('CHECKING REFERENCES')
-                        # If all the locations this reference points to are resolved, then we
-                        # can go ahead and resolve this one
-                        if self._check_resolved(ref_data['ref_to']):
+                        # If all the locations this reference points to are
+                        # resolved and evaluated, then we can go ahead and
+                        # resolve this one
+                        if self._check_resolved(ref_data['ref_to']) and self._check_evaled(ref_data['ref_to']):
+                            evaled = ref_data['evaluated']
+                            if not evaled:
+                                key_seq = ref.split('.')
+                                val = self.getfromseq(key_seq)
+                                res = self.eval_expr(val)
+                                self.setfromseq(key_seq, res)
+                                self.dep_graph[ref]['evaluated'] = True
                             self._resolve(ref)
                             self.dep_graph[ref]['resolved'] = True
             config_resolved = self._check_resolved(self.dep_graph.keys())
+
+    def eval_expr(self, expr_str):
+        """
+        Evaluate the provided expression string and return the result
+        """
+        expr = expr_str.strip('`')
+        result = eval(expr)
+        return result
 
     def evaluate(self, in_table=None, old_key=None):
         """
@@ -211,11 +251,10 @@ class Config(MutableMapping):
                 self.evaluate(value, new_key)
             elif isinstance(value, str):
                 if value[0] == '`' and value[-1] == '`':
-                    expr = value.strip('`')
-                    result = eval(expr)
+                    result = self.eval_expr(value)
                     key_seq = old_key.split('.')
                     key_seq.append(key)
-                    self[key_seq] = result
+                    self.setfromseq(key_seq, result)
 
     def _update_params(self):
         # self.log.info('Updating params')

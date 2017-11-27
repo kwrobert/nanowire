@@ -199,8 +199,14 @@ class Simulation:
         layers = OrderedDict()
         materials = self.conf['Materials']
         for layer, ldata in ordered_layers.items():
+            # Dont add the layer if we don't have field data for it because its
+            # beyond max_depth
+            max_depth = self.conf[('Simulation', 'max_depth')]
+            if max_depth and start >= max_depth:
+                break
             layer_t = ldata['params']['thickness']['value']
-            end = start + layer_t + self.dz
+            # end = start + layer_t + self.dz
+            end = start + layer_t
             if 'geometry' in ldata:
                 g = ldata['geometry']
             else:
@@ -348,9 +354,6 @@ class Simulation:
             #     normEsq[layer.istart:layer.iend, :, :]
             self.log.debug('GEN RATE MATRIX: ')
             self.log.debug(str(gvec))
-        air_layer = self.layers['Air']
-        air_sect = gvec[air_layer.slice]
-        # print(np.amax(air_sect))
         self.extend_data('genRate', gvec)
         return gvec
 
@@ -460,9 +463,13 @@ class Simulation:
                 continue
             bottom = layer+'_bottom'
             flux_top = np.absolute(forw+back)
+            # flux_top = .5*(forw.real + back.real)
             flux_bottom = np.absolute(fluxes[bottom][0]+fluxes[bottom][1]) 
+            # flux_bottom = .5*(fluxes[bottom][0].real+fluxes[bottom][1].real) 
             absorbed = flux_top - flux_bottom
             absorb_dict[layer] = [absorbed]
+            print("Layer: {}".format(layer))
+            print("Flux Method Absorbed: {}".format(absorbed))
         # Method 2: Go through integral of field intensity
         # P_{abs} = -.5* \omega * |E|^2 * imag(\epsilon)
         #         = -.5* \omega * |E|^2 * (2 n k)
@@ -472,32 +479,39 @@ class Simulation:
             Esq = self.data['normEsquared']
         except KeyError:
             Esq = self.normEsquared()
+        print(Esq.shape)
         freq = self.conf[('Simulation', 'params', 'frequency', 'value')]        
-        for layer_obj in self.layers:
+        for layer_name, layer_obj in self.layers.items():
+            print("Layer : {}".format(layer_name))
             n_mat, k_mat = layer_obj.get_nk_matrix(freq)
             # n and k could be functions of space, so we need to multiply the
             # fields by n and k before integrating
-            arr_slice = Esq[layer.slice]*n_mat*k_mat
+            arr_slice = Esq[layer_obj.slice]*n_mat*k_mat
             zsamps = layer_obj.iend - layer_obj.istart
-            z_vals = np.linspace(0, layer_obj.thickness*1e-4, zsamps)
-            x_vals = np.linspace(0, self.period*1e-4, self.x_samples)
-            y_vals = np.linspace(0, self.period*1e-4, self.y_samples)
+            z_vals = np.linspace(0, layer_obj.thickness, zsamps)
+            x_vals = np.linspace(0, self.period, self.x_samples)
+            y_vals = np.linspace(0, self.period, self.y_samples)
             z_integral = intg.trapz(arr_slice, x=z_vals, axis=0)
             x_integral = intg.trapz(z_integral, x=x_vals, axis=0)
             y_integral = intg.trapz(x_integral, x=y_vals, axis=0)
-            p_abs = -1*freq*y_integral
-            dlist = absorb_dict[layer_obj.name]
+            p_abs = self.period**2*c.epsilon_0*freq*y_integral
+            print("Integrated Absorbed: {}".format(p_abs))
+            dlist = absorb_dict[layer_name]
             dlist.append(p_abs)
             diff = np.abs(p_abs - dlist[0])
             dlist.append(diff)
-            absorb_dict[layer_obj.name] = dlist
+            absorb_dict[layer_name] = dlist
+        for layer in absorb_dict.keys():
+            while len(absorb_dict[layer]) < 3:
+                absorb_dict[layer].append(None)
+        print(absorb_dict)
         self.log.info("Layer absorption dict: %s", str(absorb_dict))
         outfile = os.path.join(self.dir, 'abs_per_layer.dat')
         with open(outfile, 'w') as f:
             f.write('# Layer, Flux_Method, Integrate_Method\n')
             for layer, dlist in absorb_dict.items():
-                f.write('{}, {}, {}, {}'.format(layer, dlist[0], dlist[1],
-                                                dlist[2])
+                f.write('{}, {}, {}, {}\n'.format(layer, dlist[0], dlist[1],
+                                                dlist[2]))
         return absorb_dict
 
     def transmissionData(self, port='Substrate'):
@@ -799,7 +813,7 @@ class Simulation:
                                  'supported'.format(data['type']))
         return ax
 
-    def draw_geometry_2d(self, plane, pval, ax_hand):
+    def draw_geometry_2d(self, plane, pval, ax_hand, skip_list=[]):
         """This function draws the layer boundaries and in-plane geometry on 2D
         heatmaps"""
         # Get the layers in order
@@ -826,16 +840,17 @@ class Simulation:
                     end = int(dist / self.dz) + 1
                     boundaries.append((dist, start, end))
                 if layer_t > 0:
-                    x = [0, period]
-                    y = [self.height - start * self.dz,
-                         self.height - start * self.dz]
-                    label_y = y[0] - 0.25
-                    label_x = x[-1] - .01
-                    plt.text(label_x, label_y, layer, ha='right',
-                             family='sans-serif', size=16, color='grey')
-                    line = mlines.Line2D(x, y, linestyle='solid', linewidth=2.0,
-                                         color='grey')
-                    ax_hand.add_line(line)
+                    if layer not in skip_list:
+                        x = [0, period]
+                        y = [self.height - start * self.dz,
+                             self.height - start * self.dz]
+                        label_y = y[0] + 3*self.dz
+                        label_x = x[-1] - .01
+                        # ax_hand.text(label_x, label_y, layer, ha='right',
+                        #              family='sans-serif', size=16, color='grey')
+                        line = mlines.Line2D(x, y, linestyle='solid', linewidth=2.0,
+                                             color='grey')
+                        ax_hand.add_line(line)
                     count += 1
             else:
                 # If look at a fixed z pval, the start and end values are
@@ -843,8 +858,8 @@ class Simulation:
                 start, end = None, None
             # If we have some internal geometry for this layer, draw it
             if 'geometry' in ldata:
-                ax = self._draw_layer_geometry(ldata, start, end, plane, pval, ax_hand)
-        return ax
+                ax_hand = self._draw_layer_geometry(ldata, start, end, plane, pval, ax_hand)
+        return ax_hand
 
     def heatmap2d(self, x, y, cs, labels, ptype, pval, save_path=None,
                   show=False, draw=False, fixed=None, colorsMap='jet'):
@@ -1093,6 +1108,8 @@ class SimulationGroup:
 
     def __init__(self, sims):
         self.sims = sims
+        for sim in self.sims:
+            sim.get_layers()
         self.log = logging.getLogger(__name__)
         self.num_sims = len(sims)
 

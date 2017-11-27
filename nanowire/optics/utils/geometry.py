@@ -39,8 +39,8 @@ class Layer:
         self.end = end
         self.thickness = end - start
         self.period = period
-        self.istart = int(round(start/dz))
-        self.iend = int(round(end/dz))
+        self.istart = int(np.floor(start/dz))
+        self.iend = int(np.floor(end/dz))
         self.slice = (slice(self.istart, self.iend), ...)
         if geometry:
             self.collect_shapes(geometry)

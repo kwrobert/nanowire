@@ -295,6 +295,7 @@ class Simulation:
         E_magsq = np.zeros_like(self.data['Ex'], dtype=np.float64)
         for comp in ('Ex', 'Ey', 'Ez'):
             E_magsq += np.absolute(self.data[comp])**2
+            # E_magsq += self.data[comp].real**2
         self.extend_data('normEsquared', E_magsq)
         return E_magsq
 
@@ -482,10 +483,15 @@ class Simulation:
         print(Esq.shape)
         freq = self.conf[('Simulation', 'params', 'frequency', 'value')]        
         for layer_name, layer_obj in self.layers.items():
+            if layer_name == 'Air':
+                continue
             print("Layer : {}".format(layer_name))
             n_mat, k_mat = layer_obj.get_nk_matrix(freq)
+            print(n_mat[0,0])
+            print(k_mat[0,0])
             # n and k could be functions of space, so we need to multiply the
             # fields by n and k before integrating
+            print('Slice: {}'.format(layer_obj.slice))
             arr_slice = Esq[layer_obj.slice]*n_mat*k_mat
             zsamps = layer_obj.iend - layer_obj.istart
             z_vals = np.linspace(0, layer_obj.thickness, zsamps)

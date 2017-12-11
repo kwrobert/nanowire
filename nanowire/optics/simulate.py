@@ -419,7 +419,8 @@ class SimulationManager:
             # Make a copy of the global config for this parameter combos. This copy
             # represents an individual simulation
             sim_conf = self.gconf.copy()
-            del sim_conf['Postprocessing']
+            if 'Postprocessing' in sim_conf:
+                del sim_conf['Postprocessing']
             # Now we just overwrite all the variable parameters with their new
             # fixed values. Note that itertools.product is so wonderful and
             # nice that it preserves the order of the values in every combo
@@ -985,7 +986,8 @@ class Simulator():
         # E = np.sqrt(constants.c*constants.mu_0*f_p(freq))*np.cos(polar_angle)
         E = np.sqrt(constants.c * constants.mu_0 * intensity)
         self.log.debug('Incident Amplitude: %s', str(E))
-        return E
+        # return E
+        return 1
 
     def set_excitation(self):
         """Sets the exciting plane wave for the simulation"""
@@ -1195,8 +1197,8 @@ class Simulator():
             self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez})
             self.converged = (conv, numbasis)
         else:
-            Ex, Ey, Ez = self.compute_fields_by_point()
-            # Ex, Ey, Ez = self.compute_fields()
+            # Ex, Ey, Ez = self.compute_fields_by_point()
+            Ex, Ey, Ez = self.compute_fields()
             self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez})
 
     def get_fluxes(self):

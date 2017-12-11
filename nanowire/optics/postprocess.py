@@ -83,14 +83,20 @@ class Simulation:
     for performing calculations on the data.
     """
 
-    def __init__(self, conf):
+    def __init__(self, conf=None, simulator=None):
         """
         :param :class:`~utils.config.Config`: Config object for this simulation
         """
-
-        self.conf = conf
+        
+        if conf is None and simulator is None:
+            raise ValueError('Must pass in either a Config object or a'
+                             ' Simulator object')
+        if conf is not None:
+            self.conf = conf
+        else:
+            self.conf = copy.deepcopy(simulator.conf)
         self.id = make_hash(self.conf.data)
-        self.dir = conf['General']['sim_dir']
+        self.dir = self.conf['General']['sim_dir']
         self.fhandler = logging.FileHandler(os.path.join(self.dir, 'postprocess.log'))
         self.fhandler.addFilter(IdFilter(ID=self.id))
         formatter = logging.Formatter('%(asctime)s [%(name)s:%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
@@ -102,21 +108,25 @@ class Simulation:
         # will get stored in the log record
         self.log = logging.LoggerAdapter(log, {'ID': self.id})
         self.log.debug('Logger initialized')
-        self.data = self._get_data_manager()
+        if conf is not None:
+            self.data = self._get_data_manager()
+        else:
+            self.data = copy.deepcopy(simulator.data)
+            self.data['fluxes'] = simulator.flux_dict
         self.failed = False
         self.avgs = {}
         # Compute and store dx, dy, dz at attributes
-        self.z_samples = int(conf['Simulation']['z_samples'])
-        self.x_samples = int(conf['Simulation']['x_samples'])
-        self.y_samples = int(conf['Simulation']['y_samples'])
-        max_depth = conf['Simulation']['max_depth']
+        self.z_samples = int(self.conf['Simulation']['z_samples'])
+        self.x_samples = int(self.conf['Simulation']['x_samples'])
+        self.y_samples = int(self.conf['Simulation']['y_samples'])
+        max_depth = self.conf['Simulation']['max_depth']
         if max_depth:
             self.height = max_depth
             self.dz = max_depth / self.z_samples
         else:
             self.height = self.conf.get_height()
             self.dz = self.height / self.z_samples
-        self.period = conf['Simulation']['params']['array_period']['value']
+        self.period = self.conf['Simulation']['params']['array_period']['value']
         self.dx = self.period / self.x_samples
         self.dy = self.period / self.y_samples
         self.layers = OrderedDict()

@@ -17,7 +17,7 @@ General:
     opt_keep_intermediates: False
     num_cores: 20
     save_plots: True
-    show_plots: False
+    show_plots: True
     save_as: 'hdf5'
     save_time: True
     output_pattern: True
@@ -38,7 +38,7 @@ Solver:
     ConserveMemory: False
 
 Simulation:
-    polarization: 'rhcp'
+    polarization: 'lpx'
     x_samples: '`int(%(Simulation.params.array_period.value)s*500)`'
     y_samples: '`int(%(Simulation.params.array_period.value)s*500)`'  
     z_samples: '`int(%(Simulation.max_depth)s*500)`' 
@@ -57,7 +57,7 @@ Simulation:
             value: 0
         array_period:
             type: 'fixed'
-            value: .25 
+            value: .125 
         frequency:
             type: 'fixed'
             value: 4.0e14

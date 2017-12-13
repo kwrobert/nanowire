@@ -985,7 +985,8 @@ class Simulator():
         # E = np.sqrt(constants.c*constants.mu_0*f_p(freq))*np.cos(polar_angle)
         E = np.sqrt(constants.c * constants.mu_0 * intensity)
         self.log.debug('Incident Amplitude: %s', str(E))
-        return E
+        # return E
+        return 1
 
     def set_excitation(self):
         """Sets the exciting plane wave for the simulation"""
@@ -1121,16 +1122,27 @@ class Simulator():
         Ex = 0j*np.zeros((z_samp, x_samp, y_samp))
         Ey = 0j*np.zeros((z_samp, x_samp, y_samp))
         Ez = 0j*np.zeros((z_samp, x_samp, y_samp))
+        Hx = 0j*np.zeros((z_samp, x_samp, y_samp))
+        Hy = 0j*np.zeros((z_samp, x_samp, y_samp))
+        Hz = 0j*np.zeros((z_samp, x_samp, y_samp))
         for zcount, z in enumerate(zvec):
             E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(x_samp, y_samp),
                                            Format='Array')
-            for xcount, xval in enumerate(E):
-                for ycount, yval in enumerate(xval):
-                    Ex[zcount, xcount, ycount] = yval[0]
-                    Ey[zcount, xcount, ycount] = yval[1]
-                    Ez[zcount, xcount, ycount] = yval[2]
+            # for xcount, xval in enumerate(E):
+            #     for ycount, yval in enumerate(xval):
+            #         Ex[zcount, xcount, ycount] = yval[0]
+            #         Ey[zcount, xcount, ycount] = yval[1]
+            #         Ez[zcount, xcount, ycount] = yval[2]
+            for xcount in range(x_samp):
+                for ycount in range(y_samp):
+                    Ex[zcount, xcount, ycount] = E[xcount][ycount][0]
+                    Ey[zcount, xcount, ycount] = E[xcount][ycount][1]
+                    Ez[zcount, xcount, ycount] = E[xcount][ycount][2]
+                    Hx[zcount, xcount, ycount] = H[xcount][ycount][0]
+                    Hy[zcount, xcount, ycount] = H[xcount][ycount][1]
+                    Hz[zcount, xcount, ycount] = H[xcount][ycount][2]
         self.log.debug('Finished computing fields!')
-        return Ex, Ey, Ez
+        return Ex, Ey, Ez, Hx, Hy, Hz
 
     def compute_fields_by_point(self):
         self.log.debug('Computing fields ...')
@@ -1151,6 +1163,9 @@ class Simulator():
         Ex = 0j*np.zeros((z_samp, x_samp, y_samp))
         Ey = 0j*np.zeros((z_samp, x_samp, y_samp))
         Ez = 0j*np.zeros((z_samp, x_samp, y_samp))
+        Hx = 0j*np.zeros((z_samp, x_samp, y_samp))
+        Hy = 0j*np.zeros((z_samp, x_samp, y_samp))
+        Hz = 0j*np.zeros((z_samp, x_samp, y_samp))
         xcoords = np.arange(0, self.period, dx)
         ycoords = np.arange(0, self.period, dy)
         for zcount, z in enumerate(zvec):
@@ -1160,7 +1175,10 @@ class Simulator():
                     Ex[zcount, i, j] = E[0]
                     Ey[zcount, i, j] = E[1]
                     Ez[zcount, i, j] = E[2]
-        return (Ex, Ey, Ez)
+                    Hx[zcount, i, j] = H[0]
+                    Hy[zcount, i, j] = H[1]
+                    Hz[zcount, i, j] = H[2]
+        return Ex, Ey, Ez, Hx, Hy, Hz
 
     def compute_fields_at_point(self, x, y, z):
         """
@@ -1169,7 +1187,7 @@ class Simulator():
         """
 
         E, H = self.s4.GetFields(x, y, z)
-        return E
+        return E, H
 
     def compute_fields_on_plane(self, z, xsamples, ysamples):
         """
@@ -1182,12 +1200,18 @@ class Simulator():
         Ex = 0j*np.zeros((xsamples, ysamples))
         Ey = 0j*np.zeros((xsamples, ysamples))
         Ez = 0j*np.zeros((xsamples, ysamples))
-        for xcount, xval in enumerate(E):
-            for ycount, yval in enumerate(xval):
-                Ex[xcount, ycount] = yval[0]
-                Ey[xcount, ycount] = yval[1]
-                Ez[xcount, ycount] = yval[2]
-        return (Ex, Ey, Ez)
+        Hx = 0j*np.zeros((xsamples, ysamples))
+        Hy = 0j*np.zeros((xsamples, ysamples))
+        Hz = 0j*np.zeros((xsamples, ysamples))
+        for xcount in range(xsamples):
+            for ycount in range(ysamples):
+                Ex[xcount, ycount] = E[xcount][ycount][0]
+                Ey[xcount, ycount] = E[xcount][ycount][1]
+                Ez[xcount, ycount] = E[xcount][ycount][2]
+                Hx[xcount, ycount] = H[xcount][ycount][0]
+                Hy[xcount, ycount] = H[xcount][ycount][1]
+                Hz[xcount, ycount] = H[xcount][ycount][2]
+        return Ex, Ey, Ez, Hx, Hy, Hz
 
     def get_field(self):
         if self.conf['General']['adaptive_convergence']:
@@ -1195,9 +1219,9 @@ class Simulator():
             self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez})
             self.converged = (conv, numbasis)
         else:
-            Ex, Ey, Ez = self.compute_fields_by_point()
-            # Ex, Ey, Ez = self.compute_fields()
-            self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez})
+            # Ex, Ey, Ez = self.compute_fields_by_point()
+            Ex, Ey, Ez, Hx, Hy, Hz = self.compute_fields()
+            self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez,'Hx':Hx,'Hy':Hy,'Hz':Hz})
 
     def get_fluxes(self):
         """

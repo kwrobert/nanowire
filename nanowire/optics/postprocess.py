@@ -213,7 +213,7 @@ class Simulation:
                 g = {}
             layers[layer] = Layer(layer, start, end, self.period,
                                   self.x_samples, self.y_samples, self.dz,
-                                  base_material=ldata['base_material'], 
+                                  base_material=ldata['base_material'],
                                   geometry=g, materials=materials)
             start = end
         self.layers = layers
@@ -462,25 +462,35 @@ class Simulation:
             if '_bottom' in layer:
                 continue
             bottom = layer+'_bottom'
-            flux_top = np.absolute(forw+back)
-            # flux_top = .5*(forw.real + back.real)
-            flux_bottom = np.absolute(fluxes[bottom][0]+fluxes[bottom][1]) 
-            # flux_bottom = .5*(fluxes[bottom][0].real+fluxes[bottom][1].real) 
-            absorbed = flux_top - flux_bottom
+            # flux_top = np.absolute(forw+back)
+            flux_top = .5*(forw.real + back.real)
+            # abs_forw = forw - fluxes[bottom][0]
+            # abs_back = back - fluxes[bottom][1]
+            # print(abs_forw)
+            # print(abs_back)
+            # flux_bottom = np.absolute(fluxes[bottom][0]+fluxes[bottom][1])
+            # flux_bottom = .5*(fluxes[bottom][0].real+fluxes[bottom][1].real)
+            # flux_bottom = fluxes[bottom][0]+fluxes[bottom][1]
+            # absorbed = flux_top - flux_bottom
+            # absorbed = np.absolute(abs_forw + abs_back)
+            absorbed = .5*(forw.real - fluxes[bottom][0].real + \
+                           fluxes[bottom][1].real - back.real)
             absorb_dict[layer] = [absorbed]
             print("Layer: {}".format(layer))
             print("Flux Method Absorbed: {}".format(absorbed))
         # Method 2: Go through integral of field intensity
-        # P_{abs} = -.5* \omega * |E|^2 * imag(\epsilon)
-        #         = -.5* \omega * |E|^2 * (2 n k)
+        # P_{abs} = -.5* \omega \epsilon_0 * |E|^2 * imag(\epsilon_r)
+        #         = -.5* \omega \epsilon_0 * |E|^2 * (2 n k)
         # Above formula gives absorbed power as function of space, so just
         # integrate that over entire layer to get total absorbed power in layer
         try:
             Esq = self.data['normEsquared']
+            Hsq = self.data['normHsquared']
         except KeyError:
             Esq = self.normEsquared()
+            Hsq = self.normHsquared()
         print(Esq.shape)
-        freq = self.conf[('Simulation', 'params', 'frequency', 'value')]        
+        freq = self.conf[('Simulation', 'params', 'frequency', 'value')]
         for layer_name, layer_obj in self.layers.items():
             print("Layer : {}".format(layer_name))
             n_mat, k_mat = layer_obj.get_nk_matrix(freq)
@@ -494,8 +504,12 @@ class Simulation:
             z_integral = intg.trapz(arr_slice, x=z_vals, axis=0)
             x_integral = intg.trapz(z_integral, x=x_vals, axis=0)
             y_integral = intg.trapz(x_integral, x=y_vals, axis=0)
-            p_abs = self.period**2*c.epsilon_0*freq*y_integral
+            # p_abs = self.period**2*c.epsilon_0*freq*y_integral
+            c_conv = c.c / self.conf['Simulation']['base_unit']
+            f_conv = freq / c_conv
+            p_abs = f_conv*y_integral
             print("Integrated Absorbed: {}".format(p_abs))
+            # TODO: SUm array and multiply by volume element
             dlist = absorb_dict[layer_name]
             dlist.append(p_abs)
             diff = np.abs(p_abs - dlist[0])
@@ -521,7 +535,7 @@ class Simulation:
         :param str port: Name of the location at which you would like to place
         the transmission port (i.e where you would like to compute
         transmission). This must correspond to one of the keys placed in the
-        fluxes dict located at self.data['fluxes'] 
+        fluxes dict located at self.data['fluxes']
         """
 
         data = self.data['fluxes']
@@ -561,34 +575,6 @@ class Simulation:
             self.data['transmission_data'] = {port: (reflectance,
                                                      transmission,
                                                      absorbance)}
-        # ftype = self.conf['General']['save_as']
-        # if ftype == 'npz':
-        #     outpath = os.path.join(base, 'ref_trans_abs.dat')
-        #     self.log.info('Writing transmission file')
-        #     if os.path.isfile(outpath):
-        #         with open(outpath, 'a') as out:
-        #             out.write('%s,%f,%f,%f\n' % (port, reflectance, transmission, absorbance))
-        #     else:
-        #         with open(outpath, 'w') as out:
-        #             out.write('# Port, Reflectance,Transmission,Absorbance\n')
-        #             out.write('%s,%f,%f,%f\n' % (port, reflectance, transmission, absorbance))
-        # elif ftype == 'hdf5':
-        #     group = '/sim_{}'.format(self.id)
-        #     num_rows = len(list(self.conf['Layers'].keys()))*2
-        #     try:
-        #         tb_path = group + '/transmission_data'
-        #         table = self.hdf5.get_node(tb_path, classname='Table')
-        #     except tb.NoSuchNodeError:
-        #         table = self.hdf5.create_table(group, 'transmission_data',
-        #                                        description=TransmissionData,
-        #                                        expectedrows=num_rows)
-        #     row = table.row
-        #     row['layer'] = port
-        #     row['reflection'] = reflectance
-        #     row['transmission'] = transmission
-        #     row['absorption'] = absorbance
-        #     row.append()
-        #     table.flush()
         return reflectance, transmission, absorbance
 
     def _get_incident_amplitude(self):
@@ -641,7 +627,7 @@ class Simulation:
             # If the left of right edge happens to be directly on an NREL bin edge
             # (unlikely) the linear interpolation will just return the value at the
             # NREL bin. Also the selection of inds above excluded the case of left
-            # or right being equal to an NREL bin, 
+            # or right being equal to an NREL bin,
             left_power = lin_interp(freq_vec[inds[0] - 1], freq_vec[inds[0]],
                                     p_vec[inds[0] - 1], p_vec[inds[0]], left)
             right_power = lin_interp(freq_vec[inds[-1]], freq_vec[inds[-1] + 1],
@@ -1052,7 +1038,7 @@ class Simulation:
         If direction='y' then coord1 corresponds to x and coord2 corresponds to
         z.
         :param str direction: The direction along which to plot the line. Must
-        be one of 'x', 'y', or 'z'. 
+        be one of 'x', 'y', or 'z'.
         :param str direction: The direction along which you wish to plot a
         line. Must be one of 'x', 'y', or 'z'. The other two coordinates remain
         fixed and are specified by coord1 and coord2.

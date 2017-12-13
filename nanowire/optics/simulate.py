@@ -419,7 +419,8 @@ class SimulationManager:
             # Make a copy of the global config for this parameter combos. This copy
             # represents an individual simulation
             sim_conf = self.gconf.copy()
-            del sim_conf['Postprocessing']
+            if 'Postprocessing' in sim_conf:
+                del sim_conf['Postprocessing']
             # Now we just overwrite all the variable parameters with their new
             # fixed values. Note that itertools.product is so wonderful and
             # nice that it preserves the order of the values in every combo

@@ -987,7 +987,7 @@ class Simulator():
         E = np.sqrt(constants.c * constants.mu_0 * intensity)
         self.log.debug('Incident Amplitude: %s', str(E))
         # return E
-        return 1
+        return 2
 
     def set_excitation(self):
         """Sets the exciting plane wave for the simulation"""

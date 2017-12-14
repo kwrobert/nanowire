@@ -292,7 +292,7 @@ class Simulation:
         for comp in ('Ex', 'Ey', 'Ez'):
             E_mag += np.absolute(self.data[comp])**2
         self.extend_data('normE', np.sqrt(E_mag))
-        return E_mag
+        return np.sqrt(E_mag)
 
     def normEsquared(self):
         """
@@ -1029,21 +1029,17 @@ class Simulation:
         self.scatter3d(all_data[:, 0], all_data[:, 1], all_data[:, 2],
                        all_data[:, 3], labels, 'planes_3d')
 
-    def line_plot(self, x, y, ptype, labels):
-        """Make a simple line plot"""
-        fig = plt.figure()
-        plt.plot(x, y)
-        plt.xlabel(labels[0])
-        plt.ylabel(labels[1])
-        plt.title(labels[2])
-        # plt.ylim([0, 16])
-        if self.conf['General']['save_plots']:
-            name = labels[1] + '_' + ptype + '.pdf'
-            path = os.path.join(self.conf['General']['sim_dir'], name)
-            fig.savefig(path)
-        if self.conf['General']['show_plots']:
-            plt.show()
-        plt.close(fig)
+    def line_plot(self, x, y, labels, ax=None):
+        """Make a simple line plot and return the figure and axes handles"""
+        if ax is None:
+            fig, ax = plt.subplots()
+        else:
+            fig = None
+        ax.plot(x, y, label=labels[0])
+        ax.set_xlabel(labels[1])
+        ax.set_ylabel(labels[2])
+        ax.set_title(labels[3])
+        return fig, ax
 
     def fixed_line(self, quantity, direction, coord1, coord2):
         """
@@ -1086,13 +1082,22 @@ class Simulation:
         wvlgth = (c.c / freq) * 1E9
         title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(
             freq, wvlgth)
-        labels = ('Z [um]', quantity, title)
         ptype = "%s_line_plot_%i_%i" % (direction, coord1, coord2)
         if np.iscomplexobj(data):
-            self.log.warning('Plotting only real component of %s in line plot',
-                             quantity)
-            data = data.real
-        self.line_plot(pos_data, data, ptype, labels)
+            labels = ('Real Part', 'Z [um]', quantity, title)
+            fig, ax = self.line_plot(pos_data, data.real, labels)
+            labels = ('Imag Part', 'Z [um]', quantity, title)
+            _, ax = self.line_plot(pos_data, data.imag, labels, ax=ax)
+        else:
+            labels = (None, 'Z [um]', quantity, title)
+            fig, ax = self.line_plot(pos_data, data, labels)
+        ax.legend()
+        if self.conf['General']['save_plots']:
+            name = labels[1] + '_' + ptype + '.pdf'
+            path = os.path.join(self.conf['General']['sim_dir'], name)
+            fig.savefig(path)
+        if self.conf['General']['show_plots']:
+            plt.show()
 
 class SimulationGroup:
 

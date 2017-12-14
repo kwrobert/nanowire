@@ -60,7 +60,7 @@ Simulation:
             value: .125 
         frequency:
             type: 'fixed'
-            value: 4.0e14
+            value: 5.0e14
             bin_size: 0
         numbasis:
             type: 'fixed'

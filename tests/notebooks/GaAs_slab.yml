@@ -38,7 +38,7 @@ Solver:
     ConserveMemory: False
 
 Simulation:
-    polarization: 'rhcp'
+    polarization: 'lpx'
     x_samples: '`int(%(Simulation.params.array_period.value)s*600)`' 
     y_samples: '`int(%(Simulation.params.array_period.value)s*600)`'  
     z_samples: '`int(%(Simulation.max_depth)s*300)`'
@@ -58,6 +58,7 @@ Simulation:
         array_period:
             type: 'fixed'
             value: .25 
+            # value: 1.0 
         frequency:
             type: 'fixed'
             value: 4.0e14
@@ -69,7 +70,7 @@ Simulation:
             # itertype: 'numsteps'
         numbasis:
             type: 'fixed'
-            value: 300
+            value: 40
             # type: 'variable'
             # start: 650
             # end: 900

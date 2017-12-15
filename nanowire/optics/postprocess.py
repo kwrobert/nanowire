@@ -468,13 +468,15 @@ class Simulation:
     def absorption_per_layer(self):
         # Method 1: Go through power flux
         fluxes = self.data['fluxes']
+        base_unit = self.conf['Simulation']['base_unit']
         absorb_dict = {}
-        for layer, (forw, back) in fluxes.items():
+        Zo = consts.physical_constants['characteristic impedance of vacuum'][0]
+        for layer, (forw_top, back_top) in fluxes.items():
             if '_bottom' in layer:
                 continue
             bottom = layer+'_bottom'
+            forw_bottom, back_bottom = fluxes[bottom]
             # flux_top = np.absolute(forw+back)
-            flux_top = .5*(forw.real + back.real)
             # abs_forw = forw - fluxes[bottom][0]
             # abs_back = back - fluxes[bottom][1]
             # print(abs_forw)
@@ -484,8 +486,14 @@ class Simulation:
             # flux_bottom = fluxes[bottom][0]+fluxes[bottom][1]
             # absorbed = flux_top - flux_bottom
             # absorbed = np.absolute(abs_forw + abs_back)
-            absorbed = .5*(forw.real - fluxes[bottom][0].real + \
-                           fluxes[bottom][1].real - back.real)
+            # Minus sign because S4 stick a minus in front of all backward
+            # components
+            Pin = forw_top - back_bot
+            Pout = forw_bot - back_top
+            Plost = Pin - Pout
+            # S4 returns \int |E|^2 / Area, so we need to multiply by the area
+            # here. Factor of vacuum impedance to get the units into power.
+            Pabs = .5*Plost*self.period**2/Zo
             absorb_dict[layer] = [absorbed]
             print("Layer: {}".format(layer))
             print("Flux Method Absorbed: {}".format(absorbed))
@@ -520,12 +528,14 @@ class Simulation:
             z_integral = intg.trapz(arr_slice, x=z_vals, axis=0)
             x_integral = intg.trapz(z_integral, x=x_vals, axis=0)
             y_integral = intg.trapz(x_integral, x=y_vals, axis=0)
-            # p_abs = self.period**2*c.epsilon_0*freq*y_integral
-            c_conv = c.c / self.conf['Simulation']['base_unit']
-            f_conv = freq / c_conv
-            p_abs = f_conv*y_integral
+            # 2\pi for conversion to angular frequency
+            # epsilon_0 comes out of dielectric constant
+            # Factor of base unit because we need to convert from our reference
+            # lengths in base units to SI reference length unit (meters)
+            # Factor of 1/2 for time averaging gets canceled by imaginary part
+            # of dielectric constant (2*n*k) 
+            p_abs = 2*np.pi*freq*c.epsilon_0*base_unit*y_integral
             print("Integrated Absorbed: {}".format(p_abs))
-            # TODO: SUm array and multiply by volume element
             dlist = absorb_dict[layer_name]
             dlist.append(p_abs)
             diff = np.abs(p_abs - dlist[0])

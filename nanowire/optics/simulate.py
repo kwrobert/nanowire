@@ -987,7 +987,7 @@ class Simulator():
         E = np.sqrt(constants.c * constants.mu_0 * intensity)
         self.log.debug('Incident Amplitude: %s', str(E))
         # return E
-        return 1
+        return 2
 
     def set_excitation(self):
         """Sets the exciting plane wave for the simulation"""
@@ -1134,14 +1134,22 @@ class Simulator():
             #         Ex[zcount, xcount, ycount] = yval[0]
             #         Ey[zcount, xcount, ycount] = yval[1]
             #         Ez[zcount, xcount, ycount] = yval[2]
-            for xcount in range(x_samp):
-                for ycount in range(y_samp):
-                    Ex[zcount, xcount, ycount] = E[xcount][ycount][0]
-                    Ey[zcount, xcount, ycount] = E[xcount][ycount][1]
-                    Ez[zcount, xcount, ycount] = E[xcount][ycount][2]
-                    Hx[zcount, xcount, ycount] = H[xcount][ycount][0]
-                    Hy[zcount, xcount, ycount] = H[xcount][ycount][1]
-                    Hz[zcount, xcount, ycount] = H[xcount][ycount][2]
+            E_arr = np.array(E)
+            H_arr = np.array(H)
+            Ex[zcount, :, :] = E_arr[:, :, 0]
+            Ey[zcount, :, :] = E_arr[:, :, 1]
+            Ez[zcount, :, :] = E_arr[:, :, 2]
+            Hx[zcount, :, :] = H_arr[:, :, 0]
+            Hy[zcount, :, :] = H_arr[:, :, 1]
+            Hz[zcount, :, :] = H_arr[:, :, 2]
+            # for xcount in range(x_samp):
+            #     for ycount in range(y_samp):
+            #         Ex[zcount, xcount, ycount] = E[xcount][ycount][0]
+            #         Ey[zcount, xcount, ycount] = E[xcount][ycount][1]
+            #         Ez[zcount, xcount, ycount] = E[xcount][ycount][2]
+            #         Hx[zcount, xcount, ycount] = H[xcount][ycount][0]
+            #         Hy[zcount, xcount, ycount] = H[xcount][ycount][1]
+            #         Hz[zcount, xcount, ycount] = H[xcount][ycount][2]
         self.log.debug('Finished computing fields!')
         return Ex, Ey, Ez, Hx, Hy, Hz
 
@@ -1198,20 +1206,28 @@ class Simulator():
         """
         E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(xsamples, ysamples), 
                                        Format='Array')
-        Ex = 0j*np.zeros((xsamples, ysamples))
-        Ey = 0j*np.zeros((xsamples, ysamples))
-        Ez = 0j*np.zeros((xsamples, ysamples))
-        Hx = 0j*np.zeros((xsamples, ysamples))
-        Hy = 0j*np.zeros((xsamples, ysamples))
-        Hz = 0j*np.zeros((xsamples, ysamples))
-        for xcount in range(xsamples):
-            for ycount in range(ysamples):
-                Ex[xcount, ycount] = E[xcount][ycount][0]
-                Ey[xcount, ycount] = E[xcount][ycount][1]
-                Ez[xcount, ycount] = E[xcount][ycount][2]
-                Hx[xcount, ycount] = H[xcount][ycount][0]
-                Hy[xcount, ycount] = H[xcount][ycount][1]
-                Hz[xcount, ycount] = H[xcount][ycount][2]
+        E_arr = np.array(E)
+        H_arr = np.array(H)
+        Ex = E_arr[:, :, 0]
+        Ey = E_arr[:, :, 1]
+        Ez = E_arr[:, :, 2]
+        Hx = H_arr[:, :, 0]
+        Hy = H_arr[:, :, 1]
+        Hz = H_arr[:, :, 2]
+        # Ex = 0j*np.zeros((xsamples, ysamples))
+        # Ey = 0j*np.zeros((xsamples, ysamples))
+        # Ez = 0j*np.zeros((xsamples, ysamples))
+        # Hx = 0j*np.zeros((xsamples, ysamples))
+        # Hy = 0j*np.zeros((xsamples, ysamples))
+        # Hz = 0j*np.zeros((xsamples, ysamples))
+        # for xcount in range(xsamples):
+        #     for ycount in range(ysamples):
+        #         Ex[xcount, ycount] = E[xcount][ycount][0]
+        #         Ey[xcount, ycount] = E[xcount][ycount][1]
+        #         Ez[xcount, ycount] = E[xcount][ycount][2]
+        #         Hx[xcount, ycount] = H[xcount][ycount][0]
+        #         Hy[xcount, ycount] = H[xcount][ycount][1]
+        #         Hz[xcount, ycount] = H[xcount][ycount][2]
         return Ex, Ey, Ez, Hx, Hy, Hz
 
     def get_field(self):

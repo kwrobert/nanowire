@@ -41,7 +41,7 @@ Simulation:
     polarization: 'lpx'
     x_samples: '`int(%(Simulation.params.array_period.value)s*600)`' 
     y_samples: '`int(%(Simulation.params.array_period.value)s*600)`'  
-    z_samples: '`int(%(Simulation.max_depth)s*300)`'
+    z_samples: '`int(%(Simulation.max_depth)s*600)`'
     r_samples : '`int(%(Simulation.params.array_period.value)s*200)`'
     theta_samples : 180
     max_depth: '`float(%(Layers.Substrate.params.thickness.value)s)`'
@@ -70,7 +70,7 @@ Simulation:
             # itertype: 'numsteps'
         numbasis:
             type: 'fixed'
-            value: 40
+            value: 100
             # type: 'variable'
             # start: 650
             # end: 900

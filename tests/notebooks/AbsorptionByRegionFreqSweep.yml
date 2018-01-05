@@ -1,6 +1,6 @@
 General:
     
-    base_dir: '$HOME/software/nanowire/tests'
+    base_dir: '$HOME/software/nanowire/tests/notebooks/integrate_by_region'
     db_name: 'test_run.db'
     base_name: 'field_data'
     postprocess: False
@@ -14,13 +14,13 @@ General:
     opt_tol: 1e-4
     func_opt_tol: 1e-4
     opt_keep_intermediates: False
-    num_cores: 20
+    num_cores: 6
     save_plots: True
     show_plots: False
     save_as: 'hdf5'
     save_time: True
     output_pattern: True
-    compute_h: False 
+    compute_h: True
     compression: True
     dielectric_profile: False
 
@@ -32,20 +32,18 @@ Solver:
     DiscretizationResolution: 8
     PolarizationDecomposition: True
     PolarizationBasis: 'Default'
-    LanczosSmoothing: True
+    LanczosSmoothing: False
     SubpixelSmoothing: False
     ConserveMemory: False
 
 Simulation:
-    # polarization: 'rhcp'
-    polarization: 'lpx'
-    x_samples: 20
-    y_samples: 20
-    z_samples: 50
+    polarization: 'rhcp'
+    x_samples: 250
+    y_samples: 250
+    z_samples: 600
     r_samples : '`int(%(Simulation.params.array_period.value)s*200)`'
     theta_samples : 180
     max_depth: '`%(Layers.Air.params.thickness.value)s+%(Layers.ITO.params.thickness.value)s+%(Layers.NW_SiO2.params.thickness.value)s+%(Layers.NW_AlShell.params.thickness.value)s+%(Layers.Substrate.params.thickness.value)s`'
-    # max_depth: '`%(Layers.Air.params.thickness.value)s+%(Layers.ITO.params.thickness.value)s+%(Layers.Substrate.params.thickness.value)s`'
     base_unit: 1.0E-6
     input_power: '$HOME/software/nanowire/nanowire/spectra/am15g_freq.txt'
     input_power_wv: '$HOME/software/nanowire/nanowire/spectra/ASTMG173.csv'
@@ -60,17 +58,17 @@ Simulation:
             type: 'fixed'
             value: .25 
         frequency:
-            type: 'fixed'
-            value: 4.0e+14
-            bin_size: 0.
-            # type: 'variable'
-            # start: 333102731111111.1
-            # end: 856549880000000.0
-            # step: 10
-            # itertype: 'numsteps'
+            # type: 'fixed'
+            # value: 4.0e+14
+            # bin_size: 0.
+            type: 'variable'
+            start: 333102731111111.1
+            end: 856549880000000.0
+            step: 40
+            itertype: 'numsteps'
         numbasis:
             type: 'fixed'
-            value: 40
+            value: 300  
             # type: 'variable'
             # start: 200
             # end: 900

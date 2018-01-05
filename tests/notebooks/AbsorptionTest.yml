@@ -32,7 +32,7 @@ Solver:
     DiscretizationResolution: 8
     PolarizationDecomposition: True
     PolarizationBasis: 'Default'
-    LanczosSmoothing: True
+    LanczosSmoothing: False
     SubpixelSmoothing: False
     ConserveMemory: False
 

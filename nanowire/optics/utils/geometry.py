@@ -22,7 +22,7 @@ def get_mask(shape, xcoords, ycoords):
         circ_f = lambdify((_x, _y), expr, modules='numpy', dummify=False)
         xv, yv = np.meshgrid(xcoords, ycoords)
         e = circ_f(xv, yv) 
-        mask = np.where(e > 0, False, True)
+        mask = np.where(e > 0, 0, 1)
     else:
         polygon = Path(shape.vertices)
         mask = polygon.contains_points(list(itertools.product(xcoords, 

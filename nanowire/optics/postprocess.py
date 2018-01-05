@@ -22,6 +22,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from itertools import repeat
 from collections import OrderedDict
 from scipy import interpolate
+import scipy.constants as consts
 from .utils.config import Config
 from .utils.utils import IdFilter, cmp_dicts, make_hash, get_nk
 from .data_manager import HDF5DataManager, NPZDataManager
@@ -466,60 +467,40 @@ class Simulation:
         return avgs
 
     def absorption_per_layer(self):
-        # Method 1: Go through power flux
         fluxes = self.data['fluxes']
         base_unit = self.conf['Simulation']['base_unit']
         absorb_dict = {}
         Zo = consts.physical_constants['characteristic impedance of vacuum'][0]
-        for layer, (forw_top, back_top) in fluxes.items():
-            if '_bottom' in layer:
-                continue
-            bottom = layer+'_bottom'
-            forw_bottom, back_bottom = fluxes[bottom]
-            # flux_top = np.absolute(forw+back)
-            # abs_forw = forw - fluxes[bottom][0]
-            # abs_back = back - fluxes[bottom][1]
-            # print(abs_forw)
-            # print(abs_back)
-            # flux_bottom = np.absolute(fluxes[bottom][0]+fluxes[bottom][1])
-            # flux_bottom = .5*(fluxes[bottom][0].real+fluxes[bottom][1].real)
-            # flux_bottom = fluxes[bottom][0]+fluxes[bottom][1]
-            # absorbed = flux_top - flux_bottom
-            # absorbed = np.absolute(abs_forw + abs_back)
+        try:
+            Esq = self.data['normEsquared']
+        except KeyError:
+            Esq = self.normEsquared()
+        freq = self.conf[('Simulation', 'params', 'frequency', 'value')]
+        for layer_name, layer_obj in self.layers.items():
+            # Method 1: Go through power flux
+            bottom = layer_name+'_bottom'
+            forw_top, back_top = fluxes[layer_name]
+            forw_bot, back_bot = fluxes[bottom]
             # Minus sign because S4 stick a minus in front of all backward
             # components
             Pin = forw_top - back_bot
             Pout = forw_bot - back_top
             Plost = Pin - Pout
             # S4 returns \int |E|^2 / Area, so we need to multiply by the area
-            # here. Factor of vacuum impedance to get the units into power.
-            Pabs = .5*Plost*self.period**2/Zo
-            absorb_dict[layer] = [absorbed]
-            print("Layer: {}".format(layer))
-            print("Flux Method Absorbed: {}".format(absorbed))
-        # Method 2: Go through integral of field intensity
-        # P_{abs} = -.5* \omega \epsilon_0 * |E|^2 * imag(\epsilon_r)
-        #         = -.5* \omega \epsilon_0 * |E|^2 * (2 n k)
-        # Above formula gives absorbed power as function of space, so just
-        # integrate that over entire layer to get total absorbed power in layer
-        try:
-            Esq = self.data['normEsquared']
-            Hsq = self.data['normHsquared']
-        except KeyError:
-            Esq = self.normEsquared()
-            Hsq = self.normHsquared()
-        print(Esq.shape)
-        freq = self.conf[('Simulation', 'params', 'frequency', 'value')]
-        for layer_name, layer_obj in self.layers.items():
-            if layer_name == 'Air':
-                continue
-            print("Layer : {}".format(layer_name))
+            # here. Factor of one over vacuum impedance to get the units into power.
+            Pabs_flux = .5*Plost*self.period**2/Zo
+            self.log.info("Layer: {}".format(layer_name))
+            self.log.info("Flux Method Absorbed: {}".format(Pabs_flux))
+            # Method 2: Go through integral of field intensity
+            # P_{abs} = -.5* \omega \epsilon_0 * |E|^2 * imag(\epsilon_r)
+            #         = -.5* \omega \epsilon_0 * |E|^2 * (2 n k)
+            # Above formula gives absorbed power as function of space, so just
+            # integrate that over entire layer to get total absorbed power in layer
+            # if layer_name == 'Air':
+            #     continue
             n_mat, k_mat = layer_obj.get_nk_matrix(freq)
-            print(n_mat[0,0])
-            print(k_mat[0,0])
             # n and k could be functions of space, so we need to multiply the
             # fields by n and k before integrating
-            print('Slice: {}'.format(layer_obj.slice))
             arr_slice = Esq[layer_obj.slice]*n_mat*k_mat
             zsamps = layer_obj.iend - layer_obj.istart
             z_vals = np.linspace(0, layer_obj.thickness, zsamps)
@@ -534,24 +515,19 @@ class Simulation:
             # lengths in base units to SI reference length unit (meters)
             # Factor of 1/2 for time averaging gets canceled by imaginary part
             # of dielectric constant (2*n*k) 
-            p_abs = 2*np.pi*freq*c.epsilon_0*base_unit*y_integral
-            print("Integrated Absorbed: {}".format(p_abs))
-            dlist = absorb_dict[layer_name]
-            dlist.append(p_abs)
-            diff = np.abs(p_abs - dlist[0])
-            dlist.append(diff)
-            absorb_dict[layer_name] = dlist
-        for layer in absorb_dict.keys():
-            while len(absorb_dict[layer]) < 3:
-                absorb_dict[layer].append(None)
-        print(absorb_dict)
+            Pabs_integ = 2*np.pi*freq*c.epsilon_0*base_unit*y_integral
+            self.log.info("Integrated Absorbed: {}".format(Pabs_integ))
+            diff = np.abs(Pabs_flux - Pabs_integ)
+            absorb_dict[layer_name] = [Pabs_flux, Pabs_integ, diff]
+        # for layer in absorb_dict.keys():
+        #     while len(absorb_dict[layer]) < 3:
+        #         absorb_dict[layer].append(None)
         self.log.info("Layer absorption dict: %s", str(absorb_dict))
         outfile = os.path.join(self.dir, 'abs_per_layer.dat')
         with open(outfile, 'w') as f:
             f.write('# Layer, Flux_Method, Integrate_Method\n')
             for layer, dlist in absorb_dict.items():
-                f.write('{}, {}, {}, {}\n'.format(layer, dlist[0], dlist[1],
-                                                dlist[2]))
+                f.write('{}, {}, {}, {}\n'.format(layer, *dlist))
         return absorb_dict
 
     def transmissionData(self, port='Substrate'):
@@ -669,27 +645,51 @@ class Simulation:
         self.log.info('Incident Power: %s', str(power))
         return power
 
-    def integrate_quantity(self, q, mask=None):
+    def integrate_quantity(self, q, mask=None, layer=None):
         """
-        Compute the full 3D integral of a specified quantity over the entire
-        simulation domain. If a mask is provided, it will multiply the 3D array
-        of the quantity elementwise by the mask. This can be useful if you want
-        to integrate only over a specific region of the device. You would
+        Compute a 3D integral of a specified quantity 
+        
+        :param q: A key in the self.data dict that specifies the quantity you
+        wish to integrate
+        :type q: str 
+        :param mask: A numpy array of ones and zeros, which can be 2D or 3D. If
+        a 3D array is provided, it will multiple the 3D array of the quantity
+        elementwise before integration. The z-direction is along the first
+        axis, i.e mask[z, x, y].  If a 2D array is provided, it will be
+        extended along the z-direction and then will multiply the 3D array of
+        the quantity elementwise before integration. This can be useful if you
+        want to integrate only over a specific region of the device. You would
         supply a 3D mask that is 1 inside that region, and zero outside that
-        region
+        region. Combining with the layer arg is supported.
+        :type mask: numpy array
+        :param layer: The name of the layer you wish to integrate over.
+        Providing this will extract a 3D slice of data that is in the specified
+        layer, and only integrate over that slice. Use this if you do not want
+        to include all layers in the integration. Combining with the mask arg
+        is supported.
+        :type layer: str
+        :rtype: float
         """
         qarr = self.get_scalar_quantity(q)
+        if layer is not None:
+            l = self.layers[layer]
+            zsamps = l.iend - l.istart
+            z_vals = np.linspace(l.start, l.end, zsamps)
+            x_vals = np.linspace(0, l.period, l.x_samples)
+            y_vals = np.linspace(0, l.period, l.y_samples)
+            qarr = qarr[l.slice]
+            if mask is not None and len(mask.shape) == 3:
+                mask = mask[l.slice]
+        else:
+            z_vals = np.linspace(0, self.height, self.z_samples)
+            x_vals = np.linspace(0, self.period, self.x_samples)
+            y_vals = np.linspace(0, self.period, self.y_samples)
         if mask is not None:
             qarr = qarr*mask
-        # Gen rate in cm^-3. Gotta convert lengths here from um to cm
-        z_vals = np.linspace(0, self.height, self.z_samples)
-        x_vals = np.linspace(0, self.period, self.x_samples)
-        y_vals = np.linspace(0, self.period, self.y_samples)
         z_integral = intg.trapz(qarr, x=z_vals, axis=0)
         x_integral = intg.trapz(z_integral, x=x_vals, axis=0)
         y_integral = intg.trapz(x_integral, x=y_vals, axis=0)
         return y_integral
-
 
     def jsc_contrib(self, port='Substrate_bottom'):
         self.log.info('Computing Jsc contrib')

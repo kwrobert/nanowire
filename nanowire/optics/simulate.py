@@ -1120,36 +1120,30 @@ class Simulator():
             self.log.debug('Computing for entire device')
             height = self.get_height()
             zvec = np.linspace(0, height, z_samp)
-        Ex = 0j*np.zeros((z_samp, x_samp, y_samp))
-        Ey = 0j*np.zeros((z_samp, x_samp, y_samp))
-        Ez = 0j*np.zeros((z_samp, x_samp, y_samp))
-        Hx = 0j*np.zeros((z_samp, x_samp, y_samp))
-        Hy = 0j*np.zeros((z_samp, x_samp, y_samp))
-        Hz = 0j*np.zeros((z_samp, x_samp, y_samp))
+        Ex = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
+        Ey = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
+        Ez = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
+        if self.conf["General"]["compute_h"]:
+            Hx = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
+            Hy = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
+            Hz = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
+        else:
+            Hx, Hy, Hz = None, None, None
         for zcount, z in enumerate(zvec):
-            E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(x_samp, y_samp),
-                                           Format='Array')
-            # for xcount, xval in enumerate(E):
-            #     for ycount, yval in enumerate(xval):
-            #         Ex[zcount, xcount, ycount] = yval[0]
-            #         Ey[zcount, xcount, ycount] = yval[1]
-            #         Ez[zcount, xcount, ycount] = yval[2]
+            if self.conf["General"]["compute_h"]:
+                E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(x_samp, y_samp),
+                                               Format='Array')
+                H_arr = np.array(H)
+                Hx[zcount, :, :] = H_arr[:, :, 0]
+                Hy[zcount, :, :] = H_arr[:, :, 1]
+                Hz[zcount, :, :] = H_arr[:, :, 2]
+            else:
+                E = self.s4.GetFieldsOnGrid(z=z, NumSamples=(x_samp, y_samp),
+                                            Format='Array')[0]
             E_arr = np.array(E)
-            H_arr = np.array(H)
             Ex[zcount, :, :] = E_arr[:, :, 0]
             Ey[zcount, :, :] = E_arr[:, :, 1]
             Ez[zcount, :, :] = E_arr[:, :, 2]
-            Hx[zcount, :, :] = H_arr[:, :, 0]
-            Hy[zcount, :, :] = H_arr[:, :, 1]
-            Hz[zcount, :, :] = H_arr[:, :, 2]
-            # for xcount in range(x_samp):
-            #     for ycount in range(y_samp):
-            #         Ex[zcount, xcount, ycount] = E[xcount][ycount][0]
-            #         Ey[zcount, xcount, ycount] = E[xcount][ycount][1]
-            #         Ez[zcount, xcount, ycount] = E[xcount][ycount][2]
-            #         Hx[zcount, xcount, ycount] = H[xcount][ycount][0]
-            #         Hy[zcount, xcount, ycount] = H[xcount][ycount][1]
-            #         Hz[zcount, xcount, ycount] = H[xcount][ycount][2]
         self.log.debug('Finished computing fields!')
         return Ex, Ey, Ez, Hx, Hy, Hz
 
@@ -1169,12 +1163,15 @@ class Simulator():
             zvec = np.linspace(0, height, z_samp)
         dx = self.period/x_samp
         dy = self.period/y_samp
-        Ex = 0j*np.zeros((z_samp, x_samp, y_samp))
-        Ey = 0j*np.zeros((z_samp, x_samp, y_samp))
-        Ez = 0j*np.zeros((z_samp, x_samp, y_samp))
-        Hx = 0j*np.zeros((z_samp, x_samp, y_samp))
-        Hy = 0j*np.zeros((z_samp, x_samp, y_samp))
-        Hz = 0j*np.zeros((z_samp, x_samp, y_samp))
+        Ex = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
+        Ey = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
+        Ez = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
+        if self.conf["General"]["compute_h"]:
+            Hx = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
+            Hy = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
+            Hz = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
+        else: 
+            Hx, Hy, Hz = None, None, None
         xcoords = np.arange(0, self.period, dx)
         ycoords = np.arange(0, self.period, dy)
         for zcount, z in enumerate(zvec):
@@ -1184,9 +1181,10 @@ class Simulator():
                     Ex[zcount, i, j] = E[0]
                     Ey[zcount, i, j] = E[1]
                     Ez[zcount, i, j] = E[2]
-                    Hx[zcount, i, j] = H[0]
-                    Hy[zcount, i, j] = H[1]
-                    Hz[zcount, i, j] = H[2]
+                    if self.conf["General"]["compute_h"]:
+                        Hx[zcount, i, j] = H[0]
+                        Hy[zcount, i, j] = H[1]
+                        Hz[zcount, i, j] = H[2]
         return Ex, Ey, Ez, Hx, Hy, Hz
 
     def compute_fields_at_point(self, x, y, z):
@@ -1195,8 +1193,12 @@ class Simulator():
         return a tuple of the components Ex, Ey, Ez
         """
 
-        E, H = self.s4.GetFields(x, y, z)
-        return E, H
+        if self.conf["General"]["compute_h"]:
+            E, H = self.s4.GetFields(x, y, z)
+        else:
+            E = self.s4.GetFields(x, y, z)[0]
+            H = (None, None, None)
+        return *E, *H
 
     def compute_fields_on_plane(self, z, xsamples, ysamples):
         """
@@ -1204,30 +1206,24 @@ class Simulator():
         given number of samples in the x and y directions and return a tuple
         containg the 2D arrays of the fields components in (Ex, Ey, Ez) order
         """
-        E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(xsamples, ysamples), 
+        if self.conf["General"]["compute_h"]:
+            E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(xsamples, ysamples), 
                                        Format='Array')
-        E_arr = np.array(E)
-        H_arr = np.array(H)
+            E_arr = np.array(E)
+            H_arr = np.array(H)
+        else:
+            E = self.s4.GetFieldsOnGrid(z=z, NumSamples=(xsamples, ysamples), 
+                                        Format='Array')[0]
+            E_arr = np.array(E)
         Ex = E_arr[:, :, 0]
         Ey = E_arr[:, :, 1]
         Ez = E_arr[:, :, 2]
-        Hx = H_arr[:, :, 0]
-        Hy = H_arr[:, :, 1]
-        Hz = H_arr[:, :, 2]
-        # Ex = 0j*np.zeros((xsamples, ysamples))
-        # Ey = 0j*np.zeros((xsamples, ysamples))
-        # Ez = 0j*np.zeros((xsamples, ysamples))
-        # Hx = 0j*np.zeros((xsamples, ysamples))
-        # Hy = 0j*np.zeros((xsamples, ysamples))
-        # Hz = 0j*np.zeros((xsamples, ysamples))
-        # for xcount in range(xsamples):
-        #     for ycount in range(ysamples):
-        #         Ex[xcount, ycount] = E[xcount][ycount][0]
-        #         Ey[xcount, ycount] = E[xcount][ycount][1]
-        #         Ez[xcount, ycount] = E[xcount][ycount][2]
-        #         Hx[xcount, ycount] = H[xcount][ycount][0]
-        #         Hy[xcount, ycount] = H[xcount][ycount][1]
-        #         Hz[xcount, ycount] = H[xcount][ycount][2]
+        if self.conf["General"]["compute_h"]:
+            Hx = H_arr[:, :, 0]
+            Hy = H_arr[:, :, 1]
+            Hz = H_arr[:, :, 2]
+        else: 
+            Hx, Hy, Hz = None, None, None
         return Ex, Ey, Ez, Hx, Hy, Hz
 
     def get_field(self):
@@ -1238,7 +1234,10 @@ class Simulator():
         else:
             # Ex, Ey, Ez = self.compute_fields_by_point()
             Ex, Ey, Ez, Hx, Hy, Hz = self.compute_fields()
-            self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez,'Hx':Hx,'Hy':Hy,'Hz':Hz})
+            if Hx is not None:
+                self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez,'Hx':Hx,'Hy':Hy,'Hz':Hz})
+            else:
+                self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez})
 
     def get_fluxes(self):
         """
@@ -1277,8 +1276,8 @@ class Simulator():
         x_samp = self.conf['Simulation']['x_samples']
         y_samp = self.conf['Simulation']['y_samples']
         z_samp = self.conf['Simulation']['z_samples']
-        x_vec = np.linspace(0, period, x_samp)
-        y_vec = np.linspace(0, period, y_samp)
+        x_vec = np.linspace(0, period, x_samp, endpoint=False)
+        y_vec = np.linspace(0, period, y_samp, endpoint=False)
         max_depth = self.conf[('Simulation', 'max_depth')]
         if max_depth:
             self.log.debug('Computing up to depth of {} '

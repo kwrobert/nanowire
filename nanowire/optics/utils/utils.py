@@ -1,14 +1,22 @@
 import sys
 import os
+import six
 import hashlib
 import logging
 import itertools
 import tempfile as tmp
 import numpy as np
 
-from collections import OrderedDict
+from collections import Iterable, OrderedDict
 from contextlib import contextmanager
 from scipy import interpolate
+
+
+def is_iterable(arg):
+    """
+    Returns True if object is an iterable and is not a string, false otherwise
+    """
+    return isinstance(arg, Iterable) and not isinstance(arg, six.string_types)
 
 
 def setup_sim(sim):
@@ -69,10 +77,10 @@ def get_combos(conf, keysets):
     for keyset in keysets:
         par = '.'.join(keyset)
         pdict = conf[keyset]
-        # Force to float in case we did some interpolation in the config
-        start, end, step = map(
-            float, [pdict['start'], pdict['end'], pdict['step']])
         if pdict['itertype'] == 'numsteps':
+            # Force to float in case we did some interpolation in the config
+            start, end, step = map(
+                float, [pdict['start'], pdict['end'], pdict['step']])
             values = np.linspace(start, end, step)
             # We need to add the size of the bin to each sim config so we can
             # use it to average the total power contained within each bin
@@ -80,9 +88,14 @@ def get_combos(conf, keysets):
             if 'frequency' in keyset:
                 bin_size = values[1] - values[0]
         elif pdict['itertype'] == 'stepsize':
+            # Force to float in case we did some interpolation in the config
+            start, end, step = map(
+                float, [pdict['start'], pdict['end'], pdict['step']])
             values = np.arange(start, end + step, step)
             if 'frequency' in keyset:
                 bin_size = float(step)
+        elif pdict['itertype'] == 'list':
+            values = pdict['values']
         else:
             raise ValueError(
                 'Invalid itertype specified at {}'.format(str(keyset)))
@@ -247,7 +260,7 @@ def configure_logger(level='info', name=None, console=False, logfile=None,
         ch.setLevel(numeric_level)
         ch.setFormatter(formatter)
         logger.addHandler(ch)
-   
+
     # # This will log any uncaught exceptions
     # def handle_exception(exc_type, exc_value, exc_traceback):
     #     if issubclass(exc_type, KeyboardInterrupt):
@@ -259,7 +272,7 @@ def configure_logger(level='info', name=None, console=False, logfile=None,
     return logger
 
 
-def make_hash(o):
+def make_hash(o, hash_dict=None, hasher=None):
     """
     A recursive function for hasing any python built-in data type. Probably
     won't work on custom objects. It is consistent across runs and handles
@@ -269,22 +282,36 @@ def make_hash(o):
     differentiating simulations
     """
 
-    if isinstance(o, (set, tuple, list)):
-        return tuple([make_hash(e) for e in o])
+    if hasher is None:
+        hasher = hashlib.md5()
+    # If iterable but not a string, compute the hash of each element (recursing
+    # if necessary and updating hasher as we go), and build a tuple containing
+    # the hashes of each element.  Then, hash the string representation of that
+    # tuple
+    if is_iterable(o) and not isinstance(o, dict):
+        out = repr(tuple([make_hash(e, hasher=hasher) for e in
+                          sorted(o)])).encode('utf-8')
+        hasher.update(out)
+        return hasher.hexdigest()
+    # If not a dict or an iterable, must be a float or string, so just hash it
+    # and return
     elif not isinstance(o, dict):
         buf = repr(o).encode('utf-8')
-        return hashlib.md5(buf).hexdigest()
-    new_o = OrderedDict()
-    for k, v in sorted(o.items(),key=lambda tup: tup[0]):
+        hasher.update(buf)
+        return hasher.hexdigest()
+    # If its a dict, recurse through the dictionary and update the hasher as we
+    # go
+    for k, v in sorted(o.items(), key=lambda tup: tup[0]):
         if k == 'General':
             continue
         else:
-            new_o[k] = make_hash(v)
-    out = repr(tuple(frozenset(sorted(new_o.items())))).encode('utf-8')
-    return hashlib.md5(out).hexdigest()
+            ret = make_hash(v, hasher=hasher).encode('utf-8')
+            hasher.update(ret)
+    return hasher.hexdigest()
 
 
 def cmp_dicts(d1, d2):
+
     """Recursively compares two dictionaries"""
     # First test the keys
     for k1 in d1.keys():

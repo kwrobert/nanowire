@@ -20,7 +20,7 @@ General:
     save_as: 'hdf5'
     save_time: True
     output_pattern: True
-    ignore_h: True
+    compute_h: False
     compression: True
     dielectric_profile: False
 
@@ -43,7 +43,8 @@ Simulation:
     z_samples: 600
     r_samples : '`int(%(Simulation.params.array_period.value)s*200)`'
     theta_samples : 180
-    max_depth: '`%(Layers.Air.params.thickness.value)s+%(Layers.ITO.params.thickness.value)s+%(Layers.NW_SiO2.params.thickness.value)s+%(Layers.NW_AlShell.params.thickness.value)s+%(Layers.Substrate.params.thickness.value)s`'
+    # max_depth: '`%(Layers.Air.params.thickness.value)s+%(Layers.ITO.params.thickness.value)s+%(Layers.NW_SiO2.params.thickness.value)s+%(Layers.NW_AlShell.params.thickness.value)s+%(Layers.Substrate.params.thickness.value)s`'
+    max_depth: '`%(Layers.Air.params.thickness.value)s+%(Layers.ITO.params.thickness.value)s+%(Layers.NW_AlShell.params.thickness.value)s+%(Layers.Substrate.params.thickness.value)s`'
     base_unit: 1.0E-6
     input_power: '$HOME/software/nanowire/nanowire/spectra/am15g_freq.txt'
     input_power_wv: '$HOME/software/nanowire/nanowire/spectra/ASTMG173.csv'
@@ -127,36 +128,36 @@ Layers:
                     x: '`%(Simulation.params.array_period.value)s/2`'
                     y: '`%(Simulation.params.array_period.value)s/2`'
                 material: 'GaAs' 
-    NW_SiO2:
-        order: 4
-        base_material: 'Cyclotene'
-        params:
-            thickness: 
-                type: 'fixed'
-                value: .03
-            core_radius:
-                type: 'fixed'
-                value: 0.06
-            shell_radius:
-                type: 'fixed'
-                value: 0.08
-        geometry:
-            shell:
-                order: 1
-                type: 'circle'
-                radius: '%(Layers.NW_SiO2.params.shell_radius.value)s'
-                center:
-                    x: '`%(Simulation.params.array_period.value)s/2`'
-                    y: '`%(Simulation.params.array_period.value)s/2`'
-                material: 'SiO2' 
-            core:
-                order: 2
-                type: 'circle'
-                radius: '%(Layers.NW_SiO2.params.core_radius.value)s'
-                center:
-                    x: '`%(Simulation.params.array_period.value)s/2`'
-                    y: '`%(Simulation.params.array_period.value)s/2`'
-                material: 'GaAs' 
+    # NW_SiO2:
+    #     order: 4
+    #     base_material: 'Cyclotene'
+    #     params:
+    #         thickness: 
+    #             type: 'fixed'
+    #             value: .03
+    #         core_radius:
+    #             type: 'fixed'
+    #             value: 0.06
+    #         shell_radius:
+    #             type: 'fixed'
+    #             value: 0.08
+    #     geometry:
+    #         shell:
+    #             order: 1
+    #             type: 'circle'
+    #             radius: '%(Layers.NW_SiO2.params.shell_radius.value)s'
+    #             center:
+    #                 x: '`%(Simulation.params.array_period.value)s/2`'
+    #                 y: '`%(Simulation.params.array_period.value)s/2`'
+    #             material: 'SiO2' 
+    #         core:
+    #             order: 2
+    #             type: 'circle'
+    #             radius: '%(Layers.NW_SiO2.params.core_radius.value)s'
+    #             center:
+    #                 x: '`%(Simulation.params.array_period.value)s/2`'
+    #                 y: '`%(Simulation.params.array_period.value)s/2`'
+    #             material: 'GaAs' 
     Substrate:
         order: 5
         base_material: 'GaAs'

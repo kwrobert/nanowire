@@ -1198,7 +1198,7 @@ class Simulator():
         else:
             E = self.s4.GetFields(x, y, z)[0]
             H = (None, None, None)
-        return *E, *H
+        return E[0], E[1], E[2], H[0], H[1], H[2]
 
     def compute_fields_on_plane(self, z, xsamples, ysamples):
         """

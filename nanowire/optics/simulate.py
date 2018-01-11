@@ -26,6 +26,8 @@ import scipy.constants as constants
 # import gc3libs
 # from gc3libs.core import Core, Engine
 
+from lxml import etree
+from lxml.builder import E
 # get our custom config object and the logger function
 from . import postprocess as pp
 from .utils.utils import make_hash, get_combos, IdFilter
@@ -124,13 +126,7 @@ def run_sim(conf, q=None):
     sim = Simulator(copy.deepcopy(conf), q=q)
     try:
         if not sim.conf.variable_thickness:
-            sim.evaluate_config()
-            sim.update_id()
-            try:
-                os.makedirs(sim.dir)
-            except OSError:
-                pass
-            sim.make_logger()
+            sim.setup()
             log.info('Executing sim %s', sim.id[0:10])
             sim.save_all()
             # path = os.path.join(os.path.basename(sim.dir), 'sim.hdf5')
@@ -802,6 +798,9 @@ class Simulator():
         self.hdf5 = None
         self.runtime = 0
         self.period = period
+        self.xsamps = self.conf['Simulation']['x_samples']
+        self.ysamps = self.conf['Simulation']['y_samples']
+        self.zsamps = self.conf['Simulation']['z_samples']
 
     def __del__(self):
         """
@@ -824,6 +823,43 @@ class Simulator():
             module_logger.removeHandler(self.fhandler)
         except AttributeError:
             pass
+
+    def setup(self):
+        """
+        Runs all the necessary setup functions so one can begin running the
+        simulation and collecting data
+        """
+        self.evaluate_config()
+        self.update_id()
+        try:
+            os.makedirs(self.dir)
+        except OSError:
+            pass
+        self.make_logger()
+        self.make_vectors()
+        self.configure()
+        self.build_device()
+        self.set_excitation()
+
+    def make_vectors(self):
+        """
+        Set the attributes that define the spatial vectors. We can't do this in
+        __init__ because if we are doing a thickness sweep then layer
+        thicknesses and hence max_depth have not yet been resolved
+        """
+
+        self.X = np.linspace(0, self.period, self.xsamps, endpoint=False)
+        self.Y = np.linspace(0, self.period, self.ysamps, endpoint=False)
+        max_depth = self.conf['Simulation']['max_depth']
+        if max_depth:
+            self.log.debug('Computing up to depth of {} '
+                           'microns'.format(max_depth))
+            self.Z = np.linspace(0, max_depth, self.zsamps)
+        else:
+            self.log.debug('Computing for entire device')
+            height = self.get_height()
+            self.Z = np.linspace(0, height, self.zsamps)
+        self.data.update({"xcoords": self.X, "ycoords": self.Y, "zcoords": self.Z})
 
     def open_hdf5(self):
         fpath = os.path.join(self.dir, 'sim.hdf5')
@@ -1108,37 +1144,33 @@ class Simulator():
         """
 
         self.log.debug('Computing fields ...')
-        x_samp = self.conf['Simulation']['x_samples']
-        y_samp = self.conf['Simulation']['y_samples']
-        z_samp = self.conf['Simulation']['z_samples']
-        max_depth = self.conf['Simulation']['max_depth']
-        if max_depth:
-            self.log.debug('Computing up to depth of {} '
-                           'microns'.format(max_depth))
-            zvec = np.linspace(0, max_depth, z_samp)
-        else:
-            self.log.debug('Computing for entire device')
-            height = self.get_height()
-            zvec = np.linspace(0, height, z_samp)
-        Ex = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
-        Ey = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
-        Ez = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
+        Ex = np.zeros((self.zsamps, self.xsamps, self.ysamps),
+                      dtype=np.complex128)
+        Ey = np.zeros((self.zsamps, self.xsamps, self.ysamps),
+                      dtype=np.complex128)
+        Ez = np.zeros((self.zsamps, self.xsamps, self.ysamps),
+                      dtype=np.complex128)
         if self.conf["General"]["compute_h"]:
-            Hx = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
-            Hy = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
-            Hz = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
+            Hx = np.zeros((self.zsamps, self.xsamps, self.ysamps),
+                          dtype=np.complex128)
+            Hy = np.zeros((self.zsamps, self.xsamps, self.ysamps),
+                          dtype=np.complex128)
+            Hz = np.zeros((self.zsamps, self.xsamps, self.ysamps),
+                          dtype=np.complex128)
         else:
             Hx, Hy, Hz = None, None, None
-        for zcount, z in enumerate(zvec):
+        for zcount, z in enumerate(self.Z):
             if self.conf["General"]["compute_h"]:
-                E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(x_samp, y_samp),
+                E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(self.xsamps,
+                                                                self.ysamps),
                                                Format='Array')
                 H_arr = np.array(H)
                 Hx[zcount, :, :] = H_arr[:, :, 0]
                 Hy[zcount, :, :] = H_arr[:, :, 1]
                 Hz[zcount, :, :] = H_arr[:, :, 2]
             else:
-                E = self.s4.GetFieldsOnGrid(z=z, NumSamples=(x_samp, y_samp),
+                E = self.s4.GetFieldsOnGrid(z=z, NumSamples=(self.xsamps,
+                                                             self.ysamps),
                                             Format='Array')[0]
             E_arr = np.array(E)
             Ex[zcount, :, :] = E_arr[:, :, 0]
@@ -1149,32 +1181,26 @@ class Simulator():
 
     def compute_fields_by_point(self):
         self.log.debug('Computing fields ...')
-        x_samp = self.conf['Simulation']['x_samples']
-        y_samp = self.conf['Simulation']['y_samples']
-        z_samp = self.conf['Simulation']['z_samples']
-        max_depth = self.conf['Simulation']['max_depth']
-        if max_depth:
-            self.log.debug('Computing up to depth of {} '
-                           'microns'.format(max_depth))
-            zvec = np.linspace(0, max_depth, z_samp)
-        else:
-            self.log.debug('Computing for entire device')
-            height = self.get_height()
-            zvec = np.linspace(0, height, z_samp)
-        dx = self.period/x_samp
-        dy = self.period/y_samp
-        Ex = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
-        Ey = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
-        Ez = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
+        dx = self.period/self.xsamps
+        dy = self.period/self.ysamps
+        Ex = np.zeros((self.zsamps, self.xsamps, self.ysamps),
+                      dtype=np.complex128)
+        Ey = np.zeros((self.zsamps, self.xsamps, self.ysamps),
+                      dtype=np.complex128)
+        Ez = np.zeros((self.zsamps, self.xsamps, self.ysamps),
+                      dtype=np.complex128)
         if self.conf["General"]["compute_h"]:
-            Hx = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
-            Hy = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
-            Hz = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
-        else: 
+            Hx = np.zeros((self.zsamps, self.xsamps, self.ysamps),
+                          dtype=np.complex128)
+            Hy = np.zeros((self.zsamps, self.xsamps, self.ysamps),
+                          dtype=np.complex128)
+            Hz = np.zeros((self.zsamps, self.xsamps, self.ysamps),
+                          dtype=np.complex128)
+        else:
             Hx, Hy, Hz = None, None, None
         xcoords = np.arange(0, self.period, dx)
         ycoords = np.arange(0, self.period, dy)
-        for zcount, z in enumerate(zvec):
+        for zcount, z in enumerate(self.Z):
             for i, x in enumerate(xcoords):
                 for j, y in enumerate(ycoords):
                     E, H = self.s4.GetFields(x, y, z) 
@@ -1208,7 +1234,7 @@ class Simulator():
         """
         if self.conf["General"]["compute_h"]:
             E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(xsamples, ysamples), 
-                                       Format='Array')
+                                           Format='Array')
             E_arr = np.array(E)
             H_arr = np.array(H)
         else:
@@ -1272,27 +1298,13 @@ class Simulator():
         retrieiving field data.
         """
         self.log.debug('Computing dielectric profile ...')
-        period = self.conf['Simulation']['params']['array_period']['value']
-        x_samp = self.conf['Simulation']['x_samples']
-        y_samp = self.conf['Simulation']['y_samples']
-        z_samp = self.conf['Simulation']['z_samples']
-        x_vec = np.linspace(0, period, x_samp, endpoint=False)
-        y_vec = np.linspace(0, period, y_samp, endpoint=False)
-        max_depth = self.conf[('Simulation', 'max_depth')]
-        if max_depth:
-            self.log.debug('Computing up to depth of {} '
-                           'microns'.format(max_depth))
-            zmax = max_depth
-        else:
-            self.log.debug('Computing for entire device')
-            zmax = self.get_height()
-        z_vec = np.linspace(0, zmax, z_samp)
-        xv, yv, zv = np.meshgrid(x_vec, y_vec, z_vec, indexing='ij')
-        eps_mat = np.zeros((z_samp, x_samp, y_samp), dtype=np.complex128)
-        # eps_mat = np.zeros((z_samp, x_samp, y_samp))
-        for ix in range(x_samp):
-            for iy in range(y_samp):
-                for iz in range(z_samp):
+        xv, yv, zv = np.meshgrid(self.X, self.Y, self.Z, indexing='ij')
+        eps_mat = np.zeros((self.zsamps, self.xsamps, self.ysamps),
+                           dtype=np.complex128)
+        # eps_mat = np.zeros((self.zsamps, self.xsamps, self.ysamps))
+        for ix in range(self.xsamps):
+            for iy in range(self.ysamps):
+                for iz in range(self.zsamps):
                     eps_val =  self.s4.GetEpsilon(xv[ix, iy, iz],
                                                   yv[ix, iy, iz],
                                                   zv[ix, iy, iz])
@@ -1333,6 +1345,43 @@ class Simulator():
     #         integrals[layer] = result
     #     print(integrals)
     #     return integrals
+
+    def write_xdmf(self):
+        """
+        Writes an XMDF file for the electric fields, allowing import into
+        Paraview for visualization
+        """
+
+        grid = E.Grid
+        domain = E.Domain
+        topo = E.Topology
+        geo = E.Geometry
+        ditem = E.DataItem
+        attr = E.Attribute
+        base = 'sim.hdf5:/sim_{}'.format(self.id[0:10])
+        dims = '{} {} {}'.format(self.zsamps, self.xsamps, self.ysamps)
+        doc = (
+        E.Xdmf({'Version': '3.0'},
+            domain(
+                grid({'GridType': 'Uniform', 'Name': 'FullGrid'},
+                    topo({'TopologyType': '3DRectMesh'}),
+                    geo({'GeometryType': 'VXVYVZ'},
+                       ditem(base+'/xcoords', {'Name': 'xcoords', 'Dimensions': str(self.xsamps), 'NumberType': 'Float', 'Precision': '4', 'Format': 'HDF'}),
+                       ditem(base+'/ycoords', {'Name': 'ycoords', 'Dimensions': str(self.ysamps), 'NumberType': 'Float', 'Precision': '4', 'Format': 'HDF'}),
+                       ditem(base+'/zcoords', {'Name': 'zcoords', 'Dimensions': str(self.zsamps), 'NumberType': 'Float', 'Precision': '4', 'Format': 'HDF'})
+                    ),
+                    attr({'Name': 'Electric Field Components', 'AttributeType': 'Scalar', 'Center': 'Node'},
+                        ditem(base+'/Ex', {'Dimensions': dims}),
+                        ditem(base+'/Ey', {'Dimensions': dims}),
+                        ditem(base+'/Ez', {'Dimensions': dims})
+                    )
+                )
+            )
+        )
+        )
+        path = os.path.join(self.dir, 'sim.xdmf')
+        with open(path, 'wb') as out:
+            out.write(etree.tostring(doc, pretty_print=True))
 
     def save_data(self):
         """Saves the self.data dictionary to an npz file. This dictionary
@@ -1398,6 +1447,8 @@ class Simulator():
                 row['backward'] = backward
                 row.append()
             table.flush()
+            # Write XMDF xml file for importing into Paraview
+            self.write_xdmf()
                     # # Save the field arrays
                     # self.log.debug('Saving fields to HDF5')
                     # path = '/sim_'+self.id[0:10]
@@ -1544,11 +1595,7 @@ class Simulator():
         # granular sense of timing and also all getting data without having to
         # save
         start = time.time()
-        if not update:
-            self.configure()
-            self.build_device()
-            self.set_excitation()
-        else:
+        if update:
             self.update_thicknesses()
         self.get_field()
         self.get_fluxes()

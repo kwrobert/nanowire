@@ -28,6 +28,7 @@ def setup_sim(sim):
     sim.evaluate_config()
     sim.update_id()
     sim.make_logger()
+    sim.make_vectors()
     sim.configure()
     sim.build_device()
     sim.set_excitation()

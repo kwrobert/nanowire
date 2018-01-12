@@ -798,9 +798,6 @@ class Simulator():
         self.hdf5 = None
         self.runtime = 0
         self.period = period
-        self.xsamps = self.conf['Simulation']['x_samples']
-        self.ysamps = self.conf['Simulation']['y_samples']
-        self.zsamps = self.conf['Simulation']['z_samples']
 
     def __del__(self):
         """
@@ -836,18 +833,22 @@ class Simulator():
         except OSError:
             pass
         self.make_logger()
-        self.make_vectors()
+        self.make_coord_arrays()
         self.configure()
         self.build_device()
         self.set_excitation()
 
-    def make_vectors(self):
+    def make_coord_arrays(self):
         """
-        Set the attributes that define the spatial vectors. We can't do this in
-        __init__ because if we are doing a thickness sweep then layer
-        thicknesses and hence max_depth have not yet been resolved
+        Set the attributes that define the spatial coordinate arrays. We can't
+        do this in __init__ because if we are doing a thickness sweep then
+        layer thicknesses and hence max_depth have not yet been resolved in the
+        config
         """
 
+        self.xsamps = self.conf['Simulation']['x_samples']
+        self.ysamps = self.conf['Simulation']['y_samples']
+        self.zsamps = self.conf['Simulation']['z_samples']
         self.X = np.linspace(0, self.period, self.xsamps, endpoint=False)
         self.Y = np.linspace(0, self.period, self.ysamps, endpoint=False)
         max_depth = self.conf['Simulation']['max_depth']
@@ -859,6 +860,9 @@ class Simulator():
             self.log.debug('Computing for entire device')
             height = self.get_height()
             self.Z = np.linspace(0, height, self.zsamps)
+        self.dx = self.X[1] - self.X[0]
+        self.dy = self.Y[1] - self.Y[0]
+        self.dz = self.Z[1] - self.Z[0]
         self.data.update({"xcoords": self.X, "ycoords": self.Y, "zcoords": self.Z})
 
     def open_hdf5(self):
@@ -1264,6 +1268,7 @@ class Simulator():
                 self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez,'Hx':Hx,'Hy':Hy,'Hz':Hz})
             else:
                 self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez})
+                # self.data.update({'Ex':Ex.real,'Ey':Ey.real,'Ez':Ez.real})
 
     def get_fluxes(self):
         """
@@ -1366,11 +1371,28 @@ class Simulator():
                 grid({'GridType': 'Uniform', 'Name': 'FullGrid'},
                     topo({'TopologyType': '3DRectMesh'}),
                     geo({'GeometryType': 'VXVYVZ'},
-                       ditem(base+'/xcoords', {'Name': 'xcoords', 'Dimensions': str(self.xsamps), 'NumberType': 'Float', 'Precision': '4', 'Format': 'HDF'}),
-                       ditem(base+'/ycoords', {'Name': 'ycoords', 'Dimensions': str(self.ysamps), 'NumberType': 'Float', 'Precision': '4', 'Format': 'HDF'}),
-                       ditem(base+'/zcoords', {'Name': 'zcoords', 'Dimensions': str(self.zsamps), 'NumberType': 'Float', 'Precision': '4', 'Format': 'HDF'})
+                       ditem(base+'/xcoords', {'Name': 'xcoords', 
+                                               'Dimensions': str(self.xsamps),
+                                               'NumberType': 'Float',
+                                               'Precision': '4',
+                                               'Precision': '4',
+                                               'Format': 'HDF',
+                                               'Compression': 'Zlib'}),
+                       ditem(base+'/ycoords', {'Name': 'ycoords',
+                                               'Dimensions': str(self.ysamps),
+                                               'NumberType': 'Float',
+                                               'Precision': '4',
+                                               'Format': 'HDF',
+                                               'Compression': 'Zlib'}),
+                       ditem(base+'/zcoords', {'Name': 'zcoords',
+                                               'Dimensions': str(self.zsamps),
+                                               'NumberType': 'Float',
+                                               'Precision': '4',
+                                               'Format': 'HDF',
+                                               'Compression': 'Zlib'}),
                     ),
-                    attr({'Name': 'Electric Field Components', 'AttributeType': 'Scalar', 'Center': 'Node'},
+                    attr({'Name': 'Electric Field Components', 'AttributeType': 'Scalar',
+                          'Center': 'Node'},
                         ditem(base+'/Ex', {'Dimensions': dims}),
                         ditem(base+'/Ey', {'Dimensions': dims}),
                         ditem(base+'/Ez', {'Dimensions': dims})
@@ -1411,7 +1433,8 @@ class Simulator():
         elif self.conf['General']['save_as'] == 'hdf5':
             compression = self.conf['General']['compression']
             if compression:
-                filter_obj = tb.Filters(complevel=8, complib='blosc')
+                # filter_obj = tb.Filters(complevel=8, complib='blosc')
+                filter_obj = tb.Filters(complevel=8, complib='zlib')
             gpath = '/sim_'+self.id[0:10]
             # Save all the 3D field arrays
             for name, arr in self.data.items():

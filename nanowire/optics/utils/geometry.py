@@ -32,15 +32,15 @@ def get_mask(shape, xcoords, ycoords):
 
 class Layer:
 
-    def __init__(self, name, start, end, period, xsamples, ysamples, dz, 
-                 base_material=None, materials={}, geometry={}):
+    def __init__(self, name, start, end, istart, iend, period, xsamples,
+                 ysamples, dz, base_material=None, materials={}, geometry={}):
         self.name = name
         self.start = start
         self.end = end
         self.thickness = end - start
         self.period = period
-        self.istart = int(np.floor(start/dz))
-        self.iend = int(np.floor(end/dz))
+        self.istart = istart
+        self.iend = iend
         self.slice = (slice(self.istart, self.iend), ...)
         if geometry:
             self.collect_shapes(geometry)

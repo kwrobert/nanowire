@@ -117,19 +117,16 @@ class Simulation:
         self.failed = False
         self.avgs = {}
         # Compute and store dx, dy, dz at attributes
-        self.z_samples = int(self.conf['Simulation']['z_samples'])
-        self.x_samples = int(self.conf['Simulation']['x_samples'])
-        self.y_samples = int(self.conf['Simulation']['y_samples'])
-        max_depth = self.conf['Simulation']['max_depth']
-        if max_depth:
-            self.height = max_depth
-            self.dz = max_depth / self.z_samples
-        else:
-            self.height = self.conf.get_height()
-            self.dz = self.height / self.z_samples
+        self.zsamps = int(self.conf['Simulation']['z_samples'])
+        self.xsamps = int(self.conf['Simulation']['x_samples'])
+        self.ysamps = int(self.conf['Simulation']['y_samples'])
+        self.X = self.data['xcoords']
+        self.Y = self.data['ycoords']
+        self.Z = self.data['zcoords']
+        self.dx = self.X[1] - self.X[0]
+        self.dy = self.Y[1] - self.Y[0]
+        self.dz = self.Z[1] - self.Z[0]
         self.period = self.conf['Simulation']['params']['array_period']['value']
-        self.dx = self.period / self.x_samples
-        self.dy = self.period / self.y_samples
         self.layers = OrderedDict()
         self.get_layers()
 
@@ -218,12 +215,20 @@ class Simulation:
             layer_t = ldata['params']['thickness']['value']
             # end = start + layer_t + self.dz
             end = start + layer_t
+            # Things are discretized, so start needs to be a location that we
+            # have a grid point on, and not the continuous starting point of
+            # the real physical layer
+            start_ind = np.searchsorted(self.Z, start)
+            quantized_start = self.Z[start_ind] 
+            end_ind = np.searchsorted(self.Z, end)
+            quantized_end = self.Z[end_ind] 
             if 'geometry' in ldata:
                 g = ldata['geometry']
             else:
                 g = {}
-            layers[layer] = Layer(layer, start, end, self.period,
-                                  self.x_samples, self.y_samples, self.dz,
+            layers[layer] = Layer(layer, quantized_start, quantized_end,
+                                  start_ind, end_ind, self.period,
+                                  self.xsamps, self.ysamps, self.dz,
                                   base_material=ldata['base_material'],
                                   geometry=g, materials=materials)
             start = end
@@ -389,8 +394,6 @@ class Simulation:
         rsamp = self.conf['Simulation']['r_samples']
         thsamp = self.conf['Simulation']['theta_samples']
         period = self.conf['Simulation']['params']['array_period']['value']
-        x = np.linspace(0, period, self.x_samples)
-        y = np.linspace(0, period, self.y_samples)
         # Maximum r value such that circle and square unit cell have equal area
         rmax = period / np.sqrt(np.pi)
         # Diff between rmax and unit cell boundary at point of maximum
@@ -431,9 +434,11 @@ class Simulation:
         ext_vals[:, x_inds:-x_inds, y_inds:-y_inds] = quant[:, :, :]
         # Extend the points arrays to include these new regions
         x = np.concatenate((np.array([self.dx * i for i in
-                                      range(-x_inds, 0)]), x, np.array([x[-1] + self.dx * i for i in range(1, x_inds + 1)])))
+                                      range(-x_inds, 0)]), self.X,
+                            np.array([self.X[-1] + self.dx * i for i in range(1, x_inds + 1)])))
         y = np.concatenate((np.array([self.dy * i for i in
-                                      range(-y_inds, 0)]), y, np.array([y[-1] + self.dy * i for i in range(1, y_inds + 1)])))
+                                      range(-y_inds, 0)]), self.Y,
+                            np.array([self.Y[-1] + self.dy * i for i in range(1, y_inds + 1)])))
         # The points on which we have data
         points = (x, y)
         # The points corresponding to "rings" in cylindrical coordinates. Note
@@ -504,11 +509,9 @@ class Simulation:
             arr_slice = Esq[layer_obj.slice]*n_mat*k_mat
             zsamps = layer_obj.iend - layer_obj.istart
             z_vals = np.linspace(0, layer_obj.thickness, zsamps)
-            x_vals = np.linspace(0, self.period, self.x_samples)
-            y_vals = np.linspace(0, self.period, self.y_samples)
             z_integral = intg.trapz(arr_slice, x=z_vals, axis=0)
-            x_integral = intg.trapz(z_integral, x=x_vals, axis=0)
-            y_integral = intg.trapz(x_integral, x=y_vals, axis=0)
+            x_integral = intg.trapz(z_integral, x=self.X, axis=0)
+            y_integral = intg.trapz(x_integral, x=self.Y, axis=0)
             # 2\pi for conversion to angular frequency
             # epsilon_0 comes out of dielectric constant
             # Factor of base unit because we need to convert from our reference
@@ -673,22 +676,17 @@ class Simulation:
         qarr = self.get_scalar_quantity(q)
         if layer is not None:
             l = self.layers[layer]
-            zsamps = l.iend - l.istart
-            z_vals = np.linspace(l.start, l.end, zsamps)
-            x_vals = np.linspace(0, l.period, l.x_samples)
-            y_vals = np.linspace(0, l.period, l.y_samples)
+            z_vals = self.Z[layer.istart, layer.iend]
             qarr = qarr[l.slice]
             if mask is not None and len(mask.shape) == 3:
                 mask = mask[l.slice]
         else:
-            z_vals = np.linspace(0, self.height, self.z_samples)
-            x_vals = np.linspace(0, self.period, self.x_samples)
-            y_vals = np.linspace(0, self.period, self.y_samples)
+            z_vals = self.Z
         if mask is not None:
             qarr = qarr*mask
         z_integral = intg.trapz(qarr, x=z_vals, axis=0)
-        x_integral = intg.trapz(z_integral, x=x_vals, axis=0)
-        y_integral = intg.trapz(x_integral, x=y_vals, axis=0)
+        x_integral = intg.trapz(z_integral, x=self.X, axis=0)
+        y_integral = intg.trapz(x_integral, x=self.Y, axis=0)
         return y_integral
 
     def jsc_contrib(self, port='Substrate_bottom'):
@@ -726,12 +724,9 @@ class Simulation:
         except KeyError:
             genRate = self.genRate()
         # Gen rate in cm^-3. Gotta convert lengths here from um to cm
-        z_vals = np.linspace(0, self.height*1e-4, self.z_samples)
-        x_vals = np.linspace(0, self.period*1e-4, self.x_samples)
-        y_vals = np.linspace(0, self.period*1e-4, self.y_samples)
-        z_integral = intg.trapz(genRate, x=z_vals, axis=0)
-        x_integral = intg.trapz(z_integral, x=x_vals, axis=0)
-        y_integral = intg.trapz(x_integral, x=y_vals, axis=0)
+        z_integral = intg.trapz(genRate, x=self.Z, axis=0)
+        x_integral = intg.trapz(z_integral, x=self.X, axis=0)
+        y_integral = intg.trapz(x_integral, x=self.Y, axis=0)
         # Convert period to cm and current to mA
         sun_pow = self._get_incident_amplitude()
         self.log.info('Sun power = %f', sun_pow)
@@ -1006,16 +1001,13 @@ class Simulation:
         xplane = int(xplane)
         yplane = int(yplane)
         # Get the scalar values
-        x = np.linspace(0, self.period, self.x_samples)
-        y = np.linspace(0, self.period, self.y_samples)
-        z = np.linspace(0, self.height, self.z_samples)
         # Get the data on the plane with a fixed x value. These means we'll
         # have changing (y, z) points
         xdata = self.get_plane(quantity, 'yz', xplane)
         # z first cuz we want y to be changing before z to correspond with the
         # way numpy flattens arrays. Note this means y points will be in the
         # 2nd column
-        xplanepoints = np.array(list(itertools.product(z, y)))
+        xplanepoints = np.array(list(itertools.product(self.Z, self.Y)))
         xdata = xdata.flatten()
         xplanexval = np.array(list(itertools.repeat(x[xplane], len(xdata))))
         xplanedata = np.zeros((xplanepoints.shape[0], 4))
@@ -1076,18 +1068,15 @@ class Simulation:
         # Get the scalar values
         # Filter out any undesired data that isn't on the planes
         data = self.get_line(quantity, direction, coord1, coord2)
-        x = np.linspace(0, self.period, self.x_samples)
-        y = np.linspace(0, self.period, self.y_samples)
-        z = np.linspace(0, self.height, self.z_samples)
         if direction == 'x':
             # z along rows, y along columns
-            pos_data = x
+            pos_data = self.X
         elif direction == 'y':
             # x along columns, z along rows
-            pos_data = y
+            pos_data = self.Y
         elif direction == 'z':
             # x along rows, y along columns
-            pos_data = z
+            pos_data = self.Z
         freq = self.conf['Simulation']['params']['frequency']['value']
         wvlgth = (c.c / freq) * 1E9
         title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(
@@ -1484,9 +1473,9 @@ class SimulationGroup:
             except FileNotFoundError:
                 genRate = sim.genRate()
             # Gen rate in cm^-3. Gotta convert lengths here from um to cm
-            z_vals = np.linspace(0, sim.height*1e-4, sim.z_samples)
-            x_vals = np.linspace(0, sim.period*1e-4, sim.x_samples)
-            y_vals = np.linspace(0, sim.period*1e-4, sim.y_samples)
+            z_vals = self.sims[0].Z
+            x_vals = self.sims[0].X
+            y_vals = self.sims[0].Y
             z_integral = intg.trapz(genRate, x=z_vals, axis=0)
             x_integral = intg.trapz(z_integral, x=x_vals, axis=0)
             y_integral = intg.trapz(x_integral, x=y_vals, axis=0)
@@ -1513,9 +1502,9 @@ class SimulationGroup:
             self.scalar_reduce('genRate')
             genRate = np.load(path)
         # Gen rate in cm^-3. Gotta convert lengths here from um to cm
-        z_vals = np.linspace(0, self.sims[0].height*1e-4, self.sims[0].z_samples)
-        x_vals = np.linspace(0, self.sims[0].period*1e-4, self.sims[0].x_samples)
-        y_vals = np.linspace(0, self.sims[0].period*1e-4, self.sims[0].y_samples)
+        z_vals = self.sims[0].Z
+        x_vals = self.sims[0].X
+        y_vals = self.sims[0].Y
         z_integral = intg.trapz(genRate, x=z_vals, axis=0)
         x_integral = intg.trapz(z_integral, x=x_vals, axis=0)
         y_integral = intg.trapz(x_integral, x=y_vals, axis=0)

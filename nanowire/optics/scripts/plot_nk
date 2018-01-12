@@ -1,0 +1,29 @@
+#!/usr/bin/env python
+
+from os import path
+import numpy as np
+import matplotlib.pyplot as plt
+
+file_path = path.abspath(__file__)
+nk_dir = path.abspath(path.join(file_path, '../../../NK')) 
+al = np.loadtxt(path.join(nk_dir, '009_AlInP_nk_Hz.txt'))
+cyc = np.loadtxt(path.join(nk_dir, '007_Cyclotrene_nk_Hz.txt'))
+gaas = np.loadtxt(path.join(nk_dir, '006_GaAs_nk_Walker_modified_Hz.txt'))
+
+fig, (ax1, ax2) = plt.subplots(1, 2)
+ax1.set_title('Real Part of Index of Refraction')
+ax1.plot(al[:, 0], al[:, 1], label="AlInP")
+ax1.plot(cyc[:, 0], cyc[:, 1], label="Cyclotene")
+ax1.plot(gaas[:, 0], gaas[:, 1], label="GaAs")
+ax1.set_xlabel('Frequency (Hz)')
+ax1.set_ylabel('n')
+ax1.legend()
+ax2.set_title('Imaginary Part of Index of Refraction')
+ax2.plot(al[:, 0], al[:, 2], label="AlInP")
+ax2.plot(cyc[:, 0], cyc[:, 2], label="Cyclotene")
+ax2.plot(gaas[:, 0], gaas[:, 2], label="GaAs")
+ax2.set_xlabel('Frequency (Hz)')
+ax2.set_ylabel('k')
+ax2.legend()
+plt.tight_layout()
+plt.show()

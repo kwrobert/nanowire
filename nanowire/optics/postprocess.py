@@ -129,6 +129,7 @@ class Simulation:
         self.period = self.conf['Simulation']['params']['array_period']['value']
         self.layers = OrderedDict()
         self.get_layers()
+        self.height = self.get_height()
 
     def _get_data_manager(self):
         """
@@ -155,6 +156,14 @@ class Simulation:
         self.data.write_data()
         end = time.time()
         self.log.info('Write time: %.2f seconds', end - start)
+
+    def get_height(self):
+        """Returns the total height of the device"""
+        height = 0
+        for layer, ldata in self.conf['Layers'].items():
+            layer_t = ldata['params']['thickness']['value']
+            height += layer_t
+        return height
 
     def get_scalar_quantity(self, quantity):
         """

@@ -983,8 +983,12 @@ class Simulator():
         self.log.debug('Incident Power: %s', str(power))
         # We need to reduce amplitude of the incident wave depending on
         #  incident polar angle
-        # E = np.sqrt(constants.c*constants.mu_0*f_p(freq))*np.cos(polar_angle)
-        E = np.sqrt(constants.c * constants.mu_0 * intensity)
+        # This calculation for E comes from the definition of the Poynting
+        # vector in free space (taken from Jackson 3rd Ed. pg. 298)
+        # P = .5*\sqrt{\epsilon_0 / \mu_0} | E_o |^2 where E_o is the amplitude
+        # of the plane wave and is not time averaged in any way
+        # E = np.sqrt(2*constants.c*constants.mu_0*intensity)*np.cos(polar_angle)
+        E = np.sqrt(2 * constants.c * constants.mu_0 * intensity)
         self.log.debug('Incident Amplitude: %s', str(E))
         # return E
         return 2

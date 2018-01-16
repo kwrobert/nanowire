@@ -374,14 +374,6 @@ class Config(MutableMapping):
         """Returns YAML representation of this particular config"""
         return yaml.dump(self.data, default_flow_style=False)
 
-    def get_height(self):
-        """Returns the total height of the device"""
-        height = 0
-        for layer, ldata in self['Layers'].items():
-            layer_t = ldata['params']['thickness']['value']
-            height += layer_t
-        # self.log.debug('TOTAL HEIGHT = %f'%height)
-        return height
 
     def sorted_dict(self, adict, reverse=False):
         """Returns a sorted version of a dictionary sorted by the 'order' key.

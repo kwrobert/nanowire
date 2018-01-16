@@ -28,6 +28,7 @@ def setup_sim(sim):
     sim.evaluate_config()
     sim.update_id()
     sim.make_logger()
+    sim.make_coord_arrays()
     sim.configure()
     sim.build_device()
     sim.set_excitation()
@@ -289,6 +290,7 @@ def make_hash(o, hash_dict=None, hasher=None):
     # the hashes of each element.  Then, hash the string representation of that
     # tuple
     if is_iterable(o) and not isinstance(o, dict):
+        print(o)
         out = repr(tuple([make_hash(e, hasher=hasher) for e in
                           sorted(o)])).encode('utf-8')
         hasher.update(out)
@@ -302,7 +304,7 @@ def make_hash(o, hash_dict=None, hasher=None):
     # If its a dict, recurse through the dictionary and update the hasher as we
     # go
     for k, v in sorted(o.items(), key=lambda tup: tup[0]):
-        if k == 'General':
+        if k == 'General' or k == 'Postprocessing':
             continue
         else:
             ret = make_hash(v, hasher=hasher).encode('utf-8')

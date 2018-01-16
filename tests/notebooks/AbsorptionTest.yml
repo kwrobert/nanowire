@@ -38,9 +38,9 @@ Solver:
 
 Simulation:
     polarization: 'rhcp'
-    x_samples: 250
-    y_samples: 250
-    z_samples: 600
+    x_samples: 200
+    y_samples: 200
+    z_samples: 650
     r_samples : '`int(%(Simulation.params.array_period.value)s*200)`'
     theta_samples : 180
     # max_depth: '`%(Layers.Air.params.thickness.value)s+%(Layers.ITO.params.thickness.value)s+%(Layers.NW_SiO2.params.thickness.value)s+%(Layers.NW_AlShell.params.thickness.value)s+%(Layers.Substrate.params.thickness.value)s`'

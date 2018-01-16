@@ -13,3 +13,4 @@ scipy==1.0.0
 six==1.11.0
 sympy==1.1.1
 tables==3.4.2
+lxml==4.1.1

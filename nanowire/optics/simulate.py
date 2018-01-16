@@ -939,7 +939,7 @@ class Simulator():
 
     def _get_incident_amplitude_anna(self):
         freq = self.conf['Simulation']['params']['frequency']['value']
-        path = '/home/krobert/software/nanowire/nanowire/Input_sun_power.txt'
+        path = '/home/krobert/software/nanowire/nanowire/spectra/Input_sun_power.txt'
         freq_vec, p_vec = np.loadtxt(path, unpack=True)
         p_of_f = spi.interp1d(freq_vec, p_vec)
         intensity = p_of_f(freq)
@@ -949,8 +949,8 @@ class Simulator():
         self.log.debug('Incident Power: %s', str(power))
         # We need to reduce amplitude of the incident wave depending on
         #  incident polar angle
-        # E = np.sqrt(constants.c*constants.mu_0*f_p(freq))*np.cos(polar_angle)
-        E = np.sqrt(constants.c * constants.mu_0 * intensity)
+        # E = np.sqrt(2 * constants.c*constants.mu_0*f_p(freq))*np.cos(polar_angle)
+        E = np.sqrt(2 * constants.c * constants.mu_0 * intensity)
         self.log.debug('Incident Amplitude: %s', str(E))
         return E
 
@@ -1030,8 +1030,8 @@ class Simulator():
         # E = np.sqrt(2*constants.c*constants.mu_0*intensity)*np.cos(polar_angle)
         E = np.sqrt(2 * constants.c * constants.mu_0 * intensity)
         self.log.debug('Incident Amplitude: %s', str(E))
-        # return E
-        return 2
+        return E
+        # return 2
 
     def set_excitation(self):
         """Sets the exciting plane wave for the simulation"""
@@ -1040,11 +1040,12 @@ class Simulator():
         c_conv = constants.c / self.conf['Simulation']['base_unit']
         f_conv = f_phys / c_conv
         self.s4.SetFrequency(f_conv)
-        E_mag = self._get_incident_amplitude()
-        # E_mag = self._get_incident_amplitude_anna()
+        # E_mag = self._get_incident_amplitude()
+        E_mag = self._get_incident_amplitude_anna()
         polar = self.conf['Simulation']['params']['polar_angle']['value']
         azimuth = self.conf['Simulation']['params']['azimuthal_angle']['value']
-        # To define circularly polarized light, basically just stick a j
+        # To define circularly polarized light from the point of view of the
+        # source, basically just stick a j
         # (imaginary number) in front of one of your components. The component
         # you choose to stick the j in front of is a matter of convention. In
         # S4, if the incident azimuthal angle is 0, p-polarization is along
@@ -1062,13 +1063,15 @@ class Simulator():
         if polarization == 'rhcp':
             # Right hand circularly polarized
             self.s4.SetExcitationPlanewave(IncidenceAngles=(polar, azimuth),
-                                           sAmplitude=complex(0, -E_mag),
-                                           pAmplitude=complex(E_mag, 0))
+                                           sAmplitude=complex(0,
+                                                              -E_mag/np.sqrt(2)),
+                                           pAmplitude=complex(E_mag/np.sqrt(2), 0))
         elif polarization == 'lhcp':
             # Left hand circularly polarized
             self.s4.SetExcitationPlanewave(IncidenceAngles=(polar, azimuth),
-                                           sAmplitude=complex(0, E_mag),
-                                           pAmplitude=complex(E_mag, 0))
+                                           sAmplitude=complex(0,
+                                                              E_mag/np.sqrt(2)),
+                                           pAmplitude=complex(E_mag/np.sqrt(2), 0))
         elif polarization == 'lpx':
             # Linearly polarized along x axis (TM polarixation)
             self.s4.SetExcitationPlanewave(IncidenceAngles=(polar, azimuth),

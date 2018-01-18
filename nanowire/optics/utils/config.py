@@ -40,18 +40,33 @@ class Config(MutableMapping):
     def _parse_file(self, path):
         """Parse the YAML file provided at the command line"""
         # self.log.info('Parsing YAML file')
+        path = os.path.expandvars(path)
         with open(path, 'r') as cfile:
             text = cfile.read()
         conf = yaml.load(text, Loader=yaml.Loader)
         return conf
 
-    def expand_vars(self, in_table=None, old_key=None):
-        """Expand environment variables in the config and update it in place
-        without changing anything else"""
+    def expand_vars(self, in_table=None, old_key=None, update=True):
+        """
+        Recurse through a dictionary and expand environment variables found in
+        any string values.
+
+        If in_table is not provided, the self.data dict will be recursed
+        through by default, updated in place and also returned.
+
+        If in_table is provided, that dictionary will be recursed through,
+        updated, and returned.
+
+        If update=False, the relevant table will not be updated, but instead
+        will be copied and a new dictionary will be returned. The original dict
+        will remain unmodified
+        """
         if in_table:
             t = in_table
         else:
             t = self.data
+        if not update:
+            t = deepcopy(t)
         for key, value in t.items():
             # If we get a dict, recurse
             if isinstance(value, dict):
@@ -64,6 +79,7 @@ class Config(MutableMapping):
                 # If we get string, first replace environment variables
                 value = re.sub('\$([A-z0-9-_]+)', get_env_variable, value)
                 t[key] = value
+        return t
 
     def _find_references(self, in_table=None, old_key=None):
         """Build out the dependency graph of references in the config. Will
@@ -86,11 +102,8 @@ class Config(MutableMapping):
                     new_key = key
                 self._find_references(in_table=value, old_key=new_key)
             elif isinstance(value, str):
-                # If we get string, first replace environment variables
-                value = re.sub('\$([A-z0-9-_]+)', get_env_variable, value)
-                t[key] = value
-                # Next check for matches to the
-                # replacement string and loop through all of then
+                # Next check for matches to the replacement string and loop
+                # through all of then
                 matches = re.findall('%\(([^)]+)\)s', value)
                 new_key = '%s.%s' % (old_key, key)
                 for match in matches:
@@ -124,7 +137,7 @@ class Config(MutableMapping):
                 self.dep_graph[path].update({'evaluated': False})
             else:
                 self.dep_graph[path].update({'evaluated': True})
-                
+
         # Now we build out the "refers_to" entry for each reference to see if a
         # reference at one place in the table refers to some other value
         # For each reference we found
@@ -300,11 +313,17 @@ class Config(MutableMapping):
         [] operator"""
         # self.log.debug('Getting key: {}'.format(key))
         if isinstance(key, tuple):
-            return self.getfromseq(key)
+            val = self.getfromseq(key)
         elif isinstance(key, list):
-            return self.getfromseq(key)
+            val = self.getfromseq(key)
         else:
-            return self.data[key]
+            val = self.data[key]
+        # if isinstance(val, str):
+        #     # If we get string, first replace environment variables
+        #     val = re.sub('\$([A-z0-9-_]+)', get_env_variable, val)
+        # elif isinstance(val, dict):
+        #     val = self.expand_vars(in_table=val, update=False)
+        return val
 
     def __setitem__(self, key, value):
         """This setup allows us to set a value using a sequence with the usual
@@ -366,6 +385,7 @@ class Config(MutableMapping):
 
     def write(self, path):
         """Dumps this config object to its YAML representation given a path to a file"""
+        path = os.path.expandvars(path)
         with open(path, 'w') as out:
             out.write(yaml.dump(self.data, default_flow_style=False))
         return

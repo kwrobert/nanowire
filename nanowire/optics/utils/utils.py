@@ -46,6 +46,7 @@ def get_nk(path, freq):
     """
 
     # Get data
+    path = os.path.expandvars(path)
     freq_vec, n_vec, k_vec = np.loadtxt(path, unpack=True)
     # Get n and k at specified frequency via interpolation
     f_n = interpolate.interp1d(freq_vec, n_vec, kind='linear',
@@ -290,7 +291,6 @@ def make_hash(o, hash_dict=None, hasher=None):
     # the hashes of each element.  Then, hash the string representation of that
     # tuple
     if is_iterable(o) and not isinstance(o, dict):
-        print(o)
         out = repr(tuple([make_hash(e, hasher=hasher) for e in
                           sorted(o)])).encode('utf-8')
         hasher.update(out)

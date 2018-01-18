@@ -124,7 +124,8 @@ class HDF5DataManager(DataManager):
         """
 
         super(HDF5DataManager, self).__init__(conf, log)
-        path = os.path.join(self.conf['General']['sim_dir'], 'sim.hdf5')
+        base = os.path.expandvars(self.conf['General']['sim_dir'])
+        path = os.path.join(base, 'sim.hdf5')
         self._dfile = tb.open_file(path, 'a')
         ID = os.path.basename(self.conf['General']['sim_dir'])
         self.gpath = '/sim_{}'.format(ID)

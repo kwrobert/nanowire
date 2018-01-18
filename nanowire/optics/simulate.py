@@ -344,7 +344,7 @@ class SimulationManager:
             self.gconf = Config(path=os.path.abspath(gconf))
         else:
             self.gconf = gconf
-        self.gconf.expand_vars()
+        # self.gconf.expand_vars()
         lfile = os.path.join(self.gconf['General']['base_dir'],
                              'logs/sim_manager.log')
         try:
@@ -789,7 +789,8 @@ class Simulator():
         self.id = make_hash(conf.data)
         sim_dir = os.path.join(self.conf['General']['base_dir'], self.id[0:10])
         self.conf['General']['sim_dir'] = sim_dir
-        self.dir = sim_dir
+        self.dir = os.path.expandvars(sim_dir)
+        # self.dir = sim_dir
         self.s4 = S4.New(Lattice=((period, 0), (0, period)),
                          NumBasis=int(round(numbasis)))
         self.data = {}
@@ -907,6 +908,7 @@ class Simulator():
         self.id = make_hash(self.conf.data)
         sim_dir = os.path.join(self.conf['General']['base_dir'], self.id[0:10])
         self.conf['General']['sim_dir'] = sim_dir
+        sim_dir = os.path.expandvars(sim_dir)
         self.dir = sim_dir
         try:
             os.makedirs(sim_dir)
@@ -1090,7 +1092,8 @@ class Simulator():
 
         # First define all the materials
         for mat, mat_path in self.conf['Materials'].items():
-            eps = self._get_epsilon(mat_path)
+            eps = self._get_epsilon(os.path.expandvars(mat_path))
+            # eps = self._get_epsilon(mat_path)
             self.s4.SetMaterial(Name=mat, Epsilon=eps)
         self.s4.SetMaterial(Name='vacuum', Epsilon=complex(1, 0))
         # We need to properly sort our layers because order DOES matter. Light

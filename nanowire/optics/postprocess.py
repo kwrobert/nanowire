@@ -97,7 +97,7 @@ class Simulation:
         else:
             self.conf = copy.deepcopy(simulator.conf)
         self.id = make_hash(self.conf.data)
-        self.dir = self.conf['General']['sim_dir']
+        self.dir = os.path.expandvars(self.conf['General']['sim_dir'])
         self.fhandler = logging.FileHandler(os.path.join(self.dir, 'postprocess.log'))
         self.fhandler.addFilter(IdFilter(ID=self.id))
         formatter = logging.Formatter('%(asctime)s [%(name)s:%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
@@ -617,7 +617,7 @@ class Simulation:
         """Returns the incident amplitude of a wave depending on frequency"""
         freq = self.conf['Simulation']['params']['frequency']['value']
         polar_angle = self.conf['Simulation']['params']['polar_angle']['value']
-        path = self.conf['Simulation']['input_power']
+        path = os.path.expandvars(self.conf['Simulation']['input_power'])
         bin_size = self.conf['Simulation']['params']['frequency']['bin_size']
         # Get NREL AM1.5 data
         freq_vec, p_vec = np.loadtxt(path, unpack=True, delimiter=',')
@@ -963,10 +963,11 @@ class Simulation:
         self.log.info('DATA SHAPE: %s' % str(cs.shape))
         show = self.conf['General']['show_plots']
         p = False
+        sim_dir = os.path.expandvars(self.conf['General']['sim_dir'])
         if plane == 'yz' or plane == 'zy':
             labels = ('y [um]', 'z [um]', quantity, title)
             if self.conf['General']['save_plots']:
-                p = os.path.join(self.conf['General']['sim_dir'],
+                p = os.path.join(sim_dir,
                                  '%s_plane_2d_yz_pval%s.pdf' % (quantity,
                                                                str(pval)))
             self.heatmap2d(y, z, cs, labels, plane, pval,
@@ -974,7 +975,7 @@ class Simulation:
         elif plane == 'xz' or plane == 'zx':
             labels = ('x [um]', 'z [um]', quantity, title)
             if self.conf['General']['save_plots']:
-                p = os.path.join(self.conf['General']['sim_dir'],
+                p = os.path.join(sim_dir,
                                  '%s_plane_2d_xz_pval%s.pdf' % (quantity,
                                                                str(pval)))
             self.heatmap2d(x, z, cs, labels, plane, pval,
@@ -982,7 +983,7 @@ class Simulation:
         elif plane == 'xy' or plane == 'yx':
             labels = ('y [um]', 'x [um]', quantity, title)
             if self.conf['General']['save_plots']:
-                p = os.path.join(self.conf['General']['sim_dir'],
+                p = os.path.join(sim_dir,
                                  '%s_plane_2d_xy_pval%s.pdf' % (quantity,
                                                                str(pval)))
             self.heatmap2d(x, y, cs, labels, plane, pval,
@@ -1123,8 +1124,9 @@ class Simulation:
             fig, ax = self.line_plot(pos_data, data, labels)
         ax.legend()
         if self.conf['General']['save_plots']:
-            name = labels[1] + '_' + ptype + '.pdf'
-            path = os.path.join(self.conf['General']['sim_dir'], name)
+            name = labels[2] + '_' + ptype + '.pdf'
+            sim_dir = os.path.expandvars(self.conf['General']['sim_dir'])
+            path = os.path.join(sim_dir, name)
             fig.savefig(path)
         if self.conf['General']['show_plots']:
             plt.show()
@@ -1451,7 +1453,7 @@ class SimulationGroup:
         collection, meaning every incident photon gets converted to 1 collected
         electron, this factor is q/(hbar*c) which converts to a current per
         unit area"""
-        base = self.sims[0].conf['General']['results_dir']
+        base = os.path.expandvars(self.sims[0].conf['General']['results_dir'])
         self.log.info('Computing photocurrent density for group at %s' % base)
         vals = np.zeros(self.num_sims)
         freqs = np.zeros(self.num_sims)
@@ -1469,7 +1471,7 @@ class SimulationGroup:
             freqs[i] = freq
             wvlgths[i] = wvlgth
             # Get solar power from chosen spectrum
-            path = sim.conf['Simulation']['input_power_wv']
+            path = os.path.expandvars(sim.conf['Simulation']['input_power_wv'])
             wv_vec, p_vec = np.loadtxt(path, usecols=(0, 2), unpack=True, delimiter=',')
             # Get p at wvlength by interpolation
             p_wv = interpolate.interp1d(wv_vec, p_vec, kind='linear',
@@ -1645,7 +1647,7 @@ class SimulationGroup:
         """Plot the result of a particular scalar reduction for each group"""
 
         sim = self.sims[0]
-        base = sim.conf['General']['results_dir']
+        base = os.path.expandvars(sim.conf['General']['results_dir'])
         self.log.info('Plotting scalar reduction of %s for quantity %s' % (base, quantity))
         cm = plt.get_cmap('jet')
         max_depth = sim.conf['Simulation']['max_depth']
@@ -1819,7 +1821,7 @@ class Processor(object):
             self.gconf = Config(os.path.abspath(global_conf))
         else:
             self.gconf = global_conf
-        self.gconf.expand_vars()
+        # self.gconf.expand_vars()
         self.log = logging.getLogger(__name__)
         self.log.debug("Processor base init")
         self.sims = sims
@@ -1844,13 +1846,15 @@ class Processor(object):
         else:
             raise ValueError('Invalid file type specified in config')
         # Find the data files and instantiate Simulation objects
-        self.log.info(self.gconf['General']['base_dir'])
-        for root, dirs, files in os.walk(self.gconf['General']['base_dir']):
+        base = os.path.expandvars(self.gconf['General']['base_dir'])
+        self.log.info(base)
+        for root, dirs, files in os.walk(base):
             conf_path = os.path.join(root, 'sim_conf.yml')
+            print(conf_path)
             if 'sim_conf.yml' in files and datfile in files:
                 self.log.info('Gather sim at %s', root)
                 sim_obj = Simulation(Config(conf_path))
-                sim_obj.conf.expand_vars()
+                # sim_obj.conf.expand_vars()
                 sims.append(sim_obj)
             elif 'sim_conf.yml' in files:
                 sim_obj = Simulation(Config(conf_path))
@@ -1950,6 +1954,7 @@ class Processor(object):
             group.sort(key=lambda sim: sim.conf[key])
             path = '{}/grouped_against_{}'.format(group[0].conf['General']['base_dir'],
                                                   ag_key[-1])
+            path = os.path.expandvars(path)
             # If the only variable param is the one we grouped against, make
             # the top dir
             if not result_pars:
@@ -1974,6 +1979,7 @@ class Processor(object):
                 sim.conf['General']['results_dir'] = path
                 outpath = os.path.join(sim.conf['General']['sim_dir'],
                                        'sim_conf.yml')
+                outpath = os.path.expandvars(outpath)
                 sim.conf.write(outpath)
         # Sort the groups in increasing order of the provided sort key
         if sort_key:

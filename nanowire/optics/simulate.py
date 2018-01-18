@@ -941,8 +941,8 @@ class Simulator():
 
     def _get_incident_amplitude_anna(self):
         freq = self.conf['Simulation']['params']['frequency']['value']
-        path = '/home/krobert/software/nanowire/nanowire/spectra/Input_sun_power.txt'
-        freq_vec, p_vec = np.loadtxt(path, unpack=True)
+        path = '$HOME/software/nanowire/nanowire/spectra/Input_sun_power.txt'
+        freq_vec, p_vec = np.loadtxt(os.path.expandvars(path), unpack=True)
         p_of_f = spi.interp1d(freq_vec, p_vec)
         intensity = p_of_f(freq)
         self.log.debug('Incident Intensity: %s', str(intensity))
@@ -1042,8 +1042,8 @@ class Simulator():
         c_conv = constants.c / self.conf['Simulation']['base_unit']
         f_conv = f_phys / c_conv
         self.s4.SetFrequency(f_conv)
-        # E_mag = self._get_incident_amplitude()
-        E_mag = self._get_incident_amplitude_anna()
+        E_mag = self._get_incident_amplitude()
+        # E_mag = self._get_incident_amplitude_anna()
         polar = self.conf['Simulation']['params']['polar_angle']['value']
         azimuth = self.conf['Simulation']['params']['azimuthal_angle']['value']
         # To define circularly polarized light from the point of view of the

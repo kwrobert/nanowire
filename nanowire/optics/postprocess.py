@@ -88,7 +88,7 @@ class Simulation:
         """
         :param :class:`~utils.config.Config`: Config object for this simulation
         """
-        
+
         if conf is None and simulator is None:
             raise ValueError('Must pass in either a Config object or a'
                              ' Simulator object')
@@ -228,9 +228,9 @@ class Simulation:
             # have a grid point on, and not the continuous starting point of
             # the real physical layer
             start_ind = np.searchsorted(self.Z, start)
-            quantized_start = self.Z[start_ind] 
+            quantized_start = self.Z[start_ind]
             end_ind = np.searchsorted(self.Z, end)
-            quantized_end = self.Z[end_ind] 
+            quantized_end = self.Z[end_ind]
             if 'geometry' in ldata:
                 g = ldata['geometry']
             else:
@@ -481,6 +481,31 @@ class Simulation:
         return avgs
 
     def absorption_per_layer(self):
+        """
+        Computes the absorption in each layer of the device using two methods.
+        The first method takes the difference between the areal power fluxes
+        entering a layer and leaving a layer.
+
+        :math:`P_{abs} = P_{in} - P_{out}`
+
+        The second method uses the raw fields and computes a volume integral of
+        the norm squared of the electric field
+
+        .. math::
+
+           P_abs &= \frac{\omega}{2} \int |E|^2 \mathrm{Im}[\epsilon] dV
+                 &= \frac{\omega \epsilon_0}{2} \int |E|^2 \mathrm{Im}[\epsilon_r] dV
+
+        Recall :math:`\mathrm{Im}[\epsilon_r] = 2nk` so we finally arrive at
+
+        .. math::
+
+           P_abs = \omega \int |E|^2 n k dV
+        
+        This provides a metric for quantifying how converged the real space
+        reconstructions of the fields are.
+        """
+
         fluxes = self.data['fluxes']
         base_unit = self.conf['Simulation']['base_unit']
         absorb_dict = {}
@@ -501,15 +526,12 @@ class Simulation:
             Pout = forw_bot - back_top
             Plost = Pin - Pout
             # S4 returns \int |E|^2 / Area, so we need to multiply by the area
-            # here. Factor of one over vacuum impedance to get the units into power.
+            # here. Factor of one over vacuum impedance to get the units into
+            # power.
             Pabs_flux = .5*Plost*self.period**2/Zo
             self.log.info("Layer: {}".format(layer_name))
             self.log.info("Flux Method Absorbed: {}".format(Pabs_flux))
             # Method 2: Go through integral of field intensity
-            # P_{abs} = -.5* \omega \epsilon_0 * |E|^2 * imag(\epsilon_r)
-            #         = -.5* \omega \epsilon_0 * |E|^2 * (2 n k)
-            # Above formula gives absorbed power as function of space, so just
-            # integrate that over entire layer to get total absorbed power in layer
             # if layer_name == 'Air':
             #     continue
             n_mat, k_mat = layer_obj.get_nk_matrix(freq)
@@ -526,7 +548,7 @@ class Simulation:
             # Factor of base unit because we need to convert from our reference
             # lengths in base units to SI reference length unit (meters)
             # Factor of 1/2 for time averaging gets canceled by imaginary part
-            # of dielectric constant (2*n*k) 
+            # of dielectric constant (2*n*k)
             Pabs_integ = 2*np.pi*freq*c.epsilon_0*base_unit*y_integral
             self.log.info("Integrated Absorbed: {}".format(Pabs_integ))
             diff = np.abs(Pabs_flux - Pabs_integ)
@@ -659,11 +681,11 @@ class Simulation:
 
     def integrate_quantity(self, q, mask=None, layer=None):
         """
-        Compute a 3D integral of a specified quantity 
-        
+        Compute a 3D integral of a specified quantity
+
         :param q: A key in the self.data dict that specifies the quantity you
         wish to integrate
-        :type q: str 
+        :type q: str
         :param mask: A numpy array of ones and zeros, which can be 2D or 3D. If
         a 3D array is provided, it will multiple the 3D array of the quantity
         elementwise before integration. The z-direction is along the first

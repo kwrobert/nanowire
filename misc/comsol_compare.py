@@ -34,9 +34,30 @@ def get_comsol_data(sim, path):
     Ey = raw_data[:, 5] + 1j*raw_data[:, 6]
     Ez = raw_data[:, 7] + 1j*raw_data[:, 8]
     normE = raw_data[:, 9]
+    normE_test = np.sqrt(np.absolute(Ex)**2 + np.absolute(Ey)**2 +
+                        np.absolute(Ez)**2)
+    # normE_test = np.sqrt(Ex*Ex.conj() + Ey*Ey.conj() +
+                        # Ez*Ez.conj())
+    diff = np.flipud(np.abs(normE - normE_test).reshape(sim.zsamps,
+                                                        sim.ysamps+1))
+    normE_test = np.flipud(normE_test.reshape((sim.zsamps, sim.ysamps+1)))
     data_dict = {'Ex': Ex, 'Ey': Ey, 'Ez': Ez, 'normE': normE}
     for k, v in data_dict.items():
         data_dict[k] = np.flipud(v.reshape((sim.zsamps, sim.ysamps+1))[:, :-1])
+    #fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(9, 12))
+    #cax1 = ax1.imshow(normE_test)
+    #cbar1 = fig.colorbar(cax1, ax=ax1)
+    #ax1.set_title('|E|\nfrom Raw Fields', fontsize=14)
+    #cax2 = ax2.imshow(data_dict['normE'])
+    #cbar2 = fig.colorbar(cax2, ax=ax2)
+    #ax2.set_title('|E|\nfrom COMSOL', fontsize=14)
+    #cax3 = ax3.imshow(diff)
+    #cbar3 = fig.colorbar(cax3, ax=ax3)
+    #ax3.set_title('Absolute\nDifference', fontsize=14)
+    #plt.tight_layout()
+    #plt.savefig('norm_diff.pdf')
+    #plt.show()
+    data_dict['normE'] = normE_test[:, :-1]
     return data_dict
 
 def strip_air(sim, rcwa, coms):
@@ -47,7 +68,7 @@ def strip_air(sim, rcwa, coms):
         coms[k] = coms[k][inds:, :]
     return rcwa, coms
 
-def compare(rcwa, coms, title, sim, pname=False):
+def compare(rcwa, coms, title, sim, cb_label='', pname=False):
     diff = np.abs(rcwa - coms)
     fig, axes = plt.subplots(1, 4, figsize=(13, 11))
     ax1, ax2, ax3, ax4 = axes.flatten()
@@ -60,20 +81,24 @@ def compare(rcwa, coms, title, sim, pname=False):
     print("RCWA Max: {}".format(np.amax(rcwa)))
     print("COMSOL Max: {}".format(np.amax(coms)))
     norm_max = max(np.amax(rcwa), np.amax(coms))
+    norm_min = min(np.amin(rcwa), np.amin(coms))
     x = np.arange(0, sim.period, sim.dx)
     z = np.arange(0, height + sim.dz, sim.dz)
-    cax1 = ax1.imshow(rcwa, vmin=10, vmax=norm_max,
+    # RCWA Heatmap
+    cax1 = ax1.imshow(rcwa, vmin=norm_min, vmax=norm_max,
                       extent=[x.min(),x.max(),z.min(),z.max()], aspect='auto')
     # cax1 = ax1.imshow(rcwa, norm=LogNorm(vmin=rcwa.min(), vmax=rcwa.max()))
     cbar1 = fig.colorbar(cax1, ax=ax1)
-    cbar1.set_label('|E|^2', rotation=270)
-    cax2 = ax2.imshow(coms, vmin=10, vmax=norm_max,
+    cbar1.set_label(cb_label, rotation=270)
+    # COMSOL Heatmap
+    cax2 = ax2.imshow(coms, vmin=norm_min, vmax=norm_max,
                       extent=[x.min(),x.max(),z.min(),z.max()], aspect='auto')
     # cax2 = ax2.imshow(coms, norm=LogNorm(vmin=coms.min(), vmax=coms.max()))
     cbar2 = fig.colorbar(cax2, ax=ax2)
-    cbar2.set_label('|E|^2', rotation=270)
-    # cax3 = ax3.imshow(diff, norm=LogNorm(vmin=1, vmax=diff.max()),
-    cax3 = ax3.imshow(diff, 
+    cbar2.set_label(cb_label, rotation=270)
+    # Absolute Difference Heatmap
+    cax3 = ax3.imshow(diff, norm=LogNorm(vmin=diff.min(), vmax=diff.max()),
+    # cax3 = ax3.imshow(diff, 
                       extent=[x.min(),x.max(),z.min(),z.max()], aspect='auto')
     cbar3 = fig.colorbar(cax3, ax=ax3)
     rel_diff = diff / np.abs(coms)
@@ -144,6 +169,7 @@ def main():
     parser = ap.ArgumentParser(description=desc)
     parser.add_argument('rcwa', help='The RCWA YAML config file')
     parser.add_argument('comsol', help='The COMSOL CSV file') 
+    parser.add_argument('--save', '-s', action='store_true', help='Save pdf of plots') 
     args = parser.parse_args()
 
     sim = Simulation(Config(args.rcwa))
@@ -151,9 +177,7 @@ def main():
     lanczos = sim.conf[('Solver', 'LanczosSmoothing')]
     basis = sim.conf[('Simulation', 'params', 'numbasis', 'value')]
     rcwa_data = get_middle_slice(sim)
-    print(list(rcwa_data.keys()))
     comsol_data = get_comsol_data(sim, args.comsol)
-    print(list(comsol_data.keys()))
     rcwa_data, comsol_data = strip_air(sim, rcwa_data, comsol_data)
     c = 2.99e8
     wvlgth = 1e9*c/freq
@@ -167,7 +191,25 @@ def main():
         pname = 'f{:.2E}_nolanczos_n{}.pdf'.format(freq, basis)
         pname2 = 'f{:.2E}_nolanczos_n{}_absdiff.pdf'.format(freq, basis)
         title += ', w/o Lanczos, Basis = {}'.format(basis)
-    compare(rcwa_data['normE']**2, comsol_data['normE']**2, title, sim, pname=pname)
+    # compare(rcwa_data['normE']**2, comsol_data['normE']**2, title, sim, pname=pname)
+    if args.save:
+        pnamex = 'f{:.2E}_n{}_ex.pdf'.format(freq, basis)
+        pnamey = 'f{:.2E}_n{}_ey.pdf'.format(freq, basis)
+        pnamez = 'f{:.2E}_n{}_ez.pdf'.format(freq, basis)
+        pnamenorm = 'f{:.2E}_n{}_enorm.pdf'.format(freq, basis)
+    else:
+        pnamex = False
+        pnamey = False
+        pnamez = False
+        pnamenorm = False
+    compare(rcwa_data['normE']**2, comsol_data['normE']**2, title, sim,
+            cb_label='|E|^2', pname=pnamenorm)
+    compare(np.absolute(rcwa_data['Ey']), np.absolute(comsol_data['Ex']),
+            title, sim, cb_label='|Ex|', pname=pnamex)
+    compare(np.absolute(rcwa_data['Ex']), np.absolute(comsol_data['Ey']),
+            title, sim, cb_label='|Ey|', pname=pnamey)
+    compare(np.absolute(rcwa_data['Ez']), np.absolute(comsol_data['Ez']),
+            title, sim, cb_label='|Ez|', pname=pnamez)
     # plot_diff(rcwa_normE, comsol_normE, title, sim, pname=pname2)
 
 if __name__ == '__main__':

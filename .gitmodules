@@ -1,0 +1,3 @@
+[submodule "S4"]
+	path = S4
+	url = https://github.com/kwrobert/S4.git

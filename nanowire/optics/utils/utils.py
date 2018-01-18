@@ -1,13 +1,60 @@
 import sys
 import os
+import six
 import hashlib
 import logging
 import itertools
 import tempfile as tmp
 import numpy as np
 
-from collections import OrderedDict
+from collections import Iterable, OrderedDict
 from contextlib import contextmanager
+from scipy import interpolate
+
+
+def is_iterable(arg):
+    """
+    Returns True if object is an iterable and is not a string, false otherwise
+    """
+    return isinstance(arg, Iterable) and not isinstance(arg, six.string_types)
+
+
+def setup_sim(sim):
+    """
+    Convenience function for setting up a simulation for execution. Just calls
+    a bunch of methods of the Simulator object
+    """
+
+    sim.evaluate_config()
+    sim.update_id()
+    sim.make_logger()
+    sim.make_coord_arrays()
+    sim.configure()
+    sim.build_device()
+    sim.set_excitation()
+    return sim
+
+
+def get_nk(path, freq):
+    """
+    Returns n and k, the real and imaginary components of the index of
+    refraction at a given frequency :param str path: A path to a text file
+    containing the n and k data. The first column should be the frequency
+    in Hertz, the second column the n values, and the third column the k
+    values. Columns must be delimited by whitespace.  :param float freq:
+    The desired frequency in Hertz
+    """
+
+    # Get data
+    freq_vec, n_vec, k_vec = np.loadtxt(path, unpack=True)
+    # Get n and k at specified frequency via interpolation
+    f_n = interpolate.interp1d(freq_vec, n_vec, kind='linear',
+                               bounds_error=False,
+                               fill_value='extrapolate')
+    f_k = interpolate.interp1d(freq_vec, k_vec, kind='linear',
+                               bounds_error=False,
+                               fill_value='extrapolate')
+    return f_n(freq), f_k(freq)
 
 
 def get_combos(conf, keysets):
@@ -27,14 +74,14 @@ def get_combos(conf, keysets):
     # log.info("Constructing dictionary of options and their values ...")
     # Get the list of values from all our variable keysets
     optionValues = OrderedDict()
-    bin_size = None
+    bin_size = 0
     for keyset in keysets:
         par = '.'.join(keyset)
         pdict = conf[keyset]
-        # Force to float in case we did some interpolation in the config
-        start, end, step = map(
-            float, [pdict['start'], pdict['end'], pdict['step']])
         if pdict['itertype'] == 'numsteps':
+            # Force to float in case we did some interpolation in the config
+            start, end, step = map(
+                float, [pdict['start'], pdict['end'], pdict['step']])
             values = np.linspace(start, end, step)
             # We need to add the size of the bin to each sim config so we can
             # use it to average the total power contained within each bin
@@ -42,9 +89,14 @@ def get_combos(conf, keysets):
             if 'frequency' in keyset:
                 bin_size = values[1] - values[0]
         elif pdict['itertype'] == 'stepsize':
+            # Force to float in case we did some interpolation in the config
+            start, end, step = map(
+                float, [pdict['start'], pdict['end'], pdict['step']])
             values = np.arange(start, end + step, step)
             if 'frequency' in keyset:
                 bin_size = float(step)
+        elif pdict['itertype'] == 'list':
+            values = pdict['values']
         else:
             raise ValueError(
                 'Invalid itertype specified at {}'.format(str(keyset)))
@@ -128,24 +180,55 @@ class StreamToLogger(object):
         self.level(sys.stderr)
 
 
+class IdFilter(logging.Filter):
+    """
+    A filter to either only pass log records with a matching ID, or reject all
+    log records with an ID attribute. This is configurable via a kwarg to the
+    init method
+    """
+
+    def __init__(self, ID=None, name="", reject=False):
+        super(IdFilter, self).__init__(name=name)
+        self.ID = ID
+        if reject:
+            self.filter = self.reject_filter
+        else:
+            self.filter = self.pass_filter
+
+    def pass_filter(self, record):
+        if not hasattr(record, 'ID'):
+            return 0
+        if record.ID == self.ID:
+            return 1
+        else:
+            return 0
+
+    def reject_filter(self, record):
+        if hasattr(record, 'ID'):
+            return 0
+        else:
+            return 1
+
+
 def configure_logger(level='info', name=None, console=False, logfile=None,
                      propagate=True):
     """
     Creates a logger providing some arguments to make it more configurable.
 
-    name : string
+    :param str name:
         Name of logger to be created. Defaults to the root logger
-    level : string
+    :param str level:
         The log level of the logger, defaults to INFO. One of: ['debug', 'info',
         'warning', 'error', 'critical']
-    console : bool
+    :param bool console:
         Add a stream handler to send messages to the console. Generally
         only necessary for the root logger.
-    logfile : string
+    :param str logfile:
         Path to a file. If specified, will create a simple file handler and send
         messages to the specified file. The parent dirs to the location will
         be created automatically if they don't already exist.
     """
+
     # Get numeric level safely
     numeric_level = getattr(logging, level.upper(), None)
     if not isinstance(numeric_level, int):
@@ -168,7 +251,7 @@ def configure_logger(level='info', name=None, console=False, logfile=None,
         except OSError:
             # Log dir already exists
             pass
-        output_file = os.path.join(log_dir,logfile)
+        output_file = os.path.join(log_dir, logfile)
         fhandler = logging.FileHandler(output_file)
         fhandler.setFormatter(formatter)
         logger.addHandler(fhandler)
@@ -178,8 +261,8 @@ def configure_logger(level='info', name=None, console=False, logfile=None,
         ch.setLevel(numeric_level)
         ch.setFormatter(formatter)
         logger.addHandler(ch)
-   
-    # This will log any uncaught exceptions
+
+    # # This will log any uncaught exceptions
     # def handle_exception(exc_type, exc_value, exc_traceback):
     #     if issubclass(exc_type, KeyboardInterrupt):
     #         sys.__excepthook__(exc_type, exc_value, exc_traceback)
@@ -190,26 +273,47 @@ def configure_logger(level='info', name=None, console=False, logfile=None,
     return logger
 
 
-def make_hash(o):
-    """Makes a hash from the dict representing the Simulation config. It is
-    consistent across runs and handles arbitrary nesting. Right now it ignores
-    any settings in the General section because those aren't really important
-    when it comes to differentiating simulations"""
-    if isinstance(o, (set, tuple, list)):
-        return tuple([make_hash(e) for e in o])
+def make_hash(o, hash_dict=None, hasher=None):
+    """
+    A recursive function for hasing any python built-in data type. Probably
+    won't work on custom objects. It is consistent across runs and handles
+    arbitrary nesting. Mainly intended for computing the hash of config
+    dictionarys to establish a unique ID. Right now it ignores any settings in
+    the General section because those aren't really important when it comes to
+    differentiating simulations
+    """
+
+    if hasher is None:
+        hasher = hashlib.md5()
+    # If iterable but not a string, compute the hash of each element (recursing
+    # if necessary and updating hasher as we go), and build a tuple containing
+    # the hashes of each element.  Then, hash the string representation of that
+    # tuple
+    if is_iterable(o) and not isinstance(o, dict):
+        print(o)
+        out = repr(tuple([make_hash(e, hasher=hasher) for e in
+                          sorted(o)])).encode('utf-8')
+        hasher.update(out)
+        return hasher.hexdigest()
+    # If not a dict or an iterable, must be a float or string, so just hash it
+    # and return
     elif not isinstance(o, dict):
         buf = repr(o).encode('utf-8')
-        return hashlib.md5(buf).hexdigest()
-    new_o = OrderedDict()
-    for k, v in sorted(o.items(),key=lambda tup: tup[0]):
-        if k == 'General':
+        hasher.update(buf)
+        return hasher.hexdigest()
+    # If its a dict, recurse through the dictionary and update the hasher as we
+    # go
+    for k, v in sorted(o.items(), key=lambda tup: tup[0]):
+        if k == 'General' or k == 'Postprocessing':
             continue
         else:
-            new_o[k] = make_hash(v)
-    out = repr(tuple(frozenset(sorted(new_o.items())))).encode('utf-8')
-    return hashlib.md5(out).hexdigest()
+            ret = make_hash(v, hasher=hasher).encode('utf-8')
+            hasher.update(ret)
+    return hasher.hexdigest()
 
-def cmp_dicts(d1,d2):
+
+def cmp_dicts(d1, d2):
+
     """Recursively compares two dictionaries"""
     # First test the keys
     for k1 in d1.keys():
@@ -222,43 +326,11 @@ def cmp_dicts(d1,d2):
     # each recursive comparison in a list and assert that they all must be True
     # at the end
     comps = []
-    for k1,v1 in d1.items():
+    for k1, v1 in d1.items():
         v2 = d2[k1]
-        if isinstance(v1,dict) and isinstance(v2,dict):
-            comps.append(cmp_dicts(v1,v2))
+        if isinstance(v1, dict) and isinstance(v2, dict):
+            comps.append(cmp_dicts(v1, v2))
         else:
             if v1 != v2:
                 return False
     return all(comps)
-
-#  def configure_logger(level,logger_name,log_dir,logfile):
-#      # Get numeric level safely
-#      numeric_level = getattr(logging, level.upper(), None)
-#      if not isinstance(numeric_level, int):
-#          raise ValueError('Invalid log level: %s' % level)
-#      # Set formatting
-#      formatter = logging.Formatter('%(asctime)s [%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
-#      # Get logger with name
-#      logger = logging.getLogger(logger_name)
-#      logger.setLevel(numeric_level)
-#      # Set up file handler
-#      try:
-#          os.makedirs(log_dir)
-#      except OSError:
-#          # Log dir already exists
-#          pass
-#      output_file = os.path.join(log_dir,logfile)
-#      #out = open(output_file,'a')
-#      fhandler = logging.FileHandler(output_file)
-#      fhandler.setFormatter(formatter)
-#      logger.addHandler(fhandler)
-#      #sl = StreamToLogger(logger,logging.INFO)
-#      #sys.stdout = sl
-#      #sl = StreamToLogger(logger,logging.ERROR)
-#      #sys.stderr = sl
-#      ## Duplicate this new log file descriptor to system stdout so we can
-#      ## intercept output from external S4 C library
-#      ## TODO: Make this go through the logger instead of directly to the file
-#      ## right now entries aren't properly formatted
-#      #os.dup2(out.fileno(),1)
-#      return logger

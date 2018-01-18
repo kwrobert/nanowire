@@ -47,9 +47,9 @@ frequency, or maybe incident angle). There are two ways to specify this:
         itertype: 'numsteps'
 
 This says start at START and sweep up to END (inclusive of END) in 20 equally
-equally spaced steps. The `itertype: 'numsteps'` param tells the `sim_wrapper.py` script to
+spaced steps. The ``itertype: 'numsteps'`` param tells the ``sim_wrapper.py`` script to
 interpret the 'step' parameter as the number of steps to take. This is the
-equivalent of numpy/matlab's  `linspace`
+equivalent of numpy/matlab's  ``linspace``
 
 The other way to specify a variable parameter is:
 
@@ -64,7 +64,7 @@ The other way to specify a variable parameter is:
 
 This says sweep from START to END (inclusive) in steps of size 20. 
 
-You can specify multiple variable parameters. The `sim_wrapper` script will
+You can specify multiple variable parameters. The ``sim_wrapper`` script will
 automatically generate every possible unique parameter combination and run a
 simulation for each one it generates. 
 
@@ -83,7 +83,7 @@ parameters with:
 .. code-block:: yaml
 
     param_name:
-        type: 'fixed'
+        type: 'optimized'
         value: $your_value
 
 You can specify multiple optimized parameters. The optimizer will attempt to
@@ -104,9 +104,9 @@ example:
 
     max_depth: '%(Layers.Air.params.thickness.value)s'
 
-The thing inside the `()` is a dot-separated path to some location in the
-config file. In the case, the value of the thickness of the air layer. The
-`%()s` is what tells the `Config` object to run a substitution. Always enclose
+The thing inside the ``()`` is a dot-separated path to some location in the
+config file. In this case, the value of the thickness of the air layer. The
+``%()s`` is what tells the ``Config`` object to run a substitution. Always enclose
 you substitions in quotes or things will break.
 
 Parameter Evaluation
@@ -142,6 +142,26 @@ This says:
 
 This is super handy when for example you want your shell to be 30 nm thick (i.e
 shell_radius = core_radius + 30 nm) 
+
+Environment Variables
+*********************
+
+You can reference environment variables in the config using the familiar
+$VARIABLE bash syntax. This can be useful for specifying the location of your
+$HOME directory, or some other variables you may have set in your config
+file. For example, when referencing some input files you could do:
+
+.. code-block:: yaml
+
+    Materials:
+        ITO: '$HOME/software/nanowire/NK/008_ITO_nk_Hz.txt'
+        Cyclotene: '$HOME/software/nanowire/NK/007_Cyclotrene_nk_Hz.txt'
+        GaAs: '$HOME/software/nanowire/NK/006_GaAs_nk_Walker_modified_Hz.txt'
+        AlInP: '$HOME/software/nanowire/NK/009_AlInP_nk_Hz.txt'
+
+This is super handy when you work on multiple servers, perhaps with different
+home directories. You no longer have to change your config files when moving
+them across servers, you can just use the proper environment variables. 
 
 Postprocessing
 **************

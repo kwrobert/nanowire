@@ -1,7 +1,4 @@
 Code
 ====
 
-Stuff
-*****
-
-With mroe stuff
+.. include:: modules.rst

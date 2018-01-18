@@ -1,0 +1,79 @@
+General:
+    
+    base_dir: '$HOME/software/nanowire/tests'
+    treebase: '$HOME/software/nanowire/tests'
+    db_name: 'test_run.db'
+    base_name: 'field_data'
+    postprocess: False
+    post_parallel: False
+    execution: 'serial'
+    adaptive_convergence: False
+    max_iter: 4 
+    max_diff: .02
+    basis_step: 20
+    opt_max_iter: 60
+    opt_tol: 1e-4
+    func_opt_tol: 1e-4
+    opt_keep_intermediates: False
+    num_cores: 20
+    save_plots: True
+    show_plots: True
+    save_as: 'hdf5'
+    save_time: True
+    output_pattern: True
+    ignore_h: True
+    compression: True
+    dielectric_profile: False
+
+Solver:
+
+    Verbosity: 0
+    LatticeTruncation: 'Circular'
+    DiscretizedEpsilon: False
+    DiscretizationResolution: 8
+    PolarizationDecomposition: True
+    PolarizationBasis: 'Default'
+    LanczosSmoothing: False
+    SubpixelSmoothing: False
+    ConserveMemory: False
+
+Simulation:
+    polarization: 'lpx'
+    x_samples: '`int(%(Simulation.params.array_period.value)s*500)`'
+    y_samples: '`int(%(Simulation.params.array_period.value)s*500)`'  
+    z_samples: '`int(%(Simulation.max_depth)s*500)`' 
+    r_samples : '`int(%(Simulation.params.array_period.value)s*500)`'
+    theta_samples : 180
+    max_depth: '`float(%(Layers.Air.params.thickness.value)s)`'
+    base_unit: 1.0E-6
+    input_power: '$HOME/software/nanowire/nanowire/spectra/am15g_freq.txt'
+    input_power_wv: '$HOME/software/nanowire/nanowire/spectra/ASTMG173.csv'
+    params:
+        polar_angle:
+            type: 'fixed'
+            value: 0
+        azimuthal_angle: 
+            type: 'fixed'
+            value: 0
+        array_period:
+            type: 'fixed'
+            value: .125 
+        frequency:
+            type: 'fixed'
+            value: 5.0e14
+            bin_size: 0
+        numbasis:
+            type: 'fixed'
+            value: 10
+
+Materials:
+    ITO: '$HOME/software/nanowire/nanowire/NK/008_ITO_nk_Hz.txt'
+
+Layers:
+    Air:
+        order: 1
+        base_material: 'vacuum'
+        params:
+            thickness:
+                type: 'fixed'
+                value: .5

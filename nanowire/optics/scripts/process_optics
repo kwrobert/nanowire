@@ -1,0 +1,84 @@
+#!/usr/bin/env python
+
+import os
+import argparse as ap
+import logging
+import logging_tree
+from nanowire.optics.postprocess import Processor
+
+
+def process_optics():
+    parser = ap.ArgumentParser(description="""A wrapper around s4_sim.py to automate parameter
+            sweeps, optimization, directory organization, postproccessing, etc.""")
+    parser.add_argument('config_file', type=str, help="""Absolute path to the INI file
+    specifying how you want this wrapper to behave""")
+    parser.add_argument('-nc', '--no_crunch', action="store_true", default=False, help="""Do not perform crunching
+            operations. Useful when data has already been crunched but new plots need to be
+            generated""")
+    parser.add_argument('-ngc', '--no_gcrunch', action="store_true", default=False, help="""Do not
+            perform global crunching operations. Useful when data has already been crunched but new plots need to be
+            generated""")
+    parser.add_argument('-np', '--no_plot', action="store_true", default=False, help="""Do not perform plotting
+            operations. Useful when you only want to crunch your data without plotting""")
+    parser.add_argument('-ngp', '--no_gplot', action="store_true", default=False, help="""Do not perform global plotting
+            operations. Useful when you only want to crunch your data without plotting""")
+    parser.add_argument('--log_level', type=str, default='info', choices=['debug', 'info', 'warning', 'error', 'critical'],
+                        help="""Logging level for the run""")
+    parser.add_argument('--filter_by', nargs='*', help="""List of parameters you wish to filter by,
+            specified like: p1:v1,v2,v3 p2:v1,v2,v3""")
+    parser.add_argument('-gb', '--group_by', help="""The parameter you
+            would like to group simulations by, specified as a dot separated path
+            to the key in the config as: path.to.key.value""")
+    parser.add_argument('-ga', '--group_against', help="""The parameter
+            you would like to group against, specified as a dot separated path
+            to the key in the config as: path.to.key.value""")
+    args = parser.parse_args()
+    log = logging.getLogger()
+    log.setLevel(args.log_level.upper())
+    if not os.path.isfile(args.config_file):
+        raise ValueError("The file you specified does not exist!")
+
+    if not (args.group_by or args.group_against):
+        raise ValueError('Need to group sims somehow. A sensible value would'
+                         ' be by/against frequency')
+    else:
+        if args.group_by:
+            group_by = args.group_by.split('.')
+        else:
+            group_ag = args.group_against.split('.')
+
+    # Collect the sims once up here and reuse them later
+    proc = Processor(args.config_file)
+    proc.log.info('Collecting sims')
+    proc.collect_sims()
+    # First we need to group against if specified. Grouping against corresponds
+    # to "leaves" in the tree
+    if args.group_against:
+        proc.group_against(group_ag, proc.gconf.variable)
+    # Next we group by. This corresponds to building the parent nodes for each
+    # set of leaf groups
+    if args.group_by:
+        proc.group_by(group_by)
+    # Filter if specified
+    if args.filter_by:
+        filt_dict = {}
+        for item in args.filter_by:
+            par, vals = item.split(':')
+            vals = vals.split(',')
+            filt_dict[par] = vals
+        proc.log.info('Here is the filter dictionary: %s', filt_dict)
+        proc.filter_by_param(filt_dict)
+    proc.replace()
+    logging_tree.printout()
+    # Now do all the work
+    if not args.no_crunch:
+        proc.crunch_local_all()
+    if not args.no_gcrunch:
+        proc.crunch_global_all()
+    if not args.no_plot:
+        proc.plot_local_all()
+    if not args.no_gplot:
+        proc.plot_global_all()
+
+
+process_optics()

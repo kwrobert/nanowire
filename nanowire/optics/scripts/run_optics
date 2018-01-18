@@ -1,0 +1,26 @@
+#!/usr/bin/env python
+
+import os
+import argparse as ap
+from nanowire.optics.simulate import SimulationManager
+
+def run_optics():
+
+    parser = ap.ArgumentParser(description="""A wrapper around s4_sim.py to automate parameter
+            sweeps, optimization, directory organization, postproccessing, etc.""")
+    parser.add_argument('config_file', type=str, help="""Absolute path to the INI file
+    specifying how you want this wrapper to behave""")
+    parser.add_argument('--log_level', type=str, default='info',
+                        choices=['debug', 'info', 'warning', 'error', 'critical'],
+                        help="""Logging level for the run""")
+    args = parser.parse_args()
+
+    if not os.path.isfile(args.config_file):
+        print("\n The file you specified does not exist! \n")
+        quit()
+
+    manager = SimulationManager(args.config_file, log_level=args.log_level)
+    manager.run()
+
+
+run_optics()

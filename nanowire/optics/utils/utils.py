@@ -96,7 +96,7 @@ def get_combos(conf, keysets):
             if 'frequency' in keyset:
                 bin_size = float(step)
         elif pdict['itertype'] == 'list':
-            values = pdict['values']
+            values = pdict['value']
         else:
             raise ValueError(
                 'Invalid itertype specified at {}'.format(str(keyset)))

@@ -107,7 +107,7 @@ class DataManager(MutableMapping):
         """
         Closes data file before being destroyed
         """
-        self.log.debug('Closing data file')
+        # self.log.debug('Closing data file')
         self._dfile.close()
 
 

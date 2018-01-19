@@ -1,9 +1,7 @@
-optics
-======
+nanowire
+========
 
 .. toctree::
    :maxdepth: 4
 
-   postprocess
-   sim_wrapper
-   utils
+   nanowire

@@ -77,10 +77,10 @@ sys.excepthook = handle_exception
 class Simulation:
     """
     An object that represents a simulation. It stores a DataManager object for
-    managing the reading and writing of all data as an attribute. It also
-    stores a Config object, which is a dict-like object representing the
-    configuration for the simulation, as an attribute. Many of the methods are
-    for performing calculations on the data.
+    managing the reading and writing of all data in the ``self.data``
+    attribute. It also stores a Config object, which is a dict-like object
+    representing the configuration for the simulation, in the ``self.conf``
+    attribute. Many of the methods are for performing calculations on the data.
     """
 
     def __init__(self, conf=None, simulator=None):
@@ -169,7 +169,9 @@ class Simulation:
 
         :param str quantity: The quantity you would like to retrive (ex: 'Ex'
                              or 'normE')
-        :return: A 3D numpy array of the specified quantity
+        :return: A 3D numpy array shape (zsamples, xsamples, ysamples)
+                 containing the specified quantity
+        :rtype: np.ndarray
         :raises KeyError: If the specified quantity does not exist in the data
                           dict
         """
@@ -248,13 +250,15 @@ class Simulation:
         along a given direction
 
         :param str line_dir: Any of 'x', 'y', or 'z'. Determines the direction
-        along which the line cut is taken, the other two coordinates remain
-        fixed and are specified by c1 and c2.
+                             along which the line cut is taken, the other two
+                             coordinates remain fixed and are specified by c1
+                             and c2.
         :param int c1: The integer index for the first fixed coordinate.
-        Indexes are in x,y, z order so if line_dir='z' then c1 corresponds to x
+                       Indexes are in x,y, z order so if line_dir='z' then c1
+                       corresponds to x
         :param int c2: The integer index for the second coordinate.
         :param str quantity: The quantity whose data array you wish to take a
-        line cut through
+                             line cut through
         """
 
         scalar = self.get_scalar_quantity(quantity)
@@ -274,11 +278,12 @@ class Simulation:
         quantity
 
         :param str plane: Any of 'xy', 'yz', or 'xz'. Determines the plane
-        along which the slice is taken
+                          along which the slice is taken
         :param int pval: The index along the final unspecified direction. If
-        plane='xy' then index would index along the z direction.
+                         plane='xy' then index would index along the z 
+                         direction.
         :param str quantity: The quantity whose data array you wish to take a
-        line cut through
+                             line cut through
         """
 
         self.log.info('Retrieving plane for %s', quantity)
@@ -297,7 +302,7 @@ class Simulation:
         """
         Calculates the norm of E. Adds it to the data dict for the simulation
         and also returns a 3D array
-        :return: A 3D numpy array containing normE
+        :return: A 3D numpy array containing :math: |E|
         """
 
         # Get the magnitude of E and add it to our data
@@ -311,7 +316,7 @@ class Simulation:
         """
         Calculates and returns normE squared. Adds it to the data dict for
         the simulation and also returns a 3D array
-        :return: A 3D numpy array containing normE squared
+        :return: A 3D numpy array containing :math: |E|^2
         """
 
         # Get the magnitude of E and add it to our data
@@ -323,7 +328,7 @@ class Simulation:
         return E_magsq
 
     def normH(self):
-        """Calculate and returns the norm of H"""
+        """Calculate and returns :math: |H|"""
 
         H_mag = np.zeros_like(self.data['Hx'], dtype=np.float64)
         for comp in ('Hx', 'Hy', 'Hz'):
@@ -332,7 +337,7 @@ class Simulation:
         return H_mag
 
     def normHsquared(self):
-        """Calculates and returns the norm of H squared"""
+        """Calculates and returns :math: |H|^2"""
 
         H_magsq = np.zeros_like(self.data['Hx'], dtype=np.float64)
         for comp in ('Hx', 'Hy', 'Hz'):
@@ -686,7 +691,7 @@ class Simulation:
                   wish to integrate
         :type q: str
         :param mask: A numpy array of ones and zeros, which can be 2D or 3D. If
-                     a 3D array is provided, it will multiple the 3D array of 
+                     a 3D array is provided, it will multiply the 3D array of 
                      the quantity elementwise before integration. The 
                      z-direction is along the first axis, i.e mask[z, x, y].  
                      If a 2D array is provided, it will be extended along the
@@ -696,13 +701,14 @@ class Simulation:
                      region of the device. You would supply a 3D mask that is
                      1 inside that region, and zero outside that region.
                      Combining with the layer arg is supported.
-        :type mask: numpy array
+        :type mask: np.ndarray
         :param layer: The name of the layer you wish to integrate over.  
                       Providing this will extract a 3D slice of data that is in
                       the specified layer, and only integrate over that slice. 
                       Use this if you do not want to include all layers in the
                       integration. Combining with the mask arg is supported.
         :type layer: str
+        :return: Result of :math:`\\int quantity(x, y, z) dV`
         :rtype: float
         """
         qarr = self.get_scalar_quantity(q)

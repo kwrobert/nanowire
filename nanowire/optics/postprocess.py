@@ -17,7 +17,6 @@ import scipy.constants as c
 import scipy.integrate as intg
 import numpy as np
 np.set_printoptions(precision=3, threshold=100000)
-
 from mpl_toolkits.mplot3d import Axes3D
 from itertools import repeat
 from collections import OrderedDict
@@ -113,7 +112,6 @@ class Simulation:
             self.data = self._get_data_manager()
         else:
             self.data = copy.deepcopy(simulator.data)
-            self.data['fluxes'] = simulator.flux_dict
         self.failed = False
         self.avgs = {}
         # Compute and store dx, dy, dz at attributes
@@ -362,24 +360,10 @@ class Simulation:
             self.log.debug('LAYER T: %f', layer.thickness)
             self.log.debug('START: %i', layer.istart)
             self.log.debug('END: %i', layer.iend)
-            # print('LAYER: %s'% name)
-            # print('LAYER T: %f'% layer.thickness)
-            # print('START: %i'% layer.istart)
-            # print('END: %i'% layer.iend)
             # Use the layer object to get the nk matrix with correct material
             # geometry
             nmat, kmat = layer.get_nk_matrix(freq)
-            # print(nmat)
-            # print(kmat)
-            # print(layer.slice)
             gvec[layer.slice] = fact * nmat * kmat * normEsq[layer.slice]
-            # print(gvec)
-            # print(np.max(gvec))
-            # input('Continue?')
-            # gvec[layer.istart:layer.iend, :, :] = fact * nmat * kmat * \
-            #     normEsq[layer.istart:layer.iend, :, :]
-            self.log.debug('GEN RATE MATRIX: ')
-            self.log.debug(str(gvec))
         self.extend_data('genRate', gvec)
         return gvec
 
@@ -508,18 +492,24 @@ class Simulation:
 
         fluxes = self.data['fluxes']
         base_unit = self.conf['Simulation']['base_unit']
-        absorb_dict = {}
         Zo = consts.physical_constants['characteristic impedance of vacuum'][0]
         try:
             Esq = self.data['normEsquared']
         except KeyError:
             Esq = self.normEsquared()
         freq = self.conf[('Simulation', 'params', 'frequency', 'value')]
+        dt = [('layer', 'S25'), ('flux_method', 'c16'), ('int_method', 'c16'),
+              ('difference', 'f8')]
+        num_rows = len(list(self.layers.keys()))
+        absorb_arr = np.recarray((num_rows,), dtype=dt)
+        counter = 0
         for layer_name, layer_obj in self.layers.items():
             # Method 1: Go through power flux
+            blayer_name = layer_name.encode('utf-8')
             bottom = layer_name+'_bottom'
-            forw_top, back_top = fluxes[layer_name]
-            forw_bot, back_bot = fluxes[bottom]
+            bbottom = bottom.encode('utf-8')   
+            port, forw_top, back_top = fluxes[fluxes.layer == blayer_name][0]
+            port, forw_bot, back_bot = fluxes[fluxes.layer == bbottom][0]
             # Minus sign because S4 stick a minus in front of all backward
             # components
             Pin = forw_top - back_bot
@@ -552,17 +542,11 @@ class Simulation:
             Pabs_integ = 2*np.pi*freq*c.epsilon_0*base_unit*y_integral
             self.log.info("Integrated Absorbed: {}".format(Pabs_integ))
             diff = np.abs(Pabs_flux - Pabs_integ)
-            absorb_dict[layer_name] = [Pabs_flux, Pabs_integ, diff]
-        # for layer in absorb_dict.keys():
-        #     while len(absorb_dict[layer]) < 3:
-        #         absorb_dict[layer].append(None)
-        self.log.info("Layer absorption dict: %s", str(absorb_dict))
-        outfile = os.path.join(self.dir, 'abs_per_layer.dat')
-        with open(outfile, 'w') as f:
-            f.write('# Layer, Flux_Method, Integrate_Method\n')
-            for layer, dlist in absorb_dict.items():
-                f.write('{}, {}, {}, {}\n'.format(layer, *dlist))
-        return absorb_dict
+            absorb_arr[counter] = (layer_name, Pabs_flux, Pabs_integ, diff)
+            counter += 1
+        self.log.info("Layer absorption arr: %s", str(absorb_arr))
+        self.data['abs_per_layer'] = absorb_arr
+        return absorb_arr
 
     def transmissionData(self, port='Substrate'):
         """
@@ -583,13 +567,15 @@ class Simulation:
         # An ordered dict is actually just a list of tuples so we can access
         # the key directly like so
         first_name = first_layer[0]
+        bfirst_name = first_name.encode('utf-8')
         self.log.info('FIRST LAYER NAME: %s', str(first_name))
+        bport = port.encode('utf-8')
         # p_inc = data[first_name][0]
         # p_ref = np.abs(data[first_name][1])
         # p_trans = data[last_name][0]
-        p_inc = np.absolute(data[first_name][0])
-        p_ref = np.absolute(data[first_name][1])
-        p_trans = np.absolute(data[port][0])
+        p_inc = np.absolute(data[data.layer == bfirst_name][0][1])
+        p_ref = np.absolute(data[data.layer == bfirst_name][0][2])
+        p_trans = np.absolute(data[data.layer == bport][0][1])
         reflectance = p_ref / p_inc
         transmission = p_trans / p_inc
         absorbance = 1 - reflectance - transmission
@@ -603,14 +589,25 @@ class Simulation:
         assert(transmission >= 0)
         assert(absorbance >= 0)
         # assert(delta < .00001)
-        if 'transmission_data' in self.data:
-            new = copy.deepcopy(self.data['transmission_data'])
-            new.update({port: (reflectance, transmission, absorbance)})
-            self.data['transmission_data'] = new
-        else:
-            self.data['transmission_data'] = {port: (reflectance,
-                                                     transmission,
-                                                     absorbance)}
+        # Try to get a prexisting array if it exists
+        try:
+            # If array has been computed before get it
+            arr = self.data['transmission_data']
+            # If we already have data at this port update that row, otherwise
+            # resize the array to accomodate the new row and insert the data
+            ind = np.where(arr.port == port.encode('utf-8'))[0]
+            if len(ind) > 0:
+                arr[ind[0]] = (port, reflectance, transmission, absorbance)
+            else:
+                arr = np.resize(arr, arr.shape[0]+1)
+                arr[-1] = (port, reflectance, transmission, absorbance)
+        except:
+            # Otherwise we need to make a new one
+            dt = [('port', 'S25'), ('transmission', 'f8'),
+                  ('reflection', 'f8'), ('absorption', 'f8')]
+            arr = np.recarray((1,), dtype=dt)
+            arr[-1] = (port, reflectance, transmission, absorbance)
+        self.data['transmission_data'] = arr
         return reflectance, transmission, absorbance
 
     def _get_incident_amplitude(self):
@@ -725,7 +722,8 @@ class Simulation:
         wv_fact = c.e / (c.c * c.h * 10)
         # Unpack data for the port we passed in as an argument
         try:
-            ref, trans, absorb = self.data['transmission_data'][port]
+            arr = self.data['transmission_data']
+            port, ref, trans, absorb = arr[arr.port == port.encode('utf-8')][0]
         except KeyError:
             ref, trans, absorb = self.transmissionData(port=port)
         freq = self.conf['Simulation']['params']['frequency']['value']
@@ -1850,7 +1848,6 @@ class Processor(object):
         self.log.info(base)
         for root, dirs, files in os.walk(base):
             conf_path = os.path.join(root, 'sim_conf.yml')
-            print(conf_path)
             if 'sim_conf.yml' in files and datfile in files:
                 self.log.info('Gather sim at %s', root)
                 sim_obj = Simulation(Config(conf_path))
@@ -1920,8 +1917,8 @@ class Processor(object):
             # We want the specified key to vary, so we remove it from the
             # comparison dict
             del sim.conf[key]
-            cmp1 = {'Simulation': sim.conf[
-                'Simulation'], 'Layers': sim.conf['Layers']}
+            cmp1 = {'Simulation': sim.conf['Simulation'], 
+                    'Layers': sim.conf['Layers']}
             match = False
             # Loop through each group, checking if this sim belongs in the
             # group
@@ -1929,8 +1926,8 @@ class Processor(object):
                 sim2 = group[0]
                 val2 = sim2.conf[key]
                 del sim2.conf[key]
-                cmp2 = {'Simulation': group[0].conf[
-                    'Simulation'], 'Layers': group[0].conf['Layers']}
+                cmp2 = {'Simulation': group[0].conf['Simulation'],
+                        'Layers': group[0].conf['Layers']}
                 params_same = cmp_dicts(cmp1, cmp2)
                 if params_same:
                     match = True

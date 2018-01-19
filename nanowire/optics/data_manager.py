@@ -131,6 +131,7 @@ class HDF5DataManager(DataManager):
         self.gpath = '/sim_{}'.format(ID)
         self.gobj = self._dfile.get_node(self.gpath, classname='Group')
         self._update_keys()
+        self._updated = {key:False for key in self._data.keys()}
 
     def _update_keys(self, clear=False):
         """
@@ -157,73 +158,58 @@ class HDF5DataManager(DataManager):
             node = self._dfile.get_node(nodepath)
         except tb.NoSuchNodeError:
             # Maybe we just haven't computed transmission data yet
-            if key == 'transmission_data':
-                return
-            else:
-                raise tb.NoSuchNodeError
-        if isinstance(node, tb.Array):
-            self._data[node.name] = node.read()
-        elif isinstance(node, tb.Table):
-            if key == 'fluxes':
-                self._data[key] = {tup[0].decode('utf-8'): (tup[1], tup[2])
-                                   for tup in node.read()}
-            elif key == 'transmission_data':
-                try:
-                    self._data['transmission_data'] = {tup[0].decode('utf-8'):
-                                                       (tup[1], tup[2], tup[3])
-                                                       for tup in node.read()}
-                except tb.NoSuchNodeError:
-                    pass
+            self.log.error('The node you requested does not exist in the'
+                           ' HDF5 file')
+            raise
+        if isinstance(node, tb.Table):
+            self._data[key] = node.read().view(np.recarray) 
+        else:
+            self._data[key] = node.read()
 
-    def write_data(self):
+    def write_data(self, blacklist=()):
         """
         Writes all necessary data out to the HDF5 file
         """
 
         self.log.info('Beginning HDF5 data writing procedure')
         # Filter out the original data so we don't resave it
-        black_list = ('fluxes', 'Ex', 'Ey', 'Ez', 'transmission_data')
-        for key, arr in self._data.items():
-            if key not in black_list and self._updated[key]:
-                self.log.info('Writing data for %s', key)
+        keys = [key for key in self._data.keys() if key not in blacklist and
+                self._updated[key]]
+        for key in keys:
+            obj = self._data[key]
+            # Check for recarry first cuz it is a subclass of ndarray
+            if isinstance(obj, np.recarray):
+                self.log.info('Writing data for recarray %s', key)
+                num_rows = obj.shape[0]
+                try:
+                    tb_path = self.gpath + '/{}'.format(key)
+                    table = self._dfile.get_node(tb_path, classname='Table')
+                    # If the table exists, clear it out
+                    table.remove_rows(start=0)
+                except tb.NoSuchNodeError:
+                    table = self._dfile.create_table(self.gpath, key,
+                                                     description=obj.dtype,
+                                                     expectedrows=num_rows)
+                row = table.row
+                fields = obj.dtype.names
+                for record in obj:
+                    for (i, el) in enumerate(record):
+                        row[fields[i]] = el
+                    row.append()
+                table.flush()
+            elif isinstance(obj, np.ndarray):
+                self.log.info('Writing data for array %s', key)
                 try:
                     existing_arr = self._dfile.get_node(self.gpath, name=key)
-                    existing_arr[...] = arr
+                    existing_arr[...] = obj
                 except tb.NoSuchNodeError:
                     if self.conf['General']['compression']:
                         filt = tb.Filters(complevel=4, complib='blosc')
-                        self._dfile.create_carray(self.gpath, key, obj=arr,
+                        self._dfile.create_carray(self.gpath, key, obj=obj,
                                                   filters=filt,
-                                                  atom=tb.Atom.from_dtype(arr.dtype))
+                                                  atom=tb.Atom.from_dtype(obj.dtype))
                     else:
-                        self._dfile.create_array(self.gpath, key, arr)
-            else:
-                self.log.info('Data for %s unchanged, not writing', key)
-            num_rows = len(list(self.conf['Layers'].keys()))*2
-        # We need to handle transmission_data separately because it gets
-        # saved into a table
-        if self._updated['transmission_data']:
-            self.log.info('Writing transmission data')
-            try:
-                tb_path = self.gpath + '/transmission_data'
-                table = self._dfile.get_node(tb_path, classname='Table')
-                # If the table exists, clear it out
-                table.remove_rows(start=0)
-            except tb.NoSuchNodeError:
-                table = self._dfile.create_table(self.gpath, 'transmission_data',
-                                                 description=TransmissionData,
-                                                 expectedrows=num_rows)
-            for port, tup in self._data['transmission_data'].items():
-                row = table.row
-                row['layer'] = port
-                row['reflection'] = tup[0]
-                row['transmission'] = tup[1]
-                row['absorption'] = tup[2]
-                row.append()
-            table.flush()
-        else:
-            self.log.info('Data for transmission_data unchanged, not writing')
-
+                        self._dfile.create_array(self.gpath, key, obj)
 
 class NPZDataManager(DataManager):
 

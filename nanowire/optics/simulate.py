@@ -794,8 +794,6 @@ class Simulator():
         self.s4 = S4.New(Lattice=((period, 0), (0, period)),
                          NumBasis=int(round(numbasis)))
         self.data = {}
-        self.flux_dict = {}
-        self.coeff_dict = {}
         self.hdf5 = None
         self.runtime = 0
         self.period = period
@@ -960,7 +958,7 @@ class Simulator():
         """Returns the incident amplitude of a wave depending on frequency"""
         freq = self.conf['Simulation']['params']['frequency']['value']
         polar_angle = self.conf['Simulation']['params']['polar_angle']['value']
-        path = self.conf['Simulation']['input_power']
+        path = os.path.expandvars(self.conf['Simulation']['input_power'])
         bin_size = self.conf['Simulation']['params']['frequency']['bin_size']
         # Get NREL AM1.5 data
         freq_vec, p_vec = np.loadtxt(path, unpack=True, delimiter=',')
@@ -1290,20 +1288,24 @@ class Simulator():
         component second. The components are complex numbers
         """
         self.log.debug('Computing fluxes ...')
+        rows = len(list(self.conf['Layers'].keys()))*2
+        dt = [('layer', 'S25'), ('forward', np.complex128), ('backward', np.complex128)]
+        flux_arr = np.recarray((rows,), dtype=dt)
+        counter = 0
         for layer, ldata in self.conf['Layers'].items():
             self.log.debug('Computing fluxes through layer: %s' % layer)
             # This gets flux at top of layer
             forw, back = self.s4.GetPowerFlux(Layer=layer)
-            self.flux_dict[layer] = (forw, back)
+            flux_arr[counter] = (layer, forw, back)
             # This gets flux at the bottom
             offset = ldata['params']['thickness']['value']
             forw, back = self.s4.GetPowerFlux(Layer=layer, zOffset=offset)
             key = layer + '_bottom'
-            self.flux_dict[key] = (forw, back)
-        if self.conf['General']['save_as'] == 'npz':
-            self.data['fluxes'] = self.flux_dict
+            flux_arr[counter+1] = (key, forw, back)
+            counter += 2
+        self.data['fluxes'] = flux_arr
         self.log.debug('Finished computing fluxes!')
-        return self.flux_dict
+        return flux_arr
 
     def get_dielectric_profile(self):
         """
@@ -1324,7 +1326,7 @@ class Simulator():
                                                   yv[ix, iy, iz],
                                                   zv[ix, iy, iz])
                     eps_mat[iz, ix, iy] = eps_val
-        self.data.update({'dielectric_profile': eps_mat})
+        self.data['dielectric_profile'] =  eps_mat
         self.log.debug('Finished computing dielectric profile!')
 
     def get_fourier_coefficients(self, offset=0.):
@@ -1333,7 +1335,6 @@ class Simulator():
         fields
         """
         self.log.info('Retrieving Fourier coefficients')
-        coeff_dict = {}
         for layer, ldata in self.conf['Layers'].items():
             self.log.debug("Layer: {}".format(layer))
             if offset == 0.:
@@ -1344,12 +1345,12 @@ class Simulator():
                 res = self.s4.GetAmplitudes(Layer=layer, zOffset=offset)
             forw = np.array(res[0])
             backw = np.array(res[1])
-            coeff_dict[layer] = np.row_stack((forw, backw)) 
-        self.coeff_dict = coeff_dict
-        if self.conf['General']['save_as'] == 'npz':
-            self.data['amplitudes'] = coeff_dict
+            coeff_arr = np.row_stack((forw, backw))
+            key = '{}_amplitudes'.format(layer)
+            self.data[key] = coeff_arr
         self.log.info('Finished computing coefficients!')
-        return coeff_dict
+        return {key:val for key,val in self.data.items() if '_amplitudes' in
+                key}
     # def get_integrals(self):
     #     self.log.debug('Computing volume integrals')
     #     integrals = {}
@@ -1446,58 +1447,52 @@ class Simulator():
                 # filter_obj = tb.Filters(complevel=8, complib='blosc')
                 filter_obj = tb.Filters(complevel=8, complib='zlib')
             gpath = '/sim_'+self.id[0:10]
-            # Save all the 3D field arrays
             for name, arr in self.data.items():
-                self.log.debug("Saving array %s", name)
-                if compression:
-                    self.hdf5.create_carray(gpath, name, createparents=True,
-                                       atom=tb.Atom.from_dtype(arr.dtype),
-                                       obj=arr, filters=filter_obj)
-                else:
-                    self.hdf5.create_array(gpath, name, createparents=True,
-                                      atom=tb.Atom.from_dtype(arr.dtype),
-                                      obj=arr)
-            # Save the Fourier amplitudes
-            for layer, arr in self.coeff_dict.items():
-                self.log.debug("Saving coefficients for layer %s", layer)
-                arr_path = gpath + '/{}'.format(layer)
-                if compression:
-                    self.hdf5.create_carray(arr_path, 'amplitudes', createparents=True,
-                                       atom=tb.Atom.from_dtype(arr.dtype),
-                                       obj=arr, filters=filter_obj)
-                else:
-                    self.hdf5.create_array(arr_path, 'amplitudes', createparents=True,
-                                      atom=tb.Atom.from_dtype(arr.dtype),
-                                      obj=arr)
+                # Check for recarrays first because they are subclass of
+                # ndarrays
+                if isinstance(arr, np.recarray):
+                    self.log.info("Saving record array %s", name)
+                    num_rows = len(list(self.conf['Layers'].keys()))
+                    table = self.hdf5.create_table(gpath, name,
+                                                   description=arr.dtype,
+                                                   expectedrows=num_rows,
+                                                   createparents=True)
+                    row = table.row
+                    fields = arr.dtype.names
+                    for record in arr:
+                        for (i, el) in enumerate(record):
+                            row[fields[i]] = el
+                        row.append()
+                    table.flush()
+                elif isinstance(arr, np.ndarray):
+                    self.log.debug("Saving array %s", name)
+                    if compression:
+                        self.hdf5.create_carray(gpath, name, createparents=True,
+                                           atom=tb.Atom.from_dtype(arr.dtype),
+                                           obj=arr, filters=filter_obj)
+                    else:
+                        self.hdf5.create_array(gpath, name, createparents=True,
+                                          atom=tb.Atom.from_dtype(arr.dtype),
+                                          obj=arr)
 
-            table = self.hdf5.create_table(gpath, 'fluxes', description=LayerFlux,
-                                      expectedrows=len(list(self.conf['Layers'].keys())),
-                                      createparents=True)
-            row = table.row
-            for layer, (forward, backward) in self.flux_dict.items():
-                row['layer'] = layer
-                row['forward'] = forward
-                row['backward'] = backward
-                row.append()
-            table.flush()
             # Write XMDF xml file for importing into Paraview
             self.write_xdmf()
                     # # Save the field arrays
                     # self.log.debug('Saving fields to HDF5')
                     # path = '/sim_'+self.id[0:10]
                     # for name, arr in self.data.items():
-            #     self.log.debug("Saving array %s", name)
-            #     tup = ('create_array', (path, name),
-            #            {'compression': self.conf['General']['compression'],
-            #             'createparents': True, 'obj': arr,
-            #             'atom': tb.Atom.from_dtype(arr.dtype)})
-            #     self.q.put(tup, block=True)
+                # self.log.debug("Saving array %s", name)
+                # tup = ('create_array', (path, name),
+                    #    {'compression': self.conf['General']['compression'],
+                    #     'createparents': True, 'obj': arr,
+                    #     'atom': tb.Atom.from_dtype(arr.dtype)})
+                # self.q.put(tup, block=True)
             # # Save the flux dict to a table
             # self.log.debug('Saving fluxes to HDF5')
             # self.log.debug(self.flux_dict)
             # tup = ('create_flux_table', (self.flux_dict, path, 'fluxes'),
-            #        {'createparents': True,
-            #         'expectedrows': len(list(self.conf['Layers'].keys()))})
+                   # {'createparents': True,
+                    # 'expectedrows': len(list(self.conf['Layers'].keys()))})
             # self.q.put(tup, block=True)
         else:
             raise ValueError('Invalid file type specified in config')
@@ -1632,6 +1627,7 @@ class Simulator():
             self.update_thicknesses()
         self.get_field()
         self.get_fluxes()
+        self.get_fourier_coefficients()
         if self.conf['General']['dielectric_profile']:
             self.get_dielectric_profile()
         self.open_hdf5()

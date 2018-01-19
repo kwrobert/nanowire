@@ -848,8 +848,8 @@ class Simulator():
         self.xsamps = self.conf['Simulation']['x_samples']
         self.ysamps = self.conf['Simulation']['y_samples']
         self.zsamps = self.conf['Simulation']['z_samples']
-        self.X = np.linspace(0, self.period, self.xsamps, endpoint=False)
-        self.Y = np.linspace(0, self.period, self.ysamps, endpoint=False)
+        self.X = np.linspace(0, self.period, self.xsamps)
+        self.Y = np.linspace(0, self.period, self.ysamps)
         max_depth = self.conf['Simulation']['max_depth']
         if max_depth:
             self.log.debug('Computing up to depth of {} '
@@ -1173,28 +1173,46 @@ class Simulator():
             Hx, Hy, Hz = None, None, None
         for zcount, z in enumerate(self.Z):
             if self.conf["General"]["compute_h"]:
-                E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(self.xsamps,
-                                                                self.ysamps),
+                E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(self.xsamps-1,
+                                                                self.ysamps-1),
                                                Format='Array')
                 H_arr = np.array(H)
-                Hx[zcount, :, :] = H_arr[:, :, 0]
-                Hy[zcount, :, :] = H_arr[:, :, 1]
-                Hz[zcount, :, :] = H_arr[:, :, 2]
+                Hx[zcount, :-1, :-1] = H_arr[:, :, 0]
+                Hx[zcount, 0:self.xsamps-1, -1] = H_arr[:, 0, 0]
+                Hx[zcount, -1, 0:self.ysamps-1] = H_arr[0, :, 0]
+                Hx[zcount, -1, -1] = H_arr[0, 0, 0]
+                Hy[zcount, :-1, :-1] = H_arr[:, :, 1]
+                Hy[zcount, 0:self.xsamps-1, -1] = H_arr[:, 0, 1]
+                Hy[zcount, -1, 0:self.ysamps-1] = H_arr[0, :, 1]
+                Hy[zcount, -1, -1] = H_arr[0, 0, 1]
+                Hz[zcount, :-1, :-1] = H_arr[:, :, 2]
+                Hz[zcount, 0:self.xsamps-1, -1] = H_arr[:, 0, 2]
+                Hz[zcount, -1, 0:self.ysamps-1] = H_arr[0, :, 2]
+                Hz[zcount, -1, -1] = H_arr[0, 0, 2]
             else:
-                E = self.s4.GetFieldsOnGrid(z=z, NumSamples=(self.xsamps,
-                                                             self.ysamps),
+                E = self.s4.GetFieldsOnGrid(z=z, NumSamples=(self.xsamps-1,
+                                                             self.ysamps-1),
                                             Format='Array')[0]
             E_arr = np.array(E)
-            Ex[zcount, :, :] = E_arr[:, :, 0]
-            Ey[zcount, :, :] = E_arr[:, :, 1]
-            Ez[zcount, :, :] = E_arr[:, :, 2]
+            # Grab the periodic BC, which is always excluded from results
+            # returned by S4 above
+            Ex[zcount, :-1, :-1] = E_arr[:, :, 0]
+            Ex[zcount, 0:self.xsamps-1, -1] = E_arr[:, 0, 0]
+            Ex[zcount, -1, 0:self.ysamps-1] = E_arr[0, :, 0]
+            Ex[zcount, -1, -1] = E_arr[0, 0, 0]
+            Ey[zcount, :-1, :-1] = E_arr[:, :, 1]
+            Ey[zcount, 0:self.xsamps-1, -1] = E_arr[:, 0, 1]
+            Ey[zcount, -1, 0:self.ysamps-1] = E_arr[0, :, 1]
+            Ey[zcount, -1, -1] = E_arr[0, 0, 1]
+            Ez[zcount, :-1, :-1] = E_arr[:, :, 2]
+            Ez[zcount, 0:self.xsamps-1, -1] = E_arr[:, 0, 2]
+            Ez[zcount, -1, 0:self.ysamps-1] = E_arr[0, :, 2]
+            Ez[zcount, -1, -1] = E_arr[0, 0, 2]
         self.log.debug('Finished computing fields!')
         return Ex, Ey, Ez, Hx, Hy, Hz
 
     def compute_fields_by_point(self):
         self.log.debug('Computing fields ...')
-        dx = self.period/self.xsamps
-        dy = self.period/self.ysamps
         Ex = np.zeros((self.zsamps, self.xsamps, self.ysamps),
                       dtype=np.complex128)
         Ey = np.zeros((self.zsamps, self.xsamps, self.ysamps),
@@ -1210,11 +1228,9 @@ class Simulator():
                           dtype=np.complex128)
         else:
             Hx, Hy, Hz = None, None, None
-        xcoords = np.arange(0, self.period, dx)
-        ycoords = np.arange(0, self.period, dy)
         for zcount, z in enumerate(self.Z):
-            for i, x in enumerate(xcoords):
-                for j, y in enumerate(ycoords):
+            for i, x in enumerate(self.X):
+                for j, y in enumerate(self.Y):
                     E, H = self.s4.GetFields(x, y, z) 
                     Ex[zcount, i, j] = E[0]
                     Ey[zcount, i, j] = E[1]
@@ -1243,23 +1259,47 @@ class Simulator():
         Compute the electric field on an x-y plane at a given z value with a
         given number of samples in the x and y directions and return a tuple
         containg the 2D arrays of the fields components in (Ex, Ey, Ez) order
+
+        This function is inclusive of the periodic endpoints at x=xmax and y=ymax
         """
         if self.conf["General"]["compute_h"]:
-            E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(xsamples, ysamples), 
+            E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(xsamples-1,
+                                                            ysamples-1), 
                                            Format='Array')
             E_arr = np.array(E)
             H_arr = np.array(H)
         else:
-            E = self.s4.GetFieldsOnGrid(z=z, NumSamples=(xsamples, ysamples), 
+            E = self.s4.GetFieldsOnGrid(z=z, NumSamples=(xsamples-1, ysamples-1), 
                                         Format='Array')[0]
             E_arr = np.array(E)
-        Ex = E_arr[:, :, 0]
-        Ey = E_arr[:, :, 1]
-        Ez = E_arr[:, :, 2]
+            # Grab the periodic BC, which is always excluded from results
+            # returned by S4 above
+            Ex[:-1, :-1] = E_arr[:, :, 0]
+            Ex[0:self.xsamps-1, -1] = E_arr[:, 0, 0]
+            Ex[-1, 0:self.ysamps-1] = E_arr[0, :, 0]
+            Ex[-1, -1] = E_arr[0, 0, 0]
+            Ey[:-1, :-1] = E_arr[:, :, 1]
+            Ey[0:self.xsamps-1, -1] = E_arr[:, 0, 1]
+            Ey[-1, 0:self.ysamps-1] = E_arr[0, :, 1]
+            Ey[-1, -1] = E_arr[0, 0, 1]
+            Ez[:-1, :-1] = E_arr[:, :, 2]
+            Ez[0:self.xsamps-1, -1] = E_arr[:, 0, 2]
+            Ez[-1, 0:self.ysamps-1] = E_arr[0, :, 2]
+            Ez[-1, -1] = E_arr[0, 0, 2]
         if self.conf["General"]["compute_h"]:
-            Hx = H_arr[:, :, 0]
-            Hy = H_arr[:, :, 1]
-            Hz = H_arr[:, :, 2]
+            H_arr = np.array(H)
+            Hx[:-1, :-1] = H_arr[:, :, 0]
+            Hx[0:self.xsamps-1, -1] = H_arr[:, 0, 0]
+            Hx[-1, 0:self.ysamps-1] = H_arr[0, :, 0]
+            Hx[-1, -1] = H_arr[0, 0, 0]
+            Hy[:-1, :-1] = H_arr[:, :, 1]
+            Hy[0:self.xsamps-1, -1] = H_arr[:, 0, 1]
+            Hy[-1, 0:self.ysamps-1] = H_arr[0, :, 1]
+            Hy[-1, -1] = H_arr[0, 0, 1]
+            Hz[:-1, :-1] = H_arr[:, :, 2]
+            Hz[0:self.xsamps-1, -1] = H_arr[:, 0, 2]
+            Hz[-1, 0:self.ysamps-1] = H_arr[0, :, 2]
+            Hz[-1, -1] = H_arr[0, 0, 2]
         else: 
             Hx, Hy, Hz = None, None, None
         return Ex, Ey, Ez, Hx, Hy, Hz

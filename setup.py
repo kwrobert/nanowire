@@ -21,6 +21,8 @@ class CustomInstall(install):
         subprocess.check_call('make', shell=True)
         print('Building S4 python extension')
         subprocess.check_call('make S4_pyext', shell=True)
+        print('Cleaning build')
+        subprocess.check_call('make clean', shell=True)
         os.chdir('../')
         install.run(self)
 

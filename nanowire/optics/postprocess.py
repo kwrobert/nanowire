@@ -477,14 +477,16 @@ class Simulation:
 
         .. math::
 
-           P_abs &= \frac{\omega}{2} \int |E|^2 \mathrm{Im}[\epsilon] dV
-                 &= \frac{\omega \epsilon_0}{2} \int |E|^2 \mathrm{Im}[\epsilon_r] dV
+           P_{abs} &= \\frac{\\omega}{2} \\int |E|^2 
+                      \\mathrm{Im}[\\epsilon] dV \\\\
+                   &= \\frac{\\omega \\epsilon_0}{2} 
+                      \\int |E|^2 \\mathrm{Im}[\\epsilon_r] dV
 
         Recall :math:`\mathrm{Im}[\epsilon_r] = 2nk` so we finally arrive at
 
         .. math::
 
-           P_abs = \omega \int |E|^2 n k dV
+           P_{abs} = \omega \int |E|^2 n k dV
         
         This provides a metric for quantifying how converged the real space
         reconstructions of the fields are.
@@ -681,23 +683,25 @@ class Simulation:
         Compute a 3D integral of a specified quantity
 
         :param q: A key in the self.data dict that specifies the quantity you
-        wish to integrate
+                  wish to integrate
         :type q: str
         :param mask: A numpy array of ones and zeros, which can be 2D or 3D. If
-        a 3D array is provided, it will multiple the 3D array of the quantity
-        elementwise before integration. The z-direction is along the first
-        axis, i.e mask[z, x, y].  If a 2D array is provided, it will be
-        extended along the z-direction and then will multiply the 3D array of
-        the quantity elementwise before integration. This can be useful if you
-        want to integrate only over a specific region of the device. You would
-        supply a 3D mask that is 1 inside that region, and zero outside that
-        region. Combining with the layer arg is supported.
+                     a 3D array is provided, it will multiple the 3D array of 
+                     the quantity elementwise before integration. The 
+                     z-direction is along the first axis, i.e mask[z, x, y].  
+                     If a 2D array is provided, it will be extended along the
+                     z-direction and then will multiply the 3D array of the
+                     quantity elementwise before integration. This can be 
+                     useful if you want to integrate only over a specific 
+                     region of the device. You would supply a 3D mask that is
+                     1 inside that region, and zero outside that region.
+                     Combining with the layer arg is supported.
         :type mask: numpy array
-        :param layer: The name of the layer you wish to integrate over.
-        Providing this will extract a 3D slice of data that is in the specified
-        layer, and only integrate over that slice. Use this if you do not want
-        to include all layers in the integration. Combining with the mask arg
-        is supported.
+        :param layer: The name of the layer you wish to integrate over.  
+                      Providing this will extract a 3D slice of data that is in
+                      the specified layer, and only integrate over that slice. 
+                      Use this if you do not want to include all layers in the
+                      integration. Combining with the mask arg is supported.
         :type layer: str
         :rtype: float
         """

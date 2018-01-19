@@ -1,4 +1,4 @@
 Code
 ====
 
-.. include:: modules.rst
+.. automodule:: nanowire

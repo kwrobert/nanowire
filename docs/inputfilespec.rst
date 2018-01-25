@@ -1,8 +1,18 @@
-Tutorial
-========
+.. toctree::
+    :maxdepth: 1
 
 YAML Input File
----------------
+===============
+
+A YAML input file consists of the following top level sections (in no
+particular order)
+
+1. General
+2. Solver
+3. Simulation
+4. Materials
+5. Layers
+6. Postprocessing 
 
 For starters, here is a complete input YAML file, you could copy and paste this
 into some text file on your machine and be ready to roll. The comments in here
@@ -11,7 +21,7 @@ well describe what all the various options do.
 .. literalinclude:: example.yml
 
 Types of Parameters
-*******************
+-------------------
 
 There are 3 "types" of parameters to choose from:
 
@@ -20,7 +30,7 @@ There are 3 "types" of parameters to choose from:
 * "Optimized" parameters
 
 Fixed Parameters
-****************
+----------------
 
 Fixed parameters are just that, some configurable system parameter that has a
 single fixed value. Specify them with
@@ -32,7 +42,7 @@ single fixed value. Specify them with
         value: $your_value
 
 Variable Parameters
-*******************
+-------------------
 
 Variable parameters are parameters you would like to sweep through (i.e
 frequency, or maybe incident angle). There are two ways to specify this:
@@ -69,7 +79,7 @@ automatically generate every possible unique parameter combination and run a
 simulation for each one it generates. 
 
 Optimized Parameters
-********************
+--------------------
 
 Optimized parameters are parameters you wish to optimize. The code uses the
 Nelder Mead simplex optimizer from scipy for optimizations. Right now the setup
@@ -93,7 +103,7 @@ increase the number of parameters you optimize over the optimizer will take
 longer to converge.  
 
 Parameter Substition
-********************
+--------------------
 
 Within the YAML file, it is possible to refer to other parameters in the config
 by inserting a specifically formatted string. This string will be replaced with
@@ -110,7 +120,7 @@ config file. In this case, the value of the thickness of the air layer. The
 you substitions in quotes or things will break.
 
 Parameter Evaluation
-********************
+--------------------
 
 Its possible to evaluate arbitrary python expressions by enclosing any
 parameter in back ticks. There is not validation or sanitation of this
@@ -144,7 +154,7 @@ This is super handy when for example you want your shell to be 30 nm thick (i.e
 shell_radius = core_radius + 30 nm) 
 
 Environment Variables
-*********************
+---------------------
 
 You can reference environment variables in the config using the familiar
 $VARIABLE bash syntax. This can be useful for specifying the location of your
@@ -164,7 +174,7 @@ home directories. You no longer have to change your config files when moving
 them across servers, you can just use the proper environment variables. 
 
 Postprocessing
-**************
+--------------
 
 The postprocessing section of the config file is pretty nifty. The structure
 of this section is used to configure which postprocessing functions get called,
@@ -209,28 +219,3 @@ where I store module-level functions in a big dictionary instead of inside
 objects. This will be a long term fix that will ocurr on a separate branch so
 don't worry about it for now. 
 
-Useage
-------
-
-Ok, so that covers the input YAML file. Now, how do we actually use it? This is
-the easy part! Most of the work is in configuring your simulation. Once you've
-got your file set up, to run your simulation(s) simply execute::
-
-    python /path/to/sim_wrapper.py your_input.yml
-
-That might take awhile, and you'll see a bunch of log messages printed to your
-terminal. Using the ``postprocess.py`` script is a bit more complicated. If you
-ever forget what to do, execute::
-
-    python3 /path/to/postprocess.py --help
-
-Note we use python3 here. Annoyingly, S4 currently doesn't support Python 3.
-Python 3 has some nice features (like recursive globbing) that I take advantage
-of in the postprocessing code, but can't use in the ``sim_wrapper.py`` script.
-
-Anyway, the help message will tell you what arguments you can pass in. Then
-execute with:: 
-
-    python3 /path/to/postprocess.py [args] your_input.yml
-
-And that's it! 

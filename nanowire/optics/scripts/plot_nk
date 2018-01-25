@@ -1,14 +1,20 @@
 #!/usr/bin/env python
 
 from os import path
+import sys
 import numpy as np
 import matplotlib.pyplot as plt
+plt.style.use(['presentation'])
+
+if len(sys.argv) > 1:
+    freqs = [float(s) for s in sys.argv[1:]]
 
 file_path = path.abspath(__file__)
 nk_dir = path.abspath(path.join(file_path, '../../../NK')) 
 al = np.loadtxt(path.join(nk_dir, '009_AlInP_nk_Hz.txt'))
 cyc = np.loadtxt(path.join(nk_dir, '007_Cyclotrene_nk_Hz.txt'))
 gaas = np.loadtxt(path.join(nk_dir, '006_GaAs_nk_Walker_modified_Hz.txt'))
+
 
 fig, (ax1, ax2) = plt.subplots(1, 2)
 ax1.set_title('Real Part of Index of Refraction')
@@ -24,6 +30,38 @@ ax2.plot(cyc[:, 0], cyc[:, 2], label="Cyclotene")
 ax2.plot(gaas[:, 0], gaas[:, 2], label="GaAs")
 ax2.set_xlabel('Frequency (Hz)')
 ax2.set_ylabel('k')
+for ax in (ax1, ax2):
+    for freq in freqs:
+        ymin, ymax = ax.get_ylim()
+        ax.plot([freq, freq], [ymin, ymax], 'k--')
 ax2.legend()
-plt.tight_layout()
+# plt.tight_layout()
+plt.show()
+
+al_realeps = al[:,1]**2 - al[:, 2]**2
+al_imageps = 2*al[:,1]*al[:, 2]
+cyc_realeps = cyc[:,1]**2 - cyc[:, 2]**2
+cyc_imageps = 2*cyc[:,1]*cyc[:, 2]
+gaas_realeps = gaas[:,1]**2 - gaas[:, 2]**2
+gaas_imageps = 2*gaas[:,1]*gaas[:, 2]
+fig, (ax1, ax2) = plt.subplots(1, 2)
+ax1.set_title('Real Part of Relative Permitivity')
+ax1.plot(al[:, 0], al_realeps, label="AlInP")
+ax1.plot(cyc[:, 0], cyc_realeps, label="Cyclotene")
+ax1.plot(gaas[:, 0], gaas_realeps, label="GaAs")
+ax1.set_xlabel('Frequency (Hz)')
+ax1.set_ylabel(r'$\mathrm{Re}[\epsilon_r]$')
+ax1.legend()
+ax2.set_title('Imaginary Part of Relative Permitivity')
+ax2.plot(al[:, 0], al_imageps, label="AlInP")
+ax2.plot(cyc[:, 0], cyc_imageps, label="Cyclotene")
+ax2.plot(gaas[:, 0], gaas_imageps, label="GaAs")
+ax2.set_xlabel('Frequency (Hz)')
+ax2.set_ylabel(r'$\mathrm{Im}[\epsilon_r]$')
+for ax in (ax1, ax2):
+    for freq in freqs:
+        ymin, ymax = ax.get_ylim()
+        ax.plot([freq, freq], [ymin, ymax], 'k--')
+ax2.legend()
+# plt.tight_layout()
 plt.show()

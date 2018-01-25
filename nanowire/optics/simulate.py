@@ -912,6 +912,37 @@ class Simulator():
             os.makedirs(sim_dir)
         except OSError:
             pass
+    
+    def set_numbasis(self, numbasis):
+        """
+        Set the number of basis terms. This function updates the number of
+        basis terms in the config and also updates the s4 attribute. This is
+        necessary because the interface to S4 (i.e the object stored at
+        self.s4) requires the number of basis terms to be provided to the
+        constructor of that object. 
+
+        .. note:: You will need to call self.setup() after calling this
+        function
+        """
+        self.conf['Simulation']['params']['numbasis'] = numbasis
+        self.s4 = S4.New(Lattice=((self.period, 0), (0, self.period)),
+                         NumBasis=int(round(numbasis)))
+
+    def set_numbasis(self, period):
+        """
+        Set the periodicity of the square array. This function updates the
+        number of basis terms in the config and also updates the s4 attribute.
+        This is necessary because the interface to S4 (i.e the object stored at
+        self.s4) requires the lattice vectors of the unit cell to be provided
+        to the constructor of that object. 
+
+        .. note:: You will need to call self.setup() after calling this
+        function
+        """
+        self.conf['Simulation']['params']['array_period'] = period
+        numbasis = self.conf['Simulation']['params']['numbasis']
+        self.s4 = S4.New(Lattice=((period, 0), (0, period)),
+                         NumBasis=int(round(numbasis)))
 
     def configure(self):
         """Configure options for the RCWA solver"""
@@ -1262,6 +1293,9 @@ class Simulator():
 
         This function is inclusive of the periodic endpoints at x=xmax and y=ymax
         """
+        Ex = np.zeros((xsamples, ysamples), dtype=np.complex128)
+        Ey = np.zeros((xsamples, ysamples), dtype=np.complex128)
+        Ez = np.zeros((xsamples, ysamples), dtype=np.complex128)
         if self.conf["General"]["compute_h"]:
             E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(xsamples-1,
                                                             ysamples-1), 
@@ -1275,30 +1309,30 @@ class Simulator():
             # Grab the periodic BC, which is always excluded from results
             # returned by S4 above
             Ex[:-1, :-1] = E_arr[:, :, 0]
-            Ex[0:self.xsamps-1, -1] = E_arr[:, 0, 0]
-            Ex[-1, 0:self.ysamps-1] = E_arr[0, :, 0]
+            Ex[0:xsamples-1, -1] = E_arr[:, 0, 0]
+            Ex[-1, 0:ysamples-1] = E_arr[0, :, 0]
             Ex[-1, -1] = E_arr[0, 0, 0]
             Ey[:-1, :-1] = E_arr[:, :, 1]
-            Ey[0:self.xsamps-1, -1] = E_arr[:, 0, 1]
-            Ey[-1, 0:self.ysamps-1] = E_arr[0, :, 1]
+            Ey[0:xsamples-1, -1] = E_arr[:, 0, 1]
+            Ey[-1, 0:ysamples-1] = E_arr[0, :, 1]
             Ey[-1, -1] = E_arr[0, 0, 1]
             Ez[:-1, :-1] = E_arr[:, :, 2]
-            Ez[0:self.xsamps-1, -1] = E_arr[:, 0, 2]
-            Ez[-1, 0:self.ysamps-1] = E_arr[0, :, 2]
+            Ez[0:xsamples-1, -1] = E_arr[:, 0, 2]
+            Ez[-1, 0:ysamples-1] = E_arr[0, :, 2]
             Ez[-1, -1] = E_arr[0, 0, 2]
         if self.conf["General"]["compute_h"]:
             H_arr = np.array(H)
             Hx[:-1, :-1] = H_arr[:, :, 0]
-            Hx[0:self.xsamps-1, -1] = H_arr[:, 0, 0]
-            Hx[-1, 0:self.ysamps-1] = H_arr[0, :, 0]
+            Hx[0:xsamples-1, -1] = H_arr[:, 0, 0]
+            Hx[-1, 0:ysamples-1] = H_arr[0, :, 0]
             Hx[-1, -1] = H_arr[0, 0, 0]
             Hy[:-1, :-1] = H_arr[:, :, 1]
-            Hy[0:self.xsamps-1, -1] = H_arr[:, 0, 1]
-            Hy[-1, 0:self.ysamps-1] = H_arr[0, :, 1]
+            Hy[0:xsamples-1, -1] = H_arr[:, 0, 1]
+            Hy[-1, 0:ysamples-1] = H_arr[0, :, 1]
             Hy[-1, -1] = H_arr[0, 0, 1]
             Hz[:-1, :-1] = H_arr[:, :, 2]
-            Hz[0:self.xsamps-1, -1] = H_arr[:, 0, 2]
-            Hz[-1, 0:self.ysamps-1] = H_arr[0, :, 2]
+            Hz[0:xsamples-1, -1] = H_arr[:, 0, 2]
+            Hz[-1, 0:ysamples-1] = H_arr[0, :, 2]
             Hz[-1, -1] = H_arr[0, 0, 2]
         else: 
             Hx, Hy, Hz = None, None, None

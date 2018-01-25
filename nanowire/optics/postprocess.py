@@ -541,12 +541,16 @@ class Simulation:
             # n and k could be functions of space, so we need to multiply the
             # fields by n and k before integrating
             arr_slice = Esq[layer_obj.slice]*n_mat*k_mat
-            # zsamps = layer_obj.iend - layer_obj.istart
-            # z_vals = np.linspace(0, layer_obj.thickness, zsamps)
             z_vals = self.Z[layer_obj.istart:layer_obj.iend]
             z_integral = intg.trapz(arr_slice, x=z_vals, axis=0)
             x_integral = intg.trapz(z_integral, x=self.X, axis=0)
             y_integral = intg.trapz(x_integral, x=self.Y, axis=0)
+            # print('Arr slice shape: {}'.format(arr_slice.shape))
+            # x_integral = intg.trapz(arr_slice, x=self.X, axis=1)
+            # print('X Integral shape: {}'.format(x_integral.shape))
+            # y_integral = intg.trapz(x_integral, x=self.Y, axis=1)
+            # print('Y Integral shape: {}'.format(y_integral.shape))
+            # z_integral = intg.trapz(y_integral, x=z_vals, axis=0)
             # 2\pi for conversion to angular frequency
             # epsilon_0 comes out of dielectric constant
             # Factor of base unit because we need to convert from our reference
@@ -554,6 +558,7 @@ class Simulation:
             # Factor of 1/2 for time averaging gets canceled by imaginary part
             # of dielectric constant (2*n*k)
             Pabs_integ = 2*np.pi*freq*c.epsilon_0*base_unit*y_integral
+            # Pabs_integ = 2*np.pi*freq*c.epsilon_0*base_unit*z_integral
             if per_area:
                 Pabs_integ /= self.period**2
             self.log.info("Integrated Absorbed: {}".format(Pabs_integ))
@@ -620,8 +625,8 @@ class Simulation:
                 arr[-1] = (port, reflectance, transmission, absorbance)
         except:
             # Otherwise we need to make a new one
-            dt = [('port', 'S25'), ('transmission', 'f8'),
-                  ('reflection', 'f8'), ('absorption', 'f8')]
+            dt = [('port', 'S25'), ('reflection', 'f8'),
+                  ('transmission', 'f8'), ('absorption', 'f8')]
             arr = np.recarray((1,), dtype=dt)
             arr[-1] = (port, reflectance, transmission, absorbance)
         self.data['transmission_data'] = arr
@@ -1515,11 +1520,16 @@ class SimulationGroup:
           frequency i.
         * :math:`q` is the fundamental charge
 
+        :param port: The location at which to set the transmission port
+        :type port: str
+        :param method: The method used to compute the absorbed power. One of
+                       either 'flux' or 'integral'
+        :type method: str
         :return: The photocurrent density, see :eq:`Jph`
         :rtype: float
-        :raises ValueError: if the method kwarg is not 'flux' or 'integral'.
-                            This is a bit of a hack at the moment for testing
-                            purposes.
+        :raises ValueError: if the ``method`` kwarg is not 'flux' or
+                            'integral'.  This is a bit of a hack at the moment
+                            for testing purposes.
         """
 
         if method not in ('flux', 'integral'):
@@ -1527,7 +1537,7 @@ class SimulationGroup:
             raise ValueError(msg)
 
         base = os.path.expandvars(self.sims[0].conf['General']['results_dir'])
-        self.log.info('Computing photocurrent density for group at %s' % base)
+        self.log.info('Computing photocurrent density for group at %s', base)
         jph_vals = np.zeros(self.num_sims)
         freqs = np.zeros(self.num_sims)
         # Assuming the sims have been grouped by frequency, sum over all of
@@ -1537,7 +1547,11 @@ class SimulationGroup:
             freqs[i] = freq
             E_photon = c.h * freq
             if method == 'flux':
-                ref, trans, absorb = sim.data['transmission_data'][port]
+                arr = sim.data['transmission_data']
+                print(arr.dtype)
+                print(arr)
+                _, ref, trans, absorb = arr[arr.port == port.encode('utf-8')][0]
+                print(ref, trans, absorb)
                 incident_power = sim.get_incident_power()
                 jph_vals[i] = incident_power * absorb / E_photon
             else:
@@ -1833,10 +1847,11 @@ def _call_func(quantity, obj, args):
     Calls an instance method of an object with args
     """
 
+    log = logging.getLogger(__name__)
     try:
         result = getattr(obj, quantity)(*args)
-    except KeyError:
-        print("Unable to call the following function: %s", quantity)
+    except AttributeError:
+        log.error("Unable to call the following function: %s", quantity)
         raise
     return result
 

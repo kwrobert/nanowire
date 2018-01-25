@@ -1519,7 +1519,7 @@ class Simulator():
             compression = self.conf['General']['compression']
             if compression:
                 # filter_obj = tb.Filters(complevel=8, complib='blosc')
-                filter_obj = tb.Filters(complevel=8, complib='zlib')
+                filter_obj = tb.Filters(complevel=4, complib='zlib')
             gpath = '/sim_'+self.id[0:10]
             for name, arr in self.data.items():
                 # Check for recarrays first because they are subclass of

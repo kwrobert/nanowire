@@ -204,7 +204,7 @@ class HDF5DataManager(DataManager):
                     existing_arr[...] = obj
                 except tb.NoSuchNodeError:
                     if self.conf['General']['compression']:
-                        filt = tb.Filters(complevel=4, complib='blosc')
+                        filt = tb.Filters(complevel=4, complib='zlib')
                         self._dfile.create_carray(self.gpath, key, obj=obj,
                                                   filters=filt,
                                                   atom=tb.Atom.from_dtype(obj.dtype))

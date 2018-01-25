@@ -469,7 +469,7 @@ class Simulation:
         self.data[key] = avgs
         return avgs
 
-    def absorption_per_layer(self):
+    def absorption_per_layer(self, per_area=True):
         """
         Computes the absorption in each layer of the device using two methods.
         The first method takes the difference between the areal power fluxes
@@ -495,6 +495,10 @@ class Simulation:
         
         This provides a metric for quantifying how converged the real space
         reconstructions of the fields are.
+
+        :param per_area: Compute the absorption in units of power per unit area
+                         or not. If True, in units of Watts/micrometer^2
+        :type per_area: bool
         """
 
         fluxes = self.data['fluxes']
@@ -525,7 +529,9 @@ class Simulation:
             # S4 returns \int |E|^2 / Area, so we need to multiply by the area
             # here. Factor of one over vacuum impedance to get the units into
             # power.
-            Pabs_flux = .5*Plost*self.period**2/Zo
+            Pabs_flux = .5*Plost/Zo
+            if not per_area:
+                Pabs_flux *= self.period**2
             self.log.info("Layer: {}".format(layer_name))
             self.log.info("Flux Method Absorbed: {}".format(Pabs_flux))
             # Method 2: Go through integral of field intensity
@@ -535,8 +541,9 @@ class Simulation:
             # n and k could be functions of space, so we need to multiply the
             # fields by n and k before integrating
             arr_slice = Esq[layer_obj.slice]*n_mat*k_mat
-            zsamps = layer_obj.iend - layer_obj.istart
-            z_vals = np.linspace(0, layer_obj.thickness, zsamps)
+            # zsamps = layer_obj.iend - layer_obj.istart
+            # z_vals = np.linspace(0, layer_obj.thickness, zsamps)
+            z_vals = self.Z[layer_obj.istart:layer_obj.iend]
             z_integral = intg.trapz(arr_slice, x=z_vals, axis=0)
             x_integral = intg.trapz(z_integral, x=self.X, axis=0)
             y_integral = intg.trapz(x_integral, x=self.Y, axis=0)
@@ -547,6 +554,8 @@ class Simulation:
             # Factor of 1/2 for time averaging gets canceled by imaginary part
             # of dielectric constant (2*n*k)
             Pabs_integ = 2*np.pi*freq*c.epsilon_0*base_unit*y_integral
+            if per_area:
+                Pabs_integ /= self.period**2
             self.log.info("Integrated Absorbed: {}".format(Pabs_integ))
             diff = np.abs(Pabs_flux - Pabs_integ)
             absorb_arr[counter] = (layer_name, Pabs_flux, Pabs_integ, diff)
@@ -555,7 +564,7 @@ class Simulation:
         self.data['abs_per_layer'] = absorb_arr
         return absorb_arr
 
-    def transmissionData(self, port='Substrate'):
+    def transmissionData(self, port='Substrate_bottom'):
         """
         Computes reflection, transmission, and absorbance
 
@@ -617,8 +626,35 @@ class Simulation:
         self.data['transmission_data'] = arr
         return reflectance, transmission, absorbance
 
-    def _get_incident_amplitude(self):
-        """Returns the incident amplitude of a wave depending on frequency"""
+    def get_incident_power(self):
+        """
+        Returns the incident power for this simulation depending on frequency
+       
+        Each simulation is conducted at a single frequency :math:`f =  \\omega
+        / 2\\pi` which is associated with a frequency "bin" of spectral width
+        :math:`\\Delta f`. The solar spectrum is expressed in units of Watts *
+        m^-2 * Hz^-1. In order to compute the incident power for this
+        simulation, we have a few options
+
+        1. Interpolate to find the spectral irradiance at the frequency for
+           this simulation, then multiply by the spectral width
+        2. Find all available irradiance values contained inside the frequency
+           bin, then integrate over the bin using those values as data points. 
+           The bin extends from :math:`(f - \\Delta f/2, f + \\Delta f/2)`, so
+           in summary
+           
+           .. math:: \\int_{f - \\Delta f/2}^{f + \\Delta f/2} I(f) df
+           
+           where :math:`I` is the incident solar irradiance.
+
+        Method 2 is used in this function, because it is debatably more 
+        accurate.
+        
+        :raises ValueError: If the maximum or minimum bin edge extend beyond
+                            the data range in the provided spectral data 
+        """
+
+
         freq = self.conf['Simulation']['params']['frequency']['value']
         polar_angle = self.conf['Simulation']['params']['polar_angle']['value']
         path = os.path.expandvars(self.conf['Simulation']['input_power'])
@@ -1455,57 +1491,69 @@ class SimulationGroup:
         self.log.info('Fractional Absorbtion = %f' % frac_absorb)
         return frac_absorb
 
-    def Jsc(self, port='Substrate'):
-        """Computes photocurrent density. This is just the integrated
-        absorption scaled by a unitful factor. Assuming perfect carrier
-        collection, meaning every incident photon gets converted to 1 collected
-        electron, this factor is q/(hbar*c) which converts to a current per
-        unit area"""
+    def photocurrent_density(self, port='Substrate_bottom', method='flux'):
+        """
+        Computes photocurrent density assuming perfect carrier collection,
+        meaning every absorbed photon gets converted to 1 collected electron.
+
+        The incident power computed using
+        :py:meth:`Simulation.get_incident_power`.  See that function for
+        details about how the incident power is computed.
+
+        Given some number N frequency values (and simulations at those
+        frequencies), the photocurrent density can be computed using
+
+        .. math:: J_{ph} = \\int q \\sum_i^N \\frac{P(f_i)A(f_i)}{E_{photon}}
+           :label: Jph
+
+        where
+
+        * :math:`P(f_i)` is the incident power at frequency i
+        * :math:`A(f_i)` is the fraction of the incident power that is absorbed
+        * :math:`E_{photon} = h f_i` is the energy of the incident photons at
+          frequency i.
+        * :math:`q` is the fundamental charge
+
+        :return: The photocurrent density, see :eq:`Jph`
+        :rtype: float
+        :raises ValueError: if the method kwarg is not 'flux' or 'integral'.
+                            This is a bit of a hack at the moment for testing
+                            purposes.
+        """
+
+        if method not in ('flux', 'integral'):
+            msg = 'Invalid method {} for computing absorbance'.format(method)
+            raise ValueError(msg)
+
         base = os.path.expandvars(self.sims[0].conf['General']['results_dir'])
         self.log.info('Computing photocurrent density for group at %s' % base)
-        vals = np.zeros(self.num_sims)
+        jph_vals = np.zeros(self.num_sims)
         freqs = np.zeros(self.num_sims)
-        wvlgths = np.zeros(self.num_sims)
-        spectra = np.zeros(self.num_sims)
-        wv_fact = c.e / (c.c * c.h * 10)
         # Assuming the sims have been grouped by frequency, sum over all of
         # them
         for i, sim in enumerate(self.sims):
-            # Unpack data for the port we passed in as an argument
-            ref, trans, absorb = sim.data['transmission_data'][port]
             freq = sim.conf['Simulation']['params']['frequency']['value']
-            wvlgth = c.c / freq
-            wvlgth_nm = wvlgth * 1e9
             freqs[i] = freq
-            wvlgths[i] = wvlgth
-            # Get solar power from chosen spectrum
-            path = os.path.expandvars(sim.conf['Simulation']['input_power_wv'])
-            wv_vec, p_vec = np.loadtxt(path, usecols=(0, 2), unpack=True, delimiter=',')
-            # Get p at wvlength by interpolation
-            p_wv = interpolate.interp1d(wv_vec, p_vec, kind='linear',
-                                        bounds_error=False, fill_value='extrapolate')
-            sun_pow = p_wv(wvlgth_nm)
-            spectra[i] = sun_pow * wvlgth_nm
-            # This is our integrand
-            vals[i] = absorb * sun_pow * wvlgth_nm
-            # test = absorb * sun_pow * wvlgth_nm * wv_fact * delta_wv
-            # self.log.info('Sim %s Jsc Integrand: %f', sim.id, test)
+            E_photon = c.h * freq
+            if method == 'flux':
+                ref, trans, absorb = sim.data['transmission_data'][port]
+                incident_power = sim.get_incident_power()
+                jph_vals[i] = incident_power * absorb / E_photon
+            else:
+                try:
+                    abs_arr = sim.data['abs_per_layer']
+                except KeyError:
+                    abs_arr = sim.absorption_per_layer()
+                absorbed_power = np.sum(abs_arr['int_method'])
+                jph_vals[i] = absorbed_power / E_photon
             sim.clear_data()
-        # Use Trapezoid rule to perform the integration. Note all the
-        # necessary factors of the wavelength have already been included
-        # above
-        wvlgths = wvlgths[::-1]
-        vals = vals[::-1]
-        spectra = spectra[::-1]
-        integrated_absorbtion = intg.trapz(vals, x=wvlgths)
-        # integrated_absorbtion = intg.simps(vals, x=wvlgths)
         # factor of 1/10 to convert A*m^-2 to mA*cm^-2
-        Jsc = wv_fact * integrated_absorbtion
-        outf = os.path.join(base, 'jsc.dat')
+        Jph = .1 * c.e * np.sum(jph_vals)
+        outf = os.path.join(base, 'jph_{}.dat'.format(method))
         with open(outf, 'w') as out:
-            out.write('%f\n' % Jsc)
-        self.log.info('Jsc = %f', Jsc)
-        return Jsc
+            out.write('%f\n' % Jph)
+        self.log.info('Jph = %f', Jph)
+        return Jph
 
     def Jsc_integrated_persim(self):
         for i, sim in enumerate(self.sims):

@@ -269,45 +269,43 @@ class Config(MutableMapping):
                     key_seq.append(key)
                     self.setfromseq(key_seq, result)
 
+    def _find_params(self, indict={}, keypath=[]):
+        if not indict:
+            keyset = set(self.data.keys())
+            exclude = set(['Postprocessing', 'General'])
+            keys = keyset.difference(exclude)
+            indict = self.data
+        else:
+            keys = indict.keys()
+        for key in keys:
+            val = indict[key]
+            # All variable parameters must specify their type
+            if isinstance(val, dict):
+                loc = keypath + [key]
+                if 'paramtype' in val:
+                    if val['paramtype'] == 'variable':
+                        # Thickness parameters require special treatment
+                        if key == 'thickness':
+                            self.variable_thickness.append(loc)
+                        else:
+                            self.variable.append(loc)
+                    elif val['paramtype'] == 'optimized':
+                        self.optimized.append(loc)
+                    else:
+                        raise ValueError("Invalid parameter type at"
+                                         " {}".format(loc))
+                else:
+                    self._find_params(indict=val, keypath=loc)
+            else:
+                continue
+
     def _update_params(self):
         # self.log.info('Updating params')
-        self.fixed = []
         self.variable = []
         self.variable_thickness = []
         self.optimized = []
-        for par, data in self.data['Simulation']['params'].items():
-            if data['type'] == 'fixed':
-                self.fixed.append(('Simulation', 'params', par))
-            elif data['type'] == 'variable':
-                if par == 'thickness':
-                    self.variable_thickness.append(
-                        ('Simulation', 'params', par))
-                else:
-                    self.variable.append(('Simulation', 'params', par))
-            elif data['type'] == 'optimized':
-                self.optimized.append(('Simulation', 'params', par))
-            else:
-                loc = '.'.join('Simulation', 'params', par)
-                raise ValueError(
-                    'Specified an invalid config type at {}'.format(loc))
-
-        for layer, layer_data in self.data['Layers'].items():
-            for par, data in layer_data['params'].items():
-                if data['type'] == 'fixed':
-                    self.fixed.append(('Layers', layer, 'params', par))
-                elif data['type'] == 'variable':
-                    if par == 'thickness':
-                        self.variable_thickness.append(
-                            ('Layers', layer, 'params', par))
-                    else:
-                        self.variable.append(('Layers', layer, 'params', par))
-                elif data['type'] == 'optimized':
-                    self.optimized.append(('Layers', layer, 'params', par))
-                else:
-                    loc = '.'.join('Layers', layer, 'params', par)
-                    raise ValueError(
-                        'Specified an invalid config type at {}'.format(loc))
-
+        self._find_params()
+    
     def __getitem__(self, key):
         """This setup allows us to get a value using a sequence with the usual
         [] operator"""

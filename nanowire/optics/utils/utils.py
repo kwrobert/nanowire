@@ -75,7 +75,6 @@ def get_combos(conf, keysets):
     # log.info("Constructing dictionary of options and their values ...")
     # Get the list of values from all our variable keysets
     optionValues = OrderedDict()
-    bin_size = 0
     for keyset in keysets:
         par = '.'.join(keyset)
         pdict = conf[keyset]
@@ -84,18 +83,11 @@ def get_combos(conf, keysets):
             start, end, step = map(
                 float, [pdict['start'], pdict['end'], pdict['step']])
             values = np.linspace(start, end, step)
-            # We need to add the size of the bin to each sim config so we can
-            # use it to average the total power contained within each bin
-            # when computer incident amplitude/power
-            if 'frequency' in keyset:
-                bin_size = values[1] - values[0]
         elif pdict['itertype'] == 'stepsize':
             # Force to float in case we did some interpolation in the config
             start, end, step = map(
                 float, [pdict['start'], pdict['end'], pdict['step']])
             values = np.arange(start, end + step, step)
-            if 'frequency' in keyset:
-                bin_size = float(step)
         elif pdict['itertype'] == 'list':
             values = pdict['value']
         else:
@@ -111,7 +103,7 @@ def get_combos(conf, keysets):
     combos = list(itertools.product(*valuelist))
     # log.debug('The list of parameter combos: %s', str(combos))
     # Gotta map to float cuz yaml writer doesn't like numpy data types
-    return keys, combos, float(bin_size)
+    return keys, combos
 
 
 @contextmanager

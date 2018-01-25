@@ -530,8 +530,9 @@ class Simulation:
             # n and k could be functions of space, so we need to multiply the
             # fields by n and k before integrating
             arr_slice = Esq[layer_obj.slice]*n_mat*k_mat
-            zsamps = layer_obj.iend - layer_obj.istart
-            z_vals = np.linspace(0, layer_obj.thickness, zsamps)
+            # zsamps = layer_obj.iend - layer_obj.istart
+            # z_vals = np.linspace(0, layer_obj.thickness, zsamps)
+            z_vals = self.Z[layer_obj.istart:layer_obj.iend]
             z_integral = intg.trapz(arr_slice, x=z_vals, axis=0)
             x_integral = intg.trapz(z_integral, x=self.X, axis=0)
             y_integral = intg.trapz(x_integral, x=self.Y, axis=0)

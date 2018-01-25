@@ -20,7 +20,7 @@ def get_mask(shape, xcoords, ycoords):
     if isinstance(shape, Ellipse):
         expr = shape.equation()
         circ_f = lambdify((_x, _y), expr, modules='numpy', dummify=False)
-        xv, yv = np.meshgrid(xcoords, ycoords)
+        xv, yv = np.meshgrid(ycoords, xcoords)
         e = circ_f(xv, yv) 
         mask = np.where(e > 0, 0, 1)
     else:
@@ -103,6 +103,9 @@ class Layer:
             # print(mask)
             shape_nvals = mask*n
             shape_kvals = mask*k
+            print("Mask Shape: {}".format(mask.shape))
+            print("Nvals Shape: {}".format(shape_nvals.shape))
+            print("N Matrix Shape: {}".format(n_matrix.shape))
             n_matrix = np.where(mask, shape_nvals, n_matrix)
             # print(n_matrix)
             k_matrix = np.where(mask, shape_kvals, k_matrix)

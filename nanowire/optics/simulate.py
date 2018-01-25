@@ -136,7 +136,7 @@ def run_sim(conf, q=None):
             log.info('Computing a thickness sweep at %s' % sim.id[0:10])
             orig_id = sim.id[0:10]
             # Get all combinations of layer thicknesses
-            keys, combos, bin_size = get_combos(sim.conf, sim.conf.variable_thickness)
+            keys, combos = get_combos(sim.conf, sim.conf.variable_thickness)
             # Update base directory to new sub directory
             sim.conf['General']['base_dir'] = sim.dir
             # Set things up for the first combo
@@ -146,7 +146,7 @@ def run_sim(conf, q=None):
             var_thickness = sim.conf.variable_thickness
             for i, param_val in enumerate(first_combo):
                 keyseq = var_thickness[i]
-                sim.conf[keyseq] = {'type': 'fixed', 'value': float(param_val)}
+                sim.conf[keyseq] = param_val
             # With all the params updated we can now run substutions and
             # evaluations in the config that make have referred to some thickness
             # data, then make the subdir from the sim id and get the data
@@ -167,7 +167,8 @@ def run_sim(conf, q=None):
             for combo in combos:
                 for i, param_val in enumerate(combo):
                     keyseq = var_thickness[i]
-                    sim.conf[keyseq] = {'type': 'fixed', 'value': float(param_val)}
+                    print(type(param_val))
+                    sim.conf[keyseq] = param_val
                 sim.update_id()
                 subpath = os.path.join(orig_id, sim.id[0:10])
                 log.info('Computing additional thickness at %s', subpath)
@@ -410,7 +411,8 @@ class SimulationManager:
     def make_confs(self):
         """Make all the configuration dicts for each parameter combination"""
         self.log.info('Constructing simulator objects ...')
-        locs, combos, bin_size = get_combos(self.gconf, self.gconf.variable)
+        print(self.gconf.variable)
+        locs, combos = get_combos(self.gconf, self.gconf.variable)
         for combo in combos:
             # Make a copy of the global config for this parameter combos. This copy
             # represents an individual simulation
@@ -423,18 +425,8 @@ class SimulationManager:
             # such that the combo values always line up with the proper
             # parameter name
             for i, combo in enumerate(combo):
-                if 'frequency' in locs[i]:
-                    sim_conf[self.gconf.variable[i]] = {'type': 'fixed',
-                                                        'value': float(combo),
-                                                        'bin_size': bin_size}
-                else:
-                    sim_conf[self.gconf.variable[i]] = {'type': 'fixed',
-                                                        'value': float(combo)}
-                    sim_conf[('Simulation','params','frequency')].update({'bin_size':
-                                                                    0})
+                sim_conf[self.gconf.variable[i]] = combo
             self.sim_confs.append(sim_conf)
-        if not combos[0]:
-            sim_conf[('Simulation', 'params', 'frequency')].update({'bin_size': 0})
 
     def execute_jobs(self):
         """Given a list of configuration dictionaries, run them either serially or in
@@ -553,9 +545,7 @@ class SimulationManager:
         for i in range(len(self.gconf.optimized)):
             keyseq = self.gconf.optimized[i]
             self.log.info(keyseq)
-            valseq = list(keyseq) + ['value']
-            self.log.info(valseq)
-            self.gconf[valseq] = float(opt_pars[i])
+            self.gconf[keyseq] = opt_pars[i]
         # Make all the sim objects
         self.sim_confs = []
         sims = self.make_confs()
@@ -576,21 +566,19 @@ class SimulationManager:
                     elif conv_status == 'unconverged':
                         conv_dict[freq] = (False, numbasis)
             for sim in sims:
-                freq = str(sim.conf['Simulation']['params']['frequency']['value'])
+                freq = str(sim.conf['Simulation']['params']['frequency'])
                 conv, numbasis = conv_dict[freq]
                 # Turn off adaptive convergence and update the number of basis
                 # terms
                 if conv:
                     self.log.info('Frequency %s converged at %s basis terms', freq, numbasis)
                     sim.conf['General']['adaptive_convergence'] = False
-                    sim.conf['Simulation']['params'][
-                        'numbasis']['value'] = int(numbasis)
+                    sim.conf['Simulation']['params']['numbasis'] = int(numbasis)
                 # For sims that haven't converged, set the number of basis terms to the last
                 # tested value so we're closer to our goal of convergence
                 else:
                     self.log.info('Frequency %s converged at %s basis terms', freq, numbasis)
-                    sim.conf['Simulation']['params'][
-                        'numbasis']['value'] = int(numbasis)
+                    sim.conf['Simulation']['params']['numbasis'] = int(numbasis)
         # With the leaf directories made and the number of basis terms adjusted,
         # we can now kick off our frequency sweep
         self.execute_jobs()
@@ -632,7 +620,7 @@ class SimulationManager:
             self.log.info('Storing adaptive convergence results ...')
             with open(info_file, 'w') as info:
                 for sim in sims:
-                    freq = sim.conf['Simulation']['params']['frequency']['value']
+                    freq = sim.conf['Simulation']['params']['frequency']
                     conv_path = os.path.join(sim.dir, 'converged_at.txt')
                     nconv_path = os.path.join(sim.dir, 'not_converged_at.txt')
                     if os.path.isfile(conv_path):
@@ -650,8 +638,7 @@ class SimulationManager:
                         # convergence was switched off and there will be no file to
                         # read from
                         conv = 'converged'
-                        numbasis = sim.conf['Simulation'][
-                            'params']['numbasis']['value']
+                        numbasis = sim.conf['Simulation']['params']['numbasis']
                     info.write('%s,%s,%s\n' % (str(freq), numbasis, conv))
             self.log.info('Finished storing convergence results!')
         #print('Total time = %f'%delta)
@@ -784,8 +771,8 @@ class Simulator():
     def __init__(self, conf, q=None):
         self.conf = conf
         self.q = q
-        numbasis = self.conf['Simulation']['params']['numbasis']['value']
-        period = self.conf['Simulation']['params']['array_period']['value']
+        numbasis = self.conf['Simulation']['params']['numbasis']
+        period = self.conf['Simulation']['params']['array_period']
         self.id = make_hash(conf.data)
         sim_dir = os.path.join(self.conf['General']['base_dir'], self.id[0:10])
         self.conf['General']['sim_dir'] = sim_dir
@@ -952,7 +939,7 @@ class Simulator():
         """Returns complex dielectric constant for a material by pulling in nk
         text file, interpolating, computing nk values at freq, and
         converting"""
-        freq = self.conf['Simulation']['params']['frequency']['value']
+        freq = self.conf['Simulation']['params']['frequency']
         # Get data
         freq_vec, n_vec, k_vec = np.loadtxt(path, unpack=True)
         # Get n and k at specified frequency via interpolation
@@ -969,7 +956,7 @@ class Simulator():
         return epsilon
 
     def _get_incident_amplitude_anna(self):
-        freq = self.conf['Simulation']['params']['frequency']['value']
+        freq = self.conf['Simulation']['params']['frequency']
         path = '$HOME/software/nanowire/nanowire/spectra/Input_sun_power.txt'
         freq_vec, p_vec = np.loadtxt(os.path.expandvars(path), unpack=True)
         p_of_f = spi.interp1d(freq_vec, p_vec)
@@ -987,15 +974,15 @@ class Simulator():
 
     def _get_incident_amplitude(self):
         """Returns the incident amplitude of a wave depending on frequency"""
-        freq = self.conf['Simulation']['params']['frequency']['value']
-        polar_angle = self.conf['Simulation']['params']['polar_angle']['value']
+        freq = self.conf['Simulation']['params']['frequency']
+        polar_angle = self.conf['Simulation']['params']['polar_angle']
         path = os.path.expandvars(self.conf['Simulation']['input_power'])
-        bin_size = self.conf['Simulation']['params']['frequency']['bin_size']
+        bandwidth = self.conf['Simulation']['params']['bandwidth']
         # Get NREL AM1.5 data
         freq_vec, p_vec = np.loadtxt(path, unpack=True, delimiter=',')
         # Get all available intensity values within this bin
-        left = freq - bin_size / 2.0
-        right = freq + bin_size / 2.0
+        left = freq - bandwidth / 2.0
+        right = freq + bandwidth / 2.0
         inds = np.where((left < freq_vec) & (freq_vec < right))[0]
         # Check for edge cases
         if len(inds) == 0:
@@ -1066,15 +1053,15 @@ class Simulator():
 
     def set_excitation(self):
         """Sets the exciting plane wave for the simulation"""
-        f_phys = self.conf['Simulation']['params']['frequency']['value']
+        f_phys = self.conf['Simulation']['params']['frequency']
         self.log.debug('Physical Frequency = %E' % f_phys)
         c_conv = constants.c / self.conf['Simulation']['base_unit']
         f_conv = f_phys / c_conv
         self.s4.SetFrequency(f_conv)
         E_mag = self._get_incident_amplitude()
         # E_mag = self._get_incident_amplitude_anna()
-        polar = self.conf['Simulation']['params']['polar_angle']['value']
-        azimuth = self.conf['Simulation']['params']['azimuthal_angle']['value']
+        polar = self.conf['Simulation']['params']['polar_angle']
+        azimuth = self.conf['Simulation']['params']['azimuthal_angle']
         # To define circularly polarized light from the point of view of the
         # source, basically just stick a j
         # (imaginary number) in front of one of your components. The component
@@ -1132,7 +1119,7 @@ class Simulator():
             self.log.debug('Building layer: %s' % layer)
             self.log.debug('Layer Order %i' % ldata['order'])
             base_mat = ldata['base_material']
-            layer_t = ldata['params']['thickness']['value']
+            layer_t = ldata['params']['thickness']
             self.s4.AddLayer(Name=layer, Thickness=layer_t,
                              Material=base_mat)
             if 'geometry' in ldata:
@@ -1156,18 +1143,18 @@ class Simulator():
 
         height = 0
         for layer, ldata in self.conf['Layers'].items():
-            layer_t = ldata['params']['thickness']['value']
+            layer_t = ldata['params']['thickness']
             height += layer_t
         return height
 
     def set_lattice(self, period):
         """Updates the S4 simulation object with a new array period"""
-        numbasis = self.conf['Simulation']['params']['numbasis']['value']
+        numbasis = self.conf['Simulation']['params']['numbasis']
         self.s4 = S4.New(Lattice=((period, 0), (0, period)), NumBasis=numbasis)
 
     def set_basis(self, numbasis):
         """Updates the S4 simulation object with a new set of basis terms"""
-        period = self.conf['Simulation']['params']['array_period']['value']
+        period = self.conf['Simulation']['params']['array_period']
         self.s4 = S4.New(Lattice=((period, 0), (0, period)), NumBasis=numbasis)
 
     def update_thicknesses(self):
@@ -1175,7 +1162,7 @@ class Simulator():
         allows reuse of any layer eigenmodes already computed and utilizes a
         fundamental efficiency of the RCWA solver"""
         for layer, ldata in self.conf['Layers'].items():
-            thickness = ldata['params']['thickness']['value']
+            thickness = ldata['params']['thickness']
             self.s4.SetLayerThickness(Layer=layer, Thickness=thickness)
 
     #  @ph.timecall
@@ -1372,7 +1359,7 @@ class Simulator():
             forw, back = self.s4.GetPowerFlux(Layer=layer)
             flux_arr[counter] = (layer, forw, back)
             # This gets flux at the bottom
-            offset = ldata['params']['thickness']['value']
+            offset = ldata['params']['thickness']
             forw, back = self.s4.GetPowerFlux(Layer=layer, zOffset=offset)
             key = layer + '_bottom'
             flux_arr[counter+1] = (key, forw, back)
@@ -1647,7 +1634,7 @@ class Simulator():
         Returns the field array, last number of basis terms simulated, and a
         boolean representing whether or not the simulation is converged"""
         self.log.debug('Beginning adaptive convergence procedure')
-        start_basis = self.conf['Simulation']['params']['numbasis']['value']
+        start_basis = self.conf['Simulation']['params']['numbasis']
         basis_step = self.conf['General']['basis_step']
         ex, ey, ez = self.compute_fields()
         max_diff = self.conf['General']['max_diff']

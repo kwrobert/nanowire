@@ -124,7 +124,7 @@ class Simulation:
         self.dx = self.X[1] - self.X[0]
         self.dy = self.Y[1] - self.Y[0]
         self.dz = self.Z[1] - self.Z[0]
-        self.period = self.conf['Simulation']['params']['array_period']['value']
+        self.period = self.conf['Simulation']['params']['array_period']
         self.layers = OrderedDict()
         self.get_layers()
         self.height = self.get_height()
@@ -159,7 +159,7 @@ class Simulation:
         """Returns the total height of the device"""
         height = 0
         for layer, ldata in self.conf['Layers'].items():
-            layer_t = ldata['params']['thickness']['value']
+            layer_t = ldata['params']['thickness']
             height += layer_t
         return height
 
@@ -221,7 +221,7 @@ class Simulation:
             max_depth = self.conf[('Simulation', 'max_depth')]
             if max_depth and start >= max_depth:
                 break
-            layer_t = ldata['params']['thickness']['value']
+            layer_t = ldata['params']['thickness']
             # end = start + layer_t + self.dz
             end = start + layer_t
             # Things are discretized, so start needs to be a location that we
@@ -359,7 +359,7 @@ class Simulation:
         fact = c.epsilon_0 / (c.hbar * 1e6)
         gvec = np.zeros_like(normEsq)
         # Main loop to compute generation in each layer
-        freq = self.conf[('Simulation', 'params', 'frequency', 'value')]
+        freq = self.conf[('Simulation', 'params', 'frequency')]
         for name, layer in self.layers.items():
             self.log.debug('LAYER: %s', name)
             self.log.debug('LAYER T: %f', layer.thickness)
@@ -391,7 +391,7 @@ class Simulation:
         # Get spatial discretization
         rsamp = self.conf['Simulation']['r_samples']
         thsamp = self.conf['Simulation']['theta_samples']
-        period = self.conf['Simulation']['params']['array_period']['value']
+        period = self.conf['Simulation']['params']['array_period']
         # Maximum r value such that circle and square unit cell have equal area
         rmax = period / np.sqrt(np.pi)
         # Diff between rmax and unit cell boundary at point of maximum
@@ -508,7 +508,7 @@ class Simulation:
             Esq = self.data['normEsquared']
         except KeyError:
             Esq = self.normEsquared()
-        freq = self.conf[('Simulation', 'params', 'frequency', 'value')]
+        freq = self.conf[('Simulation', 'params', 'frequency')]
         dt = [('layer', 'S25'), ('flux_method', 'c16'), ('int_method', 'c16'),
               ('difference', 'f8')]
         num_rows = len(list(self.layers.keys()))
@@ -635,7 +635,7 @@ class Simulation:
     def get_incident_power(self):
         """
         Returns the incident power for this simulation depending on frequency
-       
+
         Each simulation is conducted at a single frequency :math:`f =  \\omega
         / 2\\pi` which is associated with a frequency "bin" of spectral width
         :math:`\\Delta f`. The solar spectrum is expressed in units of Watts *
@@ -645,19 +645,19 @@ class Simulation:
         1. Interpolate to find the spectral irradiance at the frequency for
            this simulation, then multiply by the spectral width
         2. Find all available irradiance values contained inside the frequency
-           bin, then integrate over the bin using those values as data points. 
+           bin, then integrate over the bin using those values as data points.
            The bin extends from :math:`(f - \\Delta f/2, f + \\Delta f/2)`, so
            in summary
-           
+
            .. math:: \\int_{f - \\Delta f/2}^{f + \\Delta f/2} I(f) df
-           
+
            where :math:`I` is the incident solar irradiance.
 
-        Method 2 is used in this function, because it is debatably more 
+        Method 2 is used in this function, because it is debatably more
         accurate.
-        
+
         :raises ValueError: If the maximum or minimum bin edge extend beyond
-                            the data range in the provided spectral data 
+                            the data range in the provided spectral data
         """
 
 
@@ -778,7 +778,7 @@ class Simulation:
             port, ref, trans, absorb = arr[arr.port == port.encode('utf-8')][0]
         except KeyError:
             ref, trans, absorb = self.transmissionData(port=port)
-        freq = self.conf['Simulation']['params']['frequency']['value']
+        freq = self.conf['Simulation']['params']['frequency']
         wvlgth = c.c / freq
         wvlgth_nm = wvlgth * 1e9
         # Get solar power from chosen spectrum
@@ -831,7 +831,7 @@ class Simulation:
         base = self.conf['General']['sim_dir']
         path = os.path.join(base, 'integrated_absorption.dat')
         inpath = os.path.join(base, 'energy_densities.dat')
-        freq = self.conf['Simulation']['params']['frequency']['value']
+        freq = self.conf['Simulation']['params']['frequency']
         # TODO: Assuming incident amplitude and therefore incident power is
         # just 1 for now
         fact = -.5 * freq * c.epsilon_0
@@ -906,7 +906,7 @@ class Simulation:
         heatmaps"""
         # Get the layers in order
         ordered_layers = self.conf.sorted_dict(self.conf['Layers'])
-        period = self.conf['Simulation']['params']['array_period']['value']
+        period = self.conf['Simulation']['params']['array_period']
         # Loop through them
         boundaries = []
         count = 0
@@ -916,7 +916,7 @@ class Simulation:
             if plane in ["xz", "zx", "yz", "zy"]:
                 # Get boundaries between layers and their starting and ending
                 # indices
-                layer_t = ldata['params']['thickness']['value']
+                layer_t = ldata['params']['thickness']
                 if count == 0:
                     start = 0
                     end = int(layer_t / self.dz) + 1
@@ -1004,7 +1004,7 @@ class Simulation:
         y = np.arange(0, self.period, self.dy)
         z = np.arange(0, self.height + self.dz, self.dz)
         # Get the scalar values
-        freq = self.conf['Simulation']['params']['frequency']['value']
+        freq = self.conf['Simulation']['params']['frequency']
         wvlgth = (c.c / freq) * 1E9
         title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(
             freq, wvlgth)
@@ -1159,7 +1159,7 @@ class Simulation:
         elif direction == 'z':
             # x along rows, y along columns
             pos_data = self.Z
-        freq = self.conf['Simulation']['params']['frequency']['value']
+        freq = self.conf['Simulation']['params']['frequency']
         wvlgth = (c.c / freq) * 1E9
         title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(
             freq, wvlgth)
@@ -1246,9 +1246,9 @@ class SimulationGroup:
         last_layer = sorted_layers.popitem()
         # We can get the starting and ending planes from their heights
         start_plane = int(round(first_layer[1]['params'][
-                          'thickness']['value'] / sim.dz))
+                          'thickness'] / sim.dz))
         end_plane = int(round(last_layer[1]['params'][
-                        'thickness']['value'] / sim.dz))
+                        'thickness'] / sim.dz))
         return start_plane, end_plane
 
     def get_comp_vec(self, sim, field, start, end):
@@ -1290,8 +1290,8 @@ class SimulationGroup:
                 sim2 = self.sims[i]
                 vecs2, normvec2 = self.get_comp_vec(sim2, field, start, end)
                 self.log.info("Computing local error between numbasis %i and numbasis %i",
-                              ref_sim.conf['Simulation'][ 'params']['numbasis']['value'],
-                              sim2.conf['Simulation']['params']['numbasis']['value'])
+                              ref_sim.conf['Simulation'][ 'params']['numbasis'],
+                              sim2.conf['Simulation']['params']['numbasis'])
                 # Get the array containing the magnitude of the difference vector at each point
                 # in space
                 mag_diff_vec = self.diff_sq(vecs1, vecs2)
@@ -1305,8 +1305,8 @@ class SimulationGroup:
                 # Compute the average of the normalized magnitude of all
                 # the difference vectors
                 avg_diffvec_mag = np.sum(norm_mag_diff) / norm_mag_diff.size
-                errfile.write('%i,%f\n' % (sim2.conf['Simulation']['params'][
-                              'numbasis']['value'], avg_diffvec_mag))
+                errfile.write('%i,%f\n' % (sim2.conf['Simulation']['params']['numbasis'],
+                                           avg_diffvec_mag))
                 sim2.clear_data()
             ref_sim.clear_data()
 
@@ -1339,8 +1339,8 @@ class SimulationGroup:
                 sim2 = self.sims[i]
                 vecs2, normvec2 = self.get_comp_vec(sim2, field, start, end)
                 self.log.info("Computing global error between numbasis %i and numbasis %i",
-                              ref_sim.conf['Simulation'][ 'params']['numbasis']['value'],
-                              sim2.conf['Simulation']['params']['numbasis']['value'])
+                              ref_sim.conf['Simulation'][ 'params']['numbasis'],
+                              sim2.conf['Simulation']['params']['numbasis'])
                 # Get the array containing the magnitude of the difference vector at each point
                 # in space
                 mag_diff_vec = self.diff_sq(vecs1, vecs2)
@@ -1352,7 +1352,7 @@ class SimulationGroup:
                 # Error as a percentage should be the square root of the ratio of sum of mag diff vec
                 # squared to mag efield squared
                 error = np.sqrt(np.sum(mag_diff_vec) / np.sum(normvec))
-                errfile.write('%i,%f\n' % (sim2.conf['Simulation']['params']['numbasis']['value'], error))
+                errfile.write('%i,%f\n' % (sim2.conf['Simulation']['params']['numbasis'], error))
                 sim2.clear_data()
             ref_sim.clear_data()
 
@@ -1385,8 +1385,8 @@ class SimulationGroup:
                 sim2 = self.sims[i - 1]
                 vecs2, normvec2 = self.get_comp_vec(sim2, field, start, end)
                 self.log.info("Computing adjacent error between numbasis %i and numbasis %i",
-                              ref_sim.conf['Simulation'][ 'params']['numbasis']['value'],
-                              sim2.conf['Simulation']['params']['numbasis']['value'])
+                              ref_sim.conf['Simulation'][ 'params']['numbasis'],
+                              sim2.conf['Simulation']['params']['numbasis'])
                 # Get the array containing the magnitude of the difference vector at each point
                 # in space
                 mag_diff_vec = self.diff_sq(vecs1, vecs2)
@@ -1399,7 +1399,7 @@ class SimulationGroup:
                 # squared to mag efield squared
                 error = np.sqrt(np.sum(mag_diff_vec) / np.sum(normvec))
                 # self.log.info(str(error))
-                errfile.write('%i,%f\n' % (sim2.conf['Simulation']['params']['numbasis']['value'], error))
+                errfile.write('%i,%f\n' % (sim2.conf['Simulation']['params']['numbasis'], error))
                 sim2.clear_data()
                 ref_sim.clear_data()
 
@@ -1467,7 +1467,7 @@ class SimulationGroup:
         for i, sim in enumerate(self.sims):
             # Unpack data for the port we passed in as an argument
             ref, trans, absorb = sim.data['transmission_data'][port]
-            freq = sim.conf['Simulation']['params']['frequency']['value']
+            freq = sim.conf['Simulation']['params']['frequency']
             wvlgth = c.c / freq
             wvlgth_nm = wvlgth * 1e9
             freqs[i] = freq
@@ -1643,7 +1643,7 @@ class SimulationGroup:
         # Assuming the leaves contain frequency values, sum over all of them
         for i, sim in enumerate(self.sims):
             ref, trans, absorb = sim.data['transmission_data'][port]
-            freq = sim.conf['Simulation']['params']['frequency']['value']
+            freq = sim.conf['Simulation']['params']['frequency']
             wvlgth = c.c / freq
             wvlgth_nm = wvlgth * 1e9
             freqs[i] = freq
@@ -1722,7 +1722,7 @@ class SimulationGroup:
         self.log.info('Plotting scalar reduction of %s for quantity %s' % (base, quantity))
         cm = plt.get_cmap('jet')
         max_depth = sim.conf['Simulation']['max_depth']
-        period = sim.conf['Simulation']['params']['array_period']['value']
+        period = sim.conf['Simulation']['params']['array_period']
         x = np.arange(0, period, sim.dx)
         y = np.arange(0, period, sim.dy)
         z = np.arange(0, max_depth + sim.dz, sim.dz)
@@ -1784,7 +1784,7 @@ class SimulationGroup:
         for i, sim in enumerate(self.sims):
             # Unpack data for the port we passed in as an argument
             ref, trans, absorb = sim.data['transmission_data'][port]
-            freq = sim.conf['Simulation']['params']['frequency']['value']
+            freq = sim.conf['Simulation']['params']['frequency']
             freqs[i] = freq
             trans_l[i] = trans
             refl_l[i] = ref
@@ -2036,11 +2036,10 @@ class Processor(object):
             # Otherwise make the top dir and all the subdirs
             else:
                 for par in result_pars:
-                    full_key = par + ('value',)
                     # All sims in the group will have the same values for
                     # result_pars so we can just use the first sim in the group
                     path = os.path.join(path, '{}_{:.4E}/'.format(par[-1],
-                                                                  group[0].conf[full_key]))
+                                                                  group[0].conf[par]))
                     self.log.info('RESULTS DIR: %s', path)
                     try:
                         os.makedirs(path)
@@ -2059,13 +2058,33 @@ class Processor(object):
         self.sim_groups = sim_groups
         return sim_groups
 
-    def group_by(self, key, sort_key=None):
-        """Groups simulations by a particular parameter. Within each group, the
-        parameter specified will remain fixed, and all other parameters will
-        vary. Populates the sim_groups attribute and also returns a list of
-        lists. The groups will be sorted in increasing order of the specified
-        parameter. An optional key may be passed in, the individual sims within
-        each group will be sorted in increasing order of the specified key"""
+    def group_by(self, key, sort_key=None, repopulate=True):
+        """
+        Groups simulations by the parameter associated with `key` in the
+        config. Within each group, the parameter associated with `key` will
+        remain fixed, and all other parameters may vary.
+
+        .. note::
+        This function repopulates the sim_groups attribute by default. If you
+        do not want this behavior, set the `repopulate` kwarg to False
+
+
+        :param key: The key for the parameter you wish to group by. Must be an
+                    iterable of strings.
+        :type key: iterable
+        :param sort_key: An optional key by which to sort the parameters within
+                         each group. For example, group by parameter A but sort
+                         each group in increasing order of parameter B. If a
+                         callable object is provided, that callable will be
+                         applied to each individual simulation in the group to
+                         generate the sort key. If an iterable is provided, it
+                         will be interpreted as a key in the config and the
+                         parameter associated with that key will be used.
+        :type sort_key: iterable, callable
+        :returns: A singly nested list of lists. Each inner list contains a
+                  group of simulations.
+        :rtype: list
+        """
 
         self.log.info('Grouping sims by: %s', str(key))
         # This works by storing the different values of the specifed parameter
@@ -2083,10 +2102,15 @@ class Processor(object):
         # If specified, sort the sims within each group in increasing order of
         # the provided sorting key
         if sort_key:
-            for group in groups:
-                group.sort(key=lambda sim: sim.conf[sort_key])
+            if callable(sort_key):
+                for group in groups:
+                    group.sort(key=sort_key)
+            else:
+                for group in groups:
+                    group.sort(key=lambda sim: sim.conf[sort_key])
         groups = [SimulationGroup(sims) for sims in groups]
-        self.sim_groups = groups
+        if repopulate:
+            self.sim_groups = groups
         return groups
 
     def replace(self):

@@ -280,7 +280,7 @@ class Simulation:
         :param str plane: Any of 'xy', 'yz', or 'xz'. Determines the plane
                           along which the slice is taken
         :param int pval: The index along the final unspecified direction. If
-                         plane='xy' then index would index along the z 
+                         plane='xy' then index would index along the z
                          direction.
         :param str quantity: The quantity whose data array you wish to take a
                              line cut through
@@ -482,9 +482,9 @@ class Simulation:
 
         .. math::
 
-           P_{abs} &= \\frac{\\omega}{2} \\int |E|^2 
+           P_{abs} &= \\frac{\\omega}{2} \\int |E|^2
                       \\mathrm{Im}[\\epsilon] dV \\\\
-                   &= \\frac{\\omega \\epsilon_0}{2} 
+                   &= \\frac{\\omega \\epsilon_0}{2}
                       \\int |E|^2 \\mathrm{Im}[\\epsilon_r] dV
 
         Recall :math:`\mathrm{Im}[\epsilon_r] = 2nk` so we finally arrive at
@@ -492,7 +492,7 @@ class Simulation:
         .. math::
 
            P_{abs} = \omega \int |E|^2 n k dV
-        
+
         This provides a metric for quantifying how converged the real space
         reconstructions of the fields are.
 
@@ -518,7 +518,7 @@ class Simulation:
             # Method 1: Go through power flux
             blayer_name = layer_name.encode('utf-8')
             bottom = layer_name+'_bottom'
-            bbottom = bottom.encode('utf-8')   
+            bbottom = bottom.encode('utf-8')
             port, forw_top, back_top = fluxes[fluxes.layer == blayer_name][0]
             port, forw_bot, back_bot = fluxes[fluxes.layer == bbottom][0]
             # Minus sign because S4 stick a minus in front of all backward
@@ -569,9 +569,10 @@ class Simulation:
         Computes reflection, transmission, and absorbance
 
         :param str port: Name of the location at which you would like to place
-        the transmission port (i.e where you would like to compute
-        transmission). This must correspond to one of the keys placed in the
-        fluxes dict located at self.data['fluxes']
+                         the transmission port (i.e where you would like to
+                         compute transmission). This must correspond to one of
+                         the keys placed in the fluxes dict located at
+                         self.data['fluxes']
         """
 
         data = self.data['fluxes']
@@ -727,20 +728,20 @@ class Simulation:
                   wish to integrate
         :type q: str
         :param mask: A numpy array of ones and zeros, which can be 2D or 3D. If
-                     a 3D array is provided, it will multiply the 3D array of 
-                     the quantity elementwise before integration. The 
-                     z-direction is along the first axis, i.e mask[z, x, y].  
+                     a 3D array is provided, it will multiply the 3D array of
+                     the quantity elementwise before integration. The
+                     z-direction is along the first axis, i.e mask[z, x, y].
                      If a 2D array is provided, it will be extended along the
                      z-direction and then will multiply the 3D array of the
-                     quantity elementwise before integration. This can be 
-                     useful if you want to integrate only over a specific 
+                     quantity elementwise before integration. This can be
+                     useful if you want to integrate only over a specific
                      region of the device. You would supply a 3D mask that is
                      1 inside that region, and zero outside that region.
                      Combining with the layer arg is supported.
         :type mask: np.ndarray
-        :param layer: The name of the layer you wish to integrate over.  
+        :param layer: The name of the layer you wish to integrate over.
                       Providing this will extract a 3D slice of data that is in
-                      the specified layer, and only integrate over that slice. 
+                      the specified layer, and only integrate over that slice.
                       Use this if you do not want to include all layers in the
                       integration. Combining with the mask arg is supported.
         :type layer: str
@@ -1975,7 +1976,7 @@ class Processor(object):
             # We want the specified key to vary, so we remove it from the
             # comparison dict
             del sim.conf[key]
-            cmp1 = {'Simulation': sim.conf['Simulation'], 
+            cmp1 = {'Simulation': sim.conf['Simulation'],
                     'Layers': sim.conf['Layers']}
             match = False
             # Loop through each group, checking if this sim belongs in the

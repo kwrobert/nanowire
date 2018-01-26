@@ -33,6 +33,27 @@ from . import postprocess as pp
 from .utils.utils import make_hash, get_combos, IdFilter
 from .utils.config import Config
 
+from line_profiler import LineProfiler
+
+def do_profile(follow=[], out=''):
+    def inner(func):
+        def profiled_func(*args, **kwargs):
+            try:
+                profiler = LineProfiler()
+                profiler.add_function(func)
+                for f in follow:
+                    profiler.add_function(f)
+                profiler.enable_by_count()
+                return func(*args, **kwargs)
+            finally:
+                if out:
+                    path = os.path.abspath(os.path.expandvars(out))
+                    with open(path, 'a') as f:
+                        profiler.print_stats(stream=f)
+                else:
+                    profiler.print_stats()
+        return profiled_func
+    return inner
 # from rcwa_app import RCWA_App
 
 
@@ -1165,7 +1186,7 @@ class Simulator():
             thickness = ldata['params']['thickness']
             self.s4.SetLayerThickness(Layer=layer, Thickness=thickness)
 
-    #  @ph.timecall
+    # @do_profile(out='$nano/tests/profile_writing/line_profiler.txt', follow=[])
     def compute_fields(self):
         """
         Constructs and returns a full 3D numpy array for each vector component
@@ -1208,9 +1229,14 @@ class Simulator():
                 Hz[zcount, -1, 0:self.ysamps-1] = H_arr[0, :, 2]
                 Hz[zcount, -1, -1] = H_arr[0, 0, 2]
             else:
-                E = self.s4.GetFieldsOnGrid(z=z, NumSamples=(self.xsamps-1,
-                                                             self.ysamps-1),
+                start = time.time()
+                E = self.s4.GetFieldsOnGrid(z=z,
+                                            NumSamples=(self.xsamps-1,
+                                                        self.ysamps-1),
                                             Format='Array')[0]
+                end = time.time()
+                self.log.info('Time for S4 GetFieldsOnGrid call: %f',
+                              end-start)
             E_arr = np.array(E)
             # Grab the periodic BC, which is always excluded from results
             # returned by S4 above
@@ -1326,6 +1352,7 @@ class Simulator():
         return Ex, Ey, Ez, Hx, Hy, Hz
 
     def get_field(self):
+        start = time.time()
         if self.conf['General']['adaptive_convergence']:
             Ex, Ey, Ez, numbasis, conv = self.adaptive_convergence()
             self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez})
@@ -1338,6 +1365,9 @@ class Simulator():
             else:
                 self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez})
                 # self.data.update({'Ex':Ex.real,'Ey':Ey.real,'Ez':Ez.real})
+        end = time.time()
+        diff = end - start
+        self.log.info("Time to compute fields: %f seconds", diff) 
 
     def get_fluxes(self):
         """
@@ -1480,7 +1510,8 @@ class Simulator():
     def save_data(self):
         """Saves the self.data dictionary to an npz file. This dictionary
         contains all the fields and the fluxes dictionary"""
-
+        
+        start = time.time()
         if self.hdf5 is None:
             self.open_hdf5()
         if self.conf['General']['save_as'] == 'npz':
@@ -1535,9 +1566,12 @@ class Simulator():
                         self.hdf5.create_array(gpath, name, createparents=True,
                                           atom=tb.Atom.from_dtype(arr.dtype),
                                           obj=arr)
-
+            
             # Write XMDF xml file for importing into Paraview
             self.write_xdmf()
+            end = time.time()
+            diff = end - start
+            self.log.info('Time to write data to disk: %f seconds', diff)
                     # # Save the field arrays
                     # self.log.debug('Saving fields to HDF5')
                     # path = '/sim_'+self.id[0:10]

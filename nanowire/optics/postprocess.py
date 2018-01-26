@@ -25,7 +25,7 @@ import scipy.constants as consts
 from .utils.config import Config
 from .utils.utils import IdFilter, cmp_dicts, make_hash, get_nk
 from .data_manager import HDF5DataManager, NPZDataManager
-from .utils.geometry import Layer, get_mask
+from .utils.geometry import Layer, get_mask, get_layers
 
 # Configure logging for this module
 # Get numeric level safely
@@ -125,8 +125,7 @@ class Simulation:
         self.dy = self.Y[1] - self.Y[0]
         self.dz = self.Z[1] - self.Z[0]
         self.period = self.conf['Simulation']['params']['array_period']
-        self.layers = OrderedDict()
-        self.get_layers()
+        self.layers = get_layers(self)
         self.height = self.get_height()
 
     def _get_data_manager(self):
@@ -205,44 +204,6 @@ class Simulation:
         else:
             self.log.debug('Adding %s to data dict', str(quantity))
             self.data[quantity] = new_data
-
-    def get_layers(self):
-        """
-        Populates the self.layers dict with layer objects
-        """
-
-        ordered_layers = self.conf.sorted_dict(self.conf['Layers'])
-        start = 0
-        layers = OrderedDict()
-        materials = self.conf['Materials']
-        for layer, ldata in ordered_layers.items():
-            # Dont add the layer if we don't have field data for it because its
-            # beyond max_depth
-            max_depth = self.conf[('Simulation', 'max_depth')]
-            if max_depth and start >= max_depth:
-                break
-            layer_t = ldata['params']['thickness']
-            # end = start + layer_t + self.dz
-            end = start + layer_t
-            # Things are discretized, so start needs to be a location that we
-            # have a grid point on, and not the continuous starting point of
-            # the real physical layer
-            start_ind = np.searchsorted(self.Z, start)
-            quantized_start = self.Z[start_ind]
-            end_ind = np.searchsorted(self.Z, end)
-            quantized_end = self.Z[end_ind]
-            if 'geometry' in ldata:
-                g = ldata['geometry']
-            else:
-                g = {}
-            layers[layer] = Layer(layer, quantized_start, quantized_end,
-                                  start_ind, end_ind, self.period,
-                                  self.xsamps, self.ysamps, self.dz,
-                                  base_material=ldata['base_material'],
-                                  geometry=g, materials=materials)
-            start = end
-        self.layers = layers
-        return layers
 
     def get_line(self, quantity, line_dir, c1, c2):
         """

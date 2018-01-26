@@ -32,6 +32,7 @@ from lxml.builder import E
 from . import postprocess as pp
 from .utils.utils import make_hash, get_combos, IdFilter
 from .utils.config import Config
+from .utils.geometry import Layer, get_layers
 
 from line_profiler import LineProfiler
 

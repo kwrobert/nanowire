@@ -30,6 +30,50 @@ def get_mask(shape, xcoords, ycoords):
     return mask
 
 
+def get_layers(sim):
+    """
+    Creates an OrderedDict of layer objects sorted with the topmost layer first
+    
+    :param sim: :py:class:`nanowire.optics.simulate.Simulator` or
+                :py:class:`nanowire.optics.postprocess.Simulation` 
+
+    :returns: An OrderedDict of :py:class:`Layer` instances. The keys are the 
+              layer names from the config and the values are the instances
+    :rtype: OrderedDict
+    """
+
+    ordered_layers = sim.conf.sorted_dict(sim.conf['Layers'])
+    start = 0
+    layers = OrderedDict()
+    materials = sim.conf['Materials']
+    for layer, ldata in ordered_layers.items():
+        # Dont add the layer if we don't have field data for it because its
+        # beyond max_depth
+        max_depth = sim.conf[('Simulation', 'max_depth')]
+        if max_depth and start >= max_depth:
+            break
+        layer_t = ldata['params']['thickness']
+        # end = start + layer_t + sim.dz
+        end = start + layer_t
+        # Things are discretized, so start needs to be a location that we
+        # have a grid point on, and not the continuous starting point of
+        # the real physical layer
+        start_ind = np.searchsorted(sim.Z, start)
+        quantized_start = sim.Z[start_ind]
+        end_ind = np.searchsorted(sim.Z, end)
+        quantized_end = sim.Z[end_ind]
+        if 'geometry' in ldata:
+            g = ldata['geometry']
+        else:
+            g = {}
+        layers[layer] = Layer(layer, quantized_start, quantized_end,
+                              start_ind, end_ind, sim.period,
+                              sim.xsamps, sim.ysamps, sim.dz,
+                              base_material=ldata['base_material'],
+                              geometry=g, materials=materials)
+        start = end
+    return layers
+
 class Layer:
 
     def __init__(self, name, start, end, istart, iend, period, xsamples,
@@ -103,9 +147,9 @@ class Layer:
             # print(mask)
             shape_nvals = mask*n
             shape_kvals = mask*k
-            print("Mask Shape: {}".format(mask.shape))
-            print("Nvals Shape: {}".format(shape_nvals.shape))
-            print("N Matrix Shape: {}".format(n_matrix.shape))
+            # print("Mask Shape: {}".format(mask.shape))
+            # print("Nvals Shape: {}".format(shape_nvals.shape))
+            # print("N Matrix Shape: {}".format(n_matrix.shape))
             n_matrix = np.where(mask, shape_nvals, n_matrix)
             # print(n_matrix)
             k_matrix = np.where(mask, shape_kvals, k_matrix)

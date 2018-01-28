@@ -936,8 +936,9 @@ class Simulator():
         self.conf['Simulation']['params']['numbasis'] = numbasis
         self.s4 = S4.New(Lattice=((self.period, 0), (0, self.period)),
                          NumBasis=int(round(numbasis)))
+        self.setup()
 
-    def set_numbasis(self, period):
+    def set_period(self, period):
         """
         Set the periodicity of the square array. This function updates the
         number of basis terms in the config and also updates the s4 attribute.
@@ -952,6 +953,7 @@ class Simulator():
         numbasis = self.conf['Simulation']['params']['numbasis']
         self.s4 = S4.New(Lattice=((period, 0), (0, period)),
                          NumBasis=int(round(numbasis)))
+        self.setup()
 
     def configure(self):
         """Configure options for the RCWA solver"""

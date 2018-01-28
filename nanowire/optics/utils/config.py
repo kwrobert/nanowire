@@ -36,6 +36,7 @@ class Config(MutableMapping):
             self.update(dict(data))
         self._update_params()
         self.dep_graph = {}
+        self.resolved = False
 
     def _parse_file(self, path):
         """Parse the YAML file provided at the command line"""
@@ -198,8 +199,7 @@ class Config(MutableMapping):
         their actual values by retrieving them from elsewhere in the config"""
         # self.log.debug('Interpolating replacement strings')
         self.build_dependencies()
-        config_resolved = False
-        while not config_resolved:
+        while not self.resolved:
             # self.log.debug('CONFIG NOT RESOLVED, MAKING PASS')
             # Now we can actually perform any resolutions
             for ref, ref_data in self.dep_graph.items():
@@ -236,7 +236,7 @@ class Config(MutableMapping):
                                 self.dep_graph[ref]['evaluated'] = True
                             self._resolve(ref)
                             self.dep_graph[ref]['resolved'] = True
-            config_resolved = self._check_resolved(self.dep_graph.keys())
+            self.resolved = self._check_resolved(self.dep_graph.keys())
 
     def eval_expr(self, expr_str):
         """

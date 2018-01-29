@@ -1158,8 +1158,8 @@ class SimulationGroup:
 
     def __init__(self, sims):
         self.sims = sims
-        for sim in self.sims:
-            sim.get_layers()
+        # for sim in self.sims:
+        #     sim.get_layers()
         self.log = logging.getLogger(__name__)
         self.num_sims = len(sims)
 

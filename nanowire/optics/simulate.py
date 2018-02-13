@@ -1245,8 +1245,8 @@ class Simulator():
                                                         self.ysamps-1),
                                             Format='Array')[0]
                 end = time.time()
-                self.log.info('Time for S4 GetFieldsOnGrid call: %f',
-                              end-start)
+                self.log.debug('Time for S4 GetFieldsOnGrid call: %f',
+                               end-start)
             E_arr = np.array(E)
             # Grab the periodic BC, which is always excluded from results
             # returned by S4 above
@@ -1417,15 +1417,19 @@ class Simulator():
         """
         self.log.debug('Computing dielectric profile ...')
         xv, yv = np.meshgrid(self.X, self.Y, indexing='ij')
-        eps_mat = np.zeros((self.xsamps, self.ysamps), dtype=np.complex128)
-        for layer, ldata in self.conf['Layers'].items():
+        z = self.dz 
+        for layer, ldata in sorted(self.conf['Layers'].items(),
+                                   key=lambda tup: tup[1]['order']):
+            self.log.debug('Computing epsilon at z = %f in layer %s', z, layer)
+            eps_mat = np.zeros((self.xsamps, self.ysamps), dtype=np.complex128)
             for ix in range(self.xsamps):
                 for iy in range(self.ysamps):
-                    eps_val =  self.s4.GetEpsilon(xv[ix, iy],
-                                                  yv[ix, iy])
+                    eps_val =  self.s4.GetEpsilon(xv[ix, iy], yv[ix, iy],
+                                                  z)
                     eps_mat[ix, iy] = eps_val
             key = 'dielectric_profile_{}'.format(layer)
             self.data[key] = eps_mat
+            z += ldata['params']['thickness']
         self.log.debug('Finished computing dielectric profile!')
 
     def compute_dielectric_profile_at_point(self, x, y, z):

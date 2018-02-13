@@ -34,7 +34,7 @@ from .utils.utils import make_hash, get_combos, IdFilter
 from .utils.config import Config
 from .utils.geometry import Layer, get_layers
 
-from line_profiler import LineProfiler
+# from line_profiler import LineProfiler
 
 def do_profile(follow=[], out=''):
     def inner(func):

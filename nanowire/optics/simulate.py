@@ -1408,7 +1408,7 @@ class Simulator():
         self.log.debug('Finished computing fluxes!')
         return flux_arr
 
-    def get_dielectric_profile(self):
+    def compute_dielectric_profile(self):
         """
         Gets the dielectric profile throughout the device. This is useful for
         determining the resolution of the dielectric profile used by S4. It uses
@@ -1416,19 +1416,20 @@ class Simulator():
         retrieiving field data.
         """
         self.log.debug('Computing dielectric profile ...')
-        xv, yv, zv = np.meshgrid(self.X, self.Y, self.Z, indexing='ij')
-        eps_mat = np.zeros((self.zsamps, self.xsamps, self.ysamps),
-                           dtype=np.complex128)
-        # eps_mat = np.zeros((self.zsamps, self.xsamps, self.ysamps))
-        for ix in range(self.xsamps):
-            for iy in range(self.ysamps):
-                for iz in range(self.zsamps):
-                    eps_val =  self.s4.GetEpsilon(xv[ix, iy, iz],
-                                                  yv[ix, iy, iz],
-                                                  zv[ix, iy, iz])
-                    eps_mat[iz, ix, iy] = eps_val
-        self.data['dielectric_profile'] =  eps_mat
+        xv, yv = np.meshgrid(self.X, self.Y, indexing='ij')
+        eps_mat = np.zeros((self.xsamps, self.ysamps), dtype=np.complex128)
+        for layer, ldata in self.conf['Layers'].items():
+            for ix in range(self.xsamps):
+                for iy in range(self.ysamps):
+                    eps_val =  self.s4.GetEpsilon(xv[ix, iy],
+                                                  yv[ix, iy])
+                    eps_mat[ix, iy] = eps_val
+            key = 'dielectric_profile_{}'.format(layer)
+            self.data[key] = eps_mat
         self.log.debug('Finished computing dielectric profile!')
+
+    def compute_dielectric_profile_at_point(x, y, z):
+        return self.s4.GetEpsilon(x, y, z)
 
     def get_fourier_coefficients(self, offset=0.):
         """
@@ -1734,7 +1735,7 @@ class Simulator():
         self.get_fluxes()
         self.get_fourier_coefficients()
         if self.conf['General']['dielectric_profile']:
-            self.get_dielectric_profile()
+            self.compute_dielectric_profile()
         self.open_hdf5()
         self.save_data()
         self.save_conf()

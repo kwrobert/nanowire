@@ -1428,7 +1428,7 @@ class Simulator():
             self.data[key] = eps_mat
         self.log.debug('Finished computing dielectric profile!')
 
-    def compute_dielectric_profile_at_point(x, y, z):
+    def compute_dielectric_profile_at_point(self, x, y, z):
         return self.s4.GetEpsilon(x, y, z)
 
     def get_fourier_coefficients(self, offset=0.):

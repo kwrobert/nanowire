@@ -622,10 +622,10 @@ class Simulation:
         """
 
 
-        freq = self.conf['Simulation']['params']['frequency']['value']
-        polar_angle = self.conf['Simulation']['params']['polar_angle']['value']
+        freq = self.conf['Simulation']['params']['frequency']
+        polar_angle = self.conf['Simulation']['params']['polar_angle']
         path = os.path.expandvars(self.conf['Simulation']['input_power'])
-        bin_size = self.conf['Simulation']['params']['frequency']['bin_size']
+        bin_size = self.conf['Simulation']['params']['bandwidth']
         # Get NREL AM1.5 data
         freq_vec, p_vec = np.loadtxt(path, unpack=True, delimiter=',')
         # Get all available power values within this bin
@@ -1141,6 +1141,7 @@ class Simulation:
             fig.savefig(path)
         if self.conf['General']['show_plots']:
             plt.show()
+        plt.close(fig)
 
 class SimulationGroup:
 
@@ -1463,11 +1464,11 @@ class SimulationGroup:
         Computes photocurrent density assuming perfect carrier collection,
         meaning every absorbed photon gets converted to 1 collected electron.
 
-        The incident power computed using
+        The incident power is computed using
         :py:meth:`Simulation.get_incident_power`.  See that function for
         details about how the incident power is computed.
 
-        Given some number N frequency values (and simulations at those
+        Given some number of frequency values N (and simulations at those
         frequencies), the photocurrent density can be computed using
 
         .. math:: J_{ph} = \\int q \\sum_i^N \\frac{P(f_i)A(f_i)}{E_{photon}}
@@ -1504,7 +1505,7 @@ class SimulationGroup:
         # Assuming the sims have been grouped by frequency, sum over all of
         # them
         for i, sim in enumerate(self.sims):
-            freq = sim.conf['Simulation']['params']['frequency']['value']
+            freq = sim.conf['Simulation']['params']['frequency']
             freqs[i] = freq
             E_photon = c.h * freq
             if method == 'flux':
@@ -1953,7 +1954,8 @@ class Processor(object):
             # comparison dict
             del sim.conf[key]
             cmp1 = {'Simulation': sim.conf['Simulation'],
-                    'Layers': sim.conf['Layers']}
+                    'Layers': sim.conf['Layers'],
+                    'Solver': sim.conf['Solver']}
             match = False
             # Loop through each group, checking if this sim belongs in the
             # group
@@ -1962,7 +1964,8 @@ class Processor(object):
                 val2 = sim2.conf[key]
                 del sim2.conf[key]
                 cmp2 = {'Simulation': group[0].conf['Simulation'],
-                        'Layers': group[0].conf['Layers']}
+                        'Layers': group[0].conf['Layers'], 
+                        'Solver': group[0].conf['Solver']}
                 params_same = cmp_dicts(cmp1, cmp2)
                 if params_same:
                     match = True
@@ -1999,7 +2002,7 @@ class Processor(object):
                 for par in result_pars:
                     # All sims in the group will have the same values for
                     # result_pars so we can just use the first sim in the group
-                    path = os.path.join(path, '{}_{:.4E}/'.format(par[-1],
+                    path = os.path.join(path, '{}_{}/'.format(par[-1],
                                                                   group[0].conf[par]))
                     self.log.info('RESULTS DIR: %s', path)
                     try:

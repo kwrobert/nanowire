@@ -1005,61 +1005,67 @@ class Simulator():
         # Get NREL AM1.5 data
         freq_vec, p_vec = np.loadtxt(path, unpack=True, delimiter=',')
         # Get all available intensity values within this bin
-        left = freq - bandwidth / 2.0
-        right = freq + bandwidth / 2.0
-        inds = np.where((left < freq_vec) & (freq_vec < right))[0]
+        left_freq = freq - bandwidth / 2.0
+        right_freq = freq + bandwidth / 2.0
+        if right_freq > freq_vec[-1]:
+            raise ValueError('Your rightmost bin edge lies outside the'
+                             ' range provided by your input spectrum')
+        if left_freq < freq_vec[0]:
+            raise ValueError('Your leftmost bin edge lies outside the'
+                             ' range provided by your input spectrum')
+        inds = np.where((left_freq < freq_vec) & (freq_vec < right_freq))[0]
         # Check for edge cases
         if len(inds) == 0:
             # It is unphysical to claim that an input wave of a single
             # frequency can contain any power. If we're simulating at a single
-            # frequency, just assume the wave has the intensity contained within
-            # the NREL bin surrounding that frequency
-            self.log.warning('Your bins are smaller than NRELs! Using NREL'
-                             ' bin size')
+            # frequency, just assume the wave has the intensity contained
+            # within a single bin of the input spectral data surrounding that
+            # frequency
+            self.log.warning('Your bins are smaller than those of your input'
+                             ' spectra! Computing power using a single bin')
             closest_ind = np.argmin(np.abs(freq_vec - freq))
             # Is the closest one to the left or the right?
             if freq_vec[closest_ind] > freq:
                 other_ind = closest_ind - 1
-                left = freq_vec[other_ind]
+                left_freq = freq_vec[other_ind]
                 left_intensity = p_vec[other_ind]
-                right = freq_vec[closest_ind]
+                right_freq = freq_vec[closest_ind]
                 right_intensity = p_vec[closest_ind]
             else:
                 other_ind = closest_ind + 1
-                right = freq_vec[other_ind]
+                right_freq = freq_vec[other_ind]
                 right_intensity = p_vec[other_ind]
-                left = freq_vec[closest_ind]
+                left_freq = freq_vec[closest_ind]
                 left_intensity = p_vec[closest_ind]
-        elif inds[0] == 0:
-            raise ValueError('Your leftmost bin edge lies outside the'
-                             ' range provided by NREL')
-        elif inds[-1] == len(freq_vec):
-            raise ValueError('Your rightmost bin edge lies outside the'
-                             ' range provided by NREL')
         else:
-            # A simple linear interpolation given two pairs of data points, and the
-            # desired x point
+            # A simple linear interpolation given two pairs of data points, and
+            # the desired x point
             def lin_interp(x1, x2, y1, y2, x):
                 return ((y2 - y1) / (x2 - x1)) * (x - x2) + y2
             # If the left or right edge lies between NREL data points, we do a
-            # linear interpolation to get the irradiance values at the bin edges.
-            # If the left of right edge happens to be directly on an NREL bin edge
-            # (unlikely) the linear interpolation will just return the value at the
-            # NREL bin. Also the selection of inds above excluded the case of left
-            # or right being equal to an NREL bin,
-            left_intensity = lin_interp(freq_vec[inds[0] - 1], freq_vec[inds[0]],
-                                    p_vec[inds[0] - 1], p_vec[inds[0]], left)
-            right_intensity = lin_interp(freq_vec[inds[-1]], freq_vec[inds[-1] + 1],
-                                     p_vec[inds[-1]], p_vec[inds[-1] + 1], right)
+            # linear interpolation to get the irradiance values at the bin
+            # edges.  If the left of right edge happens to be directly on an
+            # NREL bin edge (unlikely) the linear interpolation will just
+            # return the value at the NREL bin. Also the selection of inds
+            # above excluded the case of left or right being equal to an NREL
+            # bin,
+            left_intensity = lin_interp(freq_vec[inds[0] - 1],
+                                        freq_vec[inds[0]],
+                                        p_vec[inds[0] - 1],
+                                        p_vec[inds[0]], left_freq)
+            right_intensity = lin_interp(freq_vec[inds[-1]],
+                                         freq_vec[inds[-1] + 1],
+                                         p_vec[inds[-1]], p_vec[inds[-1] + 1],
+                                         right_freq)
         # All the frequency values within the bin and including the bin edges
-        freqs = [left]+list(freq_vec[inds])+[right]
+        freqs = [left_freq]+list(freq_vec[inds])+[right_freq]
         # All the intensity values
         intensity_values = [left_intensity]+list(p_vec[inds])+[right_intensity]
         self.log.debug(freqs)
         self.log.debug(intensity_values)
         # Just use a trapezoidal method to integrate the spectrum
         intensity = intg.trapz(intensity_values, x=freqs)
-        self.log.info('Incident Intensity: %s', str(intensity))
+        self.log.debug('Incident Intensity: %s', str(intensity))
         area = self.period*self.period
         power = intensity*area
         self.log.debug('Incident Power: %s', str(power))
@@ -1070,7 +1076,8 @@ class Simulator():
         # P = .5*\sqrt{\epsilon_0 / \mu_0} | E_o |^2 where E_o is the amplitude
         # of the plane wave and is not time averaged in any way
         # E = np.sqrt(2*constants.c*constants.mu_0*intensity)*np.cos(polar_angle)
-        E = np.sqrt(2 * constants.c * constants.mu_0 * intensity)
+        E = np.sqrt(2 * constants.c * constants.mu_0 *
+                    intensity)*np.cos(polar_angle)
         self.log.debug('Incident Amplitude: %s', str(E))
         return E
         # return 2

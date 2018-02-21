@@ -957,6 +957,9 @@ class Simulator():
 
     def configure(self):
         """Configure options for the RCWA solver"""
+        if self.conf['General']['output_pattern']:
+            prefix = os.path.join(self.id[0:10], "VectorField")
+            self.conf['Solver']['BasisFieldDumpPrefix'] = prefix
         self.s4.SetOptions(**self.conf['Solver'])
 
     def _get_epsilon(self, path):

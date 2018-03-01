@@ -1323,6 +1323,9 @@ class Simulator():
         Ey = np.zeros((xsamples, ysamples), dtype=np.complex128)
         Ez = np.zeros((xsamples, ysamples), dtype=np.complex128)
         if self.conf["General"]["compute_h"]:
+            Hx = np.zeros((xsamples, ysamples), dtype=np.complex128)
+            Hy = np.zeros((xsamples, ysamples), dtype=np.complex128)
+            Hz = np.zeros((xsamples, ysamples), dtype=np.complex128)
             E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(xsamples-1,
                                                             ysamples-1), 
                                            Format='Array')
@@ -1371,8 +1374,8 @@ class Simulator():
             self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez})
             self.converged = (conv, numbasis)
         else:
-            # Ex, Ey, Ez = self.compute_fields_by_point()
-            Ex, Ey, Ez, Hx, Hy, Hz = self.compute_fields()
+            Ex, Ey, Ez, Hx, Hy, Hz = self.compute_fields_by_point()
+            # Ex, Ey, Ez, Hx, Hy, Hz = self.compute_fields()
             if Hx is not None:
                 self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez,'Hx':Hx,'Hy':Hy,'Hz':Hz})
             else:

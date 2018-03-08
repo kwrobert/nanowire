@@ -1,5 +1,5 @@
 import shutil
-import psutil
+# import psutil
 import os
 import sys
 import copy
@@ -1374,8 +1374,8 @@ class Simulator():
             self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez})
             self.converged = (conv, numbasis)
         else:
-            Ex, Ey, Ez, Hx, Hy, Hz = self.compute_fields_by_point()
-            # Ex, Ey, Ez, Hx, Hy, Hz = self.compute_fields()
+            # Ex, Ey, Ez, Hx, Hy, Hz = self.compute_fields_by_point()
+            Ex, Ey, Ez, Hx, Hy, Hz = self.compute_fields()
             if Hx is not None:
                 self.data.update({'Ex':Ex,'Ey':Ey,'Ez':Ez,'Hx':Hx,'Hy':Hy,'Hz':Hz})
             else:

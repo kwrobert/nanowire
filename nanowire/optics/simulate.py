@@ -1463,6 +1463,31 @@ class Simulator():
         self.log.info('Finished computing coefficients!')
         return {key:val for key,val in self.data.items() if '_amplitudes' in
                 key}
+
+    def load_state(self):
+        """
+        Load solution from disk
+        """
+        self.log.info("Loading simulation state")
+        fname = os.path.join(self.id[0:10], 'solution.xml') 
+        self.log.info("Loading from: %s"%fname)
+        self.s4.LoadSolution(Filename=fname)
+        self.log.info("Solution loaded!")
+
+    def save_state(self):
+        """
+        Save solution to disk
+        """
+        self.log.info("Saving simulation state")
+        fname = os.path.join(self.id[0:10], 'solution.xml') 
+        self.log.info("Saving to: %s"%fname)
+        # if os.path.isfile(fname):
+        #     self.log.info("State file exists, skipping save")
+        # else:
+        #     self.s4.SaveSolution(Filename=fname)
+        #     self.log.info("Solution saved!")
+        self.s4.SaveSolution(Filename=fname)
+        self.log.info("Solution saved!")
     # def get_integrals(self):
     #     self.log.debug('Computing volume integrals')
     #     integrals = {}
@@ -1741,6 +1766,10 @@ class Simulator():
         start = time.time()
         if update:
             self.update_thicknesses()
+        state_file = os.path.join(self.id[0:10], 'solution.xml')
+        if os.path.isfile(state_file):
+            self.log.debug("State file exists: %s"%state_file)
+            self.load_state()
         self.get_field()
         self.get_fluxes()
         self.get_fourier_coefficients()
@@ -1749,6 +1778,7 @@ class Simulator():
         self.open_hdf5()
         self.save_data()
         self.save_conf()
+        self.save_state()
         end = time.time()
         self.runtime = end - start
         self.save_time()

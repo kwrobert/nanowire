@@ -1469,7 +1469,8 @@ class Simulator():
         Load solution from disk
         """
         self.log.info("Loading simulation state")
-        fname = os.path.join(self.id[0:10], 'solution.xml') 
+        sfile = self.conf['General']['solution_file']
+        fname = os.path.join(self.id[0:10], sfile) 
         self.log.info("Loading from: %s"%fname)
         self.s4.LoadSolution(Filename=fname)
         self.log.info("Solution loaded!")
@@ -1479,7 +1480,8 @@ class Simulator():
         Save solution to disk
         """
         self.log.info("Saving simulation state")
-        fname = os.path.join(self.id[0:10], 'solution.xml') 
+        sfile = self.conf['General']['solution_file']
+        fname = os.path.join(self.id[0:10], sfile) 
         self.log.info("Saving to: %s"%fname)
         # if os.path.isfile(fname):
         #     self.log.info("State file exists, skipping save")

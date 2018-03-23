@@ -35,6 +35,7 @@ Solver:
     LanczosSmoothing: False
     SubpixelSmoothing: False
     ConserveMemory: False
+    WeismannFormulation: True
 
 Simulation:
     polarization: 'rhcp'
@@ -59,7 +60,7 @@ Simulation:
             # end: 856549880000000.0
             # step: 10
             # itertype: 'numsteps'
-        numbasis: 240  
+        numbasis: 20  
             # type: 'variable'
             # start: 200
             # end: 900

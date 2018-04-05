@@ -21,11 +21,11 @@ def get_mask(shape, xcoords, ycoords):
         expr = shape.equation()
         circ_f = lambdify((_x, _y), expr, modules='numpy', dummify=False)
         xv, yv = np.meshgrid(ycoords, xcoords)
-        e = circ_f(xv, yv) 
+        e = circ_f(xv, yv)
         mask = np.where(e > 0, 0, 1)
     else:
         polygon = Path(shape.vertices)
-        mask = polygon.contains_points(list(itertools.product(xcoords, 
+        mask = polygon.contains_points(list(itertools.product(xcoords,
                                                               ycoords)))
     return mask
 
@@ -33,11 +33,11 @@ def get_mask(shape, xcoords, ycoords):
 def get_layers(sim):
     """
     Creates an OrderedDict of layer objects sorted with the topmost layer first
-    
-    :param sim: :py:class:`nanowire.optics.simulate.Simulator` or
-                :py:class:`nanowire.optics.postprocess.Simulation` 
 
-    :returns: An OrderedDict of :py:class:`Layer` instances. The keys are the 
+    :param sim: :py:class:`nanowire.optics.simulate.Simulator` or
+                :py:class:`nanowire.optics.postprocess.Simulation`
+
+    :returns: An OrderedDict of :py:class:`Layer` instances. The keys are the
               layer names from the config and the values are the instances
     :rtype: OrderedDict
     """
@@ -66,7 +66,7 @@ def get_layers(sim):
             g = ldata['geometry']
         else:
             g = {}
-        layers[layer] = Layer(layer, quantized_start, quantized_end,
+        layers[layer] = Layer(layer, start, end,
                               start_ind, end_ind, sim.period,
                               sim.xsamps, sim.ysamps, sim.dz,
                               base_material=ldata['base_material'],
@@ -98,6 +98,22 @@ class Layer:
         self.base_material = base_material
         self.materials = materials
 
+    def _get_nk_dict(self, freq):
+        """
+        Build dictionary where keys are material names and values is a tuple
+        containing (n, k) at a given frequency
+        """
+        nk = {mat: (get_nk(matpath, freq)) for mat, matpath in
+              self.materials.items()}
+        nk['vacuum'] = (1, 0)
+        return nk
+
+    def is_in_layer(self, z):
+        """
+        Determine if a given z coordinate lies within this layer
+        """
+        return self.start < z < self.end
+
     def collect_shapes(self, d):
         """
         Collect and instantiate the dictionary stored in the shapes attribute
@@ -120,6 +136,33 @@ class Layer:
         self.shapes = shapes
         return shapes
 
+    def get_nk_at_point(self, x, y, freq):
+        """
+        Given the x and y coordinates of a point and the frequency of interest,
+        return the n and k values at that point
+        """
+        nk = self._get_nk_dict(freq)
+        # If this layer is just a slab of material, return the nk values of the
+        # base material
+        if not self.shapes:
+            return nk[self.base_material]
+        # First we need to get all the shapes that enclose point. tup[0] is the
+        # actual shape object
+        p = Point(x, y)
+        enclosing_shapes = [tup for name, tup in
+                            self.shapes.items() if tup[0].encloses_point(p)]
+        if len(enclosing_shapes) == 0:
+            return nk[self.base_material]
+        # Now we need to find the innermost shape containing the point
+        # not any([]) == True
+        while len(enclosing_shapes) > 0:
+            print("Inside while")
+            innermost, material_name = enclosing_shapes.pop()
+            if not any(innermost.encloses(tup[0]) for tup in enclosing_shapes):
+                break
+        print("Enclosing material: {}".format(material_name))
+        return nk[material_name]
+
     def get_nk_matrix(self, freq):
         """
         Returns two 2D matrices containing the real component n and the
@@ -129,9 +172,7 @@ class Layer:
         """
 
         # Get the nk values for all the materials in the layer
-        nk = {mat: (get_nk(matpath, freq)) for mat, matpath in
-              self.materials.items()}
-        nk['vacuum'] = (1, 0)
+        nk = self._get_nk_dict(freq)
         # Create the matrix and fill it with the values for the base material
         n_matrix = np.ones((self.x_samples,
                             self.y_samples))*nk[self.base_material][0]

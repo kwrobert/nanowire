@@ -23,6 +23,7 @@ General:
     compute_h: False
     compression: True
     dielectric_profile: False
+    solution_file: 'solution.xml'
 
 Solver:
 
@@ -39,9 +40,9 @@ Solver:
 
 Simulation:
     polarization: 'rhcp'
-    x_samples: 400
-    y_samples: 400
-    z_samples: 450
+    x_samples: 20
+    y_samples: 20
+    z_samples: 90
     r_samples : '`int(%(Simulation.params.array_period)s*200)`'
     theta_samples : 180
     # max_depth: '`%(Layers.Air.params.thickness)s+%(Layers.ITO.params.thickness)s+%(Layers.NW_SiO2.params.thickness)s+%(Layers.NW_AlShell.params.thickness)s+%(Layers.Substrate.params.thickness)s`'

@@ -23,7 +23,14 @@ from collections import OrderedDict
 from scipy import interpolate
 import scipy.constants as consts
 from .utils.config import Config
-from .utils.utils import IdFilter, cmp_dicts, make_hash, get_nk
+from .utils.utils import (
+    IdFilter,
+    cmp_dicts,
+    make_hash,
+    get_nk,
+    get_incident_power,
+    get_incident_amplitude
+)
 from .data_manager import HDF5DataManager, NPZDataManager
 from .utils.geometry import Layer, get_mask, get_layers
 
@@ -32,12 +39,13 @@ from .utils.geometry import Layer, get_mask, get_layers
 logfile = 'logs/postprocess.log'
 debug = getattr(logging, 'debug'.upper(), None)
 info = getattr(logging, 'info'.upper(), None)
+warn = getattr(logging, 'warn'.upper(), None)
 # Set formatting
 formatter = logging.Formatter('%(asctime)s [%(name)s:%(levelname)s]'
                               ' - %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
 # Create logger
 logger = logging.getLogger(__name__)
-logger.setLevel(debug)
+logger.setLevel(warn)
 log_dir, logfile = os.path.split(os.path.expandvars(logfile))
 # Set up file handler
 try:
@@ -593,99 +601,6 @@ class Simulation:
         self.data['transmission_data'] = arr
         return reflectance, transmission, absorbance
 
-    def get_incident_power(self):
-        """
-        Returns the incident power for this simulation depending on frequency
-
-        Each simulation is conducted at a single frequency :math:`f =  \\omega
-        / 2\\pi` which is associated with a frequency "bin" of spectral width
-        :math:`\\Delta f`. The solar spectrum is expressed in units of Watts *
-        m^-2 * Hz^-1. In order to compute the incident power for this
-        simulation, we have a few options
-
-        1. Interpolate to find the spectral irradiance at the frequency for
-           this simulation, then multiply by the spectral width
-        2. Find all available irradiance values contained inside the frequency
-           bin, then integrate over the bin using those values as data points.
-           The bin extends from :math:`(f - \\Delta f/2, f + \\Delta f/2)`, so
-           in summary
-
-           .. math:: \\int_{f - \\Delta f/2}^{f + \\Delta f/2} I(f) df
-
-           where :math:`I` is the incident solar irradiance.
-
-        Method 2 is used in this function, because it is debatably more
-        accurate.
-
-        :raises ValueError: If the maximum or minimum bin edge extend beyond
-                            the data range in the provided spectral data
-        """
-
-
-        freq = self.conf['Simulation']['params']['frequency']
-        polar_angle = self.conf['Simulation']['params']['polar_angle']
-        path = os.path.expandvars(self.conf['Simulation']['input_power'])
-        bin_size = self.conf['Simulation']['params']['bandwidth']
-        # Get NREL AM1.5 data
-        freq_vec, p_vec = np.loadtxt(path, unpack=True, delimiter=',')
-        # Get all available power values within this bin
-        left = freq - bin_size / 2.0
-        right = freq + bin_size / 2.0
-        inds = np.where((left < freq_vec) & (freq_vec < right))[0]
-        # Check for edge cases
-        if len(inds) == 0:
-            # It is unphysical to claim that an input wave of a single
-            # frequency can contain any power. If we're simulating at a single
-            # frequency, just assume the wave has the power contained within
-            # the NREL bin surrounding that frequency
-            self.log.warning('Your bins are smaller than NRELs! Using NREL'
-                             ' bin size')
-            closest_ind = np.argmin(np.abs(freq_vec - freq))
-            # Is the closest one to the left or the right?
-            if freq_vec[closest_ind] > freq:
-                other_ind = closest_ind - 1
-                left = freq_vec[other_ind]
-                left_power = p_vec[other_ind]
-                right = freq_vec[closest_ind]
-                right_power = p_vec[closest_ind]
-            else:
-                other_ind = closest_ind + 1
-                right = freq_vec[other_ind]
-                right_power = p_vec[other_ind]
-                left = freq_vec[closest_ind]
-                left_power = p_vec[closest_ind]
-        elif inds[0] == 0:
-            raise ValueError('Your leftmost bin edge lies outside the'
-                             ' range provided by NREL')
-        elif inds[-1] == len(freq_vec):
-            raise ValueError('Your rightmost bin edge lies outside the'
-                             ' range provided by NREL')
-        else:
-            # A simple linear interpolation given two pairs of data points, and the
-            # desired x point
-            def lin_interp(x1, x2, y1, y2, x):
-                return ((y2 - y1) / (x2 - x1)) * (x - x2) + y2
-            # If the left or right edge lies between NREL data points, we do a
-            # linear interpolation to get the irradiance values at the bin edges.
-            # If the left of right edge happens to be directly on an NREL bin edge
-            # (unlikely) the linear interpolation will just return the value at the
-            # NREL bin. Also the selection of inds above excluded the case of left
-            # or right being equal to an NREL bin,
-            left_power = lin_interp(freq_vec[inds[0] - 1], freq_vec[inds[0]],
-                                    p_vec[inds[0] - 1], p_vec[inds[0]], left)
-            right_power = lin_interp(freq_vec[inds[-1]], freq_vec[inds[-1] + 1],
-                                     p_vec[inds[-1]], p_vec[inds[-1] + 1], right)
-        # All the frequency values within the bin and including the bin edges
-        freqs = [left]+list(freq_vec[inds])+[right]
-        # All the power values
-        power_values = [left_power]+list(p_vec[inds])+[right_power]
-        self.log.info(freqs)
-        self.log.info(power_values)
-        # Just use a trapezoidal method to integrate the spectrum
-        power = intg.trapz(power_values, x=freqs)
-        self.log.info('Incident Power: %s', str(power))
-        return power
-
     def integrate_quantity(self, q, mask=None, layer=None):
         """
         Compute a 3D integral of a specified quantity
@@ -743,7 +658,7 @@ class Simulation:
         wvlgth = c.c / freq
         wvlgth_nm = wvlgth * 1e9
         # Get solar power from chosen spectrum
-        sun_pow = self._get_incident_amplitude()
+        sun_pow = get_incident_amplitude(self)
         # This is our integrand
         val = absorb * wvlgth * sun_pow
         # val = absorb * wvlgth
@@ -770,7 +685,7 @@ class Simulation:
         x_integral = intg.trapz(z_integral, x=self.X, axis=0)
         y_integral = intg.trapz(x_integral, x=self.Y, axis=0)
         # Convert period to cm and current to mA
-        sun_pow = self._get_incident_amplitude()
+        sun_pow = get_incident_amplitude(self)
         self.log.info('Sun power = %f', sun_pow)
         self.log.info('Integral = %f', y_integral)
         Jsc = 1000*(c.e/(self.period*1e-4)**2)*y_integral
@@ -1465,7 +1380,7 @@ class SimulationGroup:
         meaning every absorbed photon gets converted to 1 collected electron.
 
         The incident power is computed using
-        :py:meth:`Simulation.get_incident_power`.  See that function for
+        :py:func:`get_incident_power`.  See that function for
         details about how the incident power is computed.
 
         Given some number of frequency values N (and simulations at those
@@ -1514,7 +1429,7 @@ class SimulationGroup:
                 print(arr)
                 _, ref, trans, absorb = arr[arr.port == port.encode('utf-8')][0]
                 print(ref, trans, absorb)
-                incident_power = sim.get_incident_power()
+                incident_power = get_incident_power(self)
                 jph_vals[i] = incident_power * absorb / E_photon
             else:
                 try:

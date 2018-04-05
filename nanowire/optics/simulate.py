@@ -30,7 +30,7 @@ from lxml import etree
 from lxml.builder import E
 # get our custom config object and the logger function
 from . import postprocess as pp
-from .utils.utils import make_hash, get_combos, IdFilter
+from .utils.utils import make_hash, get_combos, IdFilter, get_incident_amplitude
 from .utils.config import Config
 from .utils.geometry import Layer, get_layers
 
@@ -63,6 +63,7 @@ def do_profile(follow=[], out=''):
 logfile = 'logs/simulate.log'
 debug = getattr(logging, 'debug'.upper(), None)
 info = getattr(logging, 'info'.upper(), None)
+warn = getattr(logging, 'warn'.upper(), None)
 # Set formatting
 formatter = logging.Formatter('%(asctime)s [%(name)s:%(levelname)s]'
                               ' - %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
@@ -189,7 +190,6 @@ def run_sim(conf, q=None):
             for combo in combos:
                 for i, param_val in enumerate(combo):
                     keyseq = var_thickness[i]
-                    print(type(param_val))
                     sim.conf[keyseq] = param_val
                 sim.update_id()
                 subpath = os.path.join(orig_id, sim.id[0:10])
@@ -433,7 +433,6 @@ class SimulationManager:
     def make_confs(self):
         """Make all the configuration dicts for each parameter combination"""
         self.log.info('Constructing simulator objects ...')
-        print(self.gconf.variable)
         locs, combos = get_combos(self.gconf, self.gconf.variable)
         for combo in combos:
             # Make a copy of the global config for this parameter combos. This copy
@@ -732,62 +731,6 @@ class SimulationManager:
                            'make sure you do not have any sorting parameters specified')
 
 
-    def gc3_submit(self):
-        """
-        This function runs jobs on a bunch of remote hosts via SSH
-        and well as on the local machine using a library called gc3pie. Requires
-        gc3pie to be installed and configured. Currently super slow and not really
-        worth using.
-        """
-        self.log.info('GC3 FUNCTION')
-        jobs = []
-        for conf in self.sim_confs:
-            # Set up the config object and make local simulation directory
-            conf.interpolate()
-            conf.evaluate()
-            sim_id = make_hash(conf.data)
-            sim_dir = os.path.join(conf['General']['base_dir'], sim_id[0:10])
-            conf['General']['sim_dir'] = sim_dir
-            try:
-                os.makedirs(sim_dir)
-            except OSError:
-                pass
-            conf.write(os.path.join(sim_dir, 'sim_conf.yml'))
-            # Create the GC3 Application object and append to list of apps to run
-            app = RCWA_App(conf)
-            jobs.append(app)
-        print(jobs)
-        # Get the config for all resources, auth, etc.
-        cfg = gc3libs.config.Configuration(*gc3libs.Default.CONFIG_FILE_LOCATIONS,
-                                           auto_enable_auth=True)
-        gcore = Core(cfg)
-        eng = Engine(gcore, tasks=jobs, retrieve_overwrites=True)
-        # eng = Engine(gcore, tasks=jobs)
-        try:
-            eng.progress()
-            stats = eng.stats()
-            while stats['TERMINATED'] < stats['total']:
-                time.sleep(10)
-                print('Checking jobs')
-                eng.progress()
-                stats = eng.stats()
-                print(stats)
-                states = eng.update_job_state()
-                print(states)
-        except KeyboardInterrupt:
-            print('KILLING REMOTE JOBS BEFORE QUITTING')
-            print('PLEASE BE PATIENT')
-            # Kill all remote jobs
-            for task in jobs:
-                eng.kill(task)
-            # update job states
-            eng.progress()
-            # free remote resources
-            for task in jobs:
-                eng.free(task)
-            # now raise exception
-            raise
-
 class Simulator():
 
     def __init__(self, conf, q=None):
@@ -894,6 +837,7 @@ class Simulator():
         self.fhandler.addFilter(IdFilter(ID=self.id))
         formatter = logging.Formatter('%(asctime)s [%(name)s:%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
         self.fhandler.setFormatter(formatter)
+        self.fhandler.setLevel(logging.DEBUG)
         log = logging.getLogger(__name__)
         log.addHandler(self.fhandler)
         # Store the logger adapter to the module level logger as an attribute.
@@ -921,14 +865,14 @@ class Simulator():
             os.makedirs(sim_dir)
         except OSError:
             pass
-    
+
     def set_numbasis(self, numbasis):
         """
         Set the number of basis terms. This function updates the number of
         basis terms in the config and also updates the s4 attribute. This is
         necessary because the interface to S4 (i.e the object stored at
         self.s4) requires the number of basis terms to be provided to the
-        constructor of that object. 
+        constructor of that object.
 
         .. note:: You will need to call self.setup() after calling this
         function
@@ -944,7 +888,7 @@ class Simulator():
         number of basis terms in the config and also updates the s4 attribute.
         This is necessary because the interface to S4 (i.e the object stored at
         self.s4) requires the lattice vectors of the unit cell to be provided
-        to the constructor of that object. 
+        to the constructor of that object.
 
         .. note:: You will need to call self.setup() after calling this
         function
@@ -999,92 +943,6 @@ class Simulator():
         self.log.debug('Incident Amplitude: %s', str(E))
         return E
 
-    def _get_incident_amplitude(self):
-        """Returns the incident amplitude of a wave depending on frequency"""
-        freq = self.conf['Simulation']['params']['frequency']
-        polar_angle = self.conf['Simulation']['params']['polar_angle']
-        path = os.path.expandvars(self.conf['Simulation']['input_power'])
-        bandwidth = self.conf['Simulation']['params']['bandwidth']
-        # Get NREL AM1.5 data
-        freq_vec, p_vec = np.loadtxt(path, unpack=True, delimiter=',')
-        # Get all available intensity values within this bin
-        left_freq = freq - bandwidth / 2.0
-        right_freq = freq + bandwidth / 2.0
-        if right_freq > freq_vec[-1]:
-            raise ValueError('Your rightmost bin edge lies outside the'
-                             ' range provided by your input spectrum')
-        if left_freq < freq_vec[0]:
-            raise ValueError('Your leftmost bin edge lies outside the'
-                             ' range provided by your input spectrum')
-        inds = np.where((left_freq < freq_vec) & (freq_vec < right_freq))[0]
-        # Check for edge cases
-        if len(inds) == 0:
-            # It is unphysical to claim that an input wave of a single
-            # frequency can contain any power. If we're simulating at a single
-            # frequency, just assume the wave has the intensity contained
-            # within a single bin of the input spectral data surrounding that
-            # frequency
-            self.log.warning('Your bins are smaller than those of your input'
-                             ' spectra! Computing power using a single bin')
-            closest_ind = np.argmin(np.abs(freq_vec - freq))
-            # Is the closest one to the left or the right?
-            if freq_vec[closest_ind] > freq:
-                other_ind = closest_ind - 1
-                left_freq = freq_vec[other_ind]
-                left_intensity = p_vec[other_ind]
-                right_freq = freq_vec[closest_ind]
-                right_intensity = p_vec[closest_ind]
-            else:
-                other_ind = closest_ind + 1
-                right_freq = freq_vec[other_ind]
-                right_intensity = p_vec[other_ind]
-                left_freq = freq_vec[closest_ind]
-                left_intensity = p_vec[closest_ind]
-        else:
-            # A simple linear interpolation given two pairs of data points, and
-            # the desired x point
-            def lin_interp(x1, x2, y1, y2, x):
-                return ((y2 - y1) / (x2 - x1)) * (x - x2) + y2
-            # If the left or right edge lies between NREL data points, we do a
-            # linear interpolation to get the irradiance values at the bin
-            # edges.  If the left of right edge happens to be directly on an
-            # NREL bin edge (unlikely) the linear interpolation will just
-            # return the value at the NREL bin. Also the selection of inds
-            # above excluded the case of left or right being equal to an NREL
-            # bin,
-            left_intensity = lin_interp(freq_vec[inds[0] - 1],
-                                        freq_vec[inds[0]],
-                                        p_vec[inds[0] - 1],
-                                        p_vec[inds[0]], left_freq)
-            right_intensity = lin_interp(freq_vec[inds[-1]],
-                                         freq_vec[inds[-1] + 1],
-                                         p_vec[inds[-1]], p_vec[inds[-1] + 1],
-                                         right_freq)
-        # All the frequency values within the bin and including the bin edges
-        freqs = [left_freq]+list(freq_vec[inds])+[right_freq]
-        # All the intensity values
-        intensity_values = [left_intensity]+list(p_vec[inds])+[right_intensity]
-        self.log.debug(freqs)
-        self.log.debug(intensity_values)
-        # Just use a trapezoidal method to integrate the spectrum
-        intensity = intg.trapz(intensity_values, x=freqs)
-        self.log.debug('Incident Intensity: %s', str(intensity))
-        area = self.period*self.period
-        power = intensity*area
-        self.log.debug('Incident Power: %s', str(power))
-        # We need to reduce amplitude of the incident wave depending on
-        #  incident polar angle
-        # This calculation for E comes from the definition of the Poynting
-        # vector in free space (taken from Jackson 3rd Ed. pg. 298)
-        # P = .5*\sqrt{\epsilon_0 / \mu_0} | E_o |^2 where E_o is the amplitude
-        # of the plane wave and is not time averaged in any way
-        # E = np.sqrt(2*constants.c*constants.mu_0*intensity)*np.cos(polar_angle)
-        E = np.sqrt(2 * constants.c * constants.mu_0 *
-                    intensity)*np.cos(polar_angle)
-        self.log.debug('Incident Amplitude: %s', str(E))
-        return E
-        # return 2
-
     def set_excitation(self):
         """Sets the exciting plane wave for the simulation"""
         f_phys = self.conf['Simulation']['params']['frequency']
@@ -1092,7 +950,7 @@ class Simulator():
         c_conv = constants.c / self.conf['Simulation']['base_unit']
         f_conv = f_phys / c_conv
         self.s4.SetFrequency(f_conv)
-        E_mag = self._get_incident_amplitude()
+        E_mag = get_incident_amplitude(self)
         # E_mag = self._get_incident_amplitude_anna()
         polar = self.conf['Simulation']['params']['polar_angle']
         azimuth = self.conf['Simulation']['params']['azimuthal_angle']
@@ -1288,7 +1146,7 @@ class Simulator():
         for zcount, z in enumerate(self.Z):
             for i, x in enumerate(self.X):
                 for j, y in enumerate(self.Y):
-                    E, H = self.s4.GetFields(x, y, z) 
+                    E, H = self.s4.GetFields(x, y, z)
                     Ex[zcount, i, j] = E[0]
                     Ey[zcount, i, j] = E[1]
                     Ez[zcount, i, j] = E[2]
@@ -1327,12 +1185,12 @@ class Simulator():
             Hy = np.zeros((xsamples, ysamples), dtype=np.complex128)
             Hz = np.zeros((xsamples, ysamples), dtype=np.complex128)
             E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(xsamples-1,
-                                                            ysamples-1), 
+                                                            ysamples-1),
                                            Format='Array')
             E_arr = np.array(E)
             H_arr = np.array(H)
         else:
-            E = self.s4.GetFieldsOnGrid(z=z, NumSamples=(xsamples-1, ysamples-1), 
+            E = self.s4.GetFieldsOnGrid(z=z, NumSamples=(xsamples-1, ysamples-1),
                                         Format='Array')[0]
             E_arr = np.array(E)
             # Grab the periodic BC, which is always excluded from results
@@ -1363,7 +1221,7 @@ class Simulator():
             Hz[0:xsamples-1, -1] = H_arr[:, 0, 2]
             Hz[-1, 0:ysamples-1] = H_arr[0, :, 2]
             Hz[-1, -1] = H_arr[0, 0, 2]
-        else: 
+        else:
             Hx, Hy, Hz = None, None, None
         return Ex, Ey, Ez, Hx, Hy, Hz
 
@@ -1383,7 +1241,7 @@ class Simulator():
                 # self.data.update({'Ex':Ex.real,'Ey':Ey.real,'Ez':Ez.real})
         end = time.time()
         diff = end - start
-        self.log.info("Time to compute fields: %f seconds", diff) 
+        self.log.info("Time to compute fields: %f seconds", diff)
 
     def get_fluxes(self):
         """
@@ -1423,7 +1281,7 @@ class Simulator():
         """
         self.log.debug('Computing dielectric profile ...')
         xv, yv = np.meshgrid(self.X, self.Y, indexing='ij')
-        z = self.dz 
+        z = self.dz
         for layer, ldata in sorted(self.conf['Layers'].items(),
                                    key=lambda tup: tup[1]['order']):
             self.log.debug('Computing epsilon at z = %f in layer %s', z, layer)
@@ -1470,10 +1328,15 @@ class Simulator():
         """
         self.log.info("Loading simulation state")
         sfile = self.conf['General']['solution_file']
-        fname = os.path.join(self.id[0:10], sfile) 
-        self.log.info("Loading from: %s"%fname)
-        self.s4.LoadSolution(Filename=fname)
-        self.log.info("Solution loaded!")
+        sdir = self.conf['General']['sim_dir']
+        fname = os.path.expandvars(os.path.join(sdir, sfile))
+        print(fname)
+        if os.path.isfile(fname):
+            self.log.info("Loading from: %s"%fname)
+            self.s4.LoadSolution(Filename=fname)
+            self.log.info("Solution loaded!")
+        else:
+            self.log.warning("Solution file does not exist. Cannot load")
 
     def save_state(self):
         """
@@ -1481,8 +1344,9 @@ class Simulator():
         """
         self.log.info("Saving simulation state")
         sfile = self.conf['General']['solution_file']
-        fname = os.path.join(self.id[0:10], sfile) 
-        self.log.info("Saving to: %s"%fname)
+        sdir = self.conf['General']['sim_dir']
+        fname = os.path.expandvars(os.path.join(sdir, sfile))
+        self.log.info("Saving to: %s" % fname)
         # if os.path.isfile(fname):
         #     self.log.info("State file exists, skipping save")
         # else:
@@ -1521,7 +1385,7 @@ class Simulator():
                 grid({'GridType': 'Uniform', 'Name': 'FullGrid'},
                     topo({'TopologyType': '3DRectMesh'}),
                     geo({'GeometryType': 'VXVYVZ'},
-                       ditem(base+'/xcoords', {'Name': 'xcoords', 
+                       ditem(base+'/xcoords', {'Name': 'xcoords',
                                                'Dimensions': str(self.xsamps),
                                                'NumberType': 'Float',
                                                'Precision': '4',
@@ -1558,7 +1422,7 @@ class Simulator():
     def save_data(self):
         """Saves the self.data dictionary to an npz file. This dictionary
         contains all the fields and the fluxes dictionary"""
-        
+
         start = time.time()
         if self.hdf5 is None:
             self.open_hdf5()
@@ -1614,7 +1478,7 @@ class Simulator():
                         self.hdf5.create_array(gpath, name, createparents=True,
                                           atom=tb.Atom.from_dtype(arr.dtype),
                                           obj=arr)
-            
+
             # Write XMDF xml file for importing into Paraview
             self.write_xdmf()
             end = time.time()
@@ -1768,10 +1632,10 @@ class Simulator():
         start = time.time()
         if update:
             self.update_thicknesses()
-        state_file = os.path.join(self.id[0:10], 'solution.xml')
-        if os.path.isfile(state_file):
-            self.log.debug("State file exists: %s"%state_file)
-            self.load_state()
+        # state_file = os.path.join(self.id[0:10], 'solution.xml')
+        # if os.path.isfile(state_file):
+        #     self.log.debug("State file exists: %s"%state_file)
+        #     self.load_state()
         self.get_field()
         self.get_fluxes()
         self.get_fourier_coefficients()
@@ -1780,7 +1644,7 @@ class Simulator():
         self.open_hdf5()
         self.save_data()
         self.save_conf()
-        self.save_state()
+        # self.save_state()
         end = time.time()
         self.runtime = end - start
         self.save_time()

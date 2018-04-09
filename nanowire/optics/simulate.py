@@ -30,7 +30,12 @@ from lxml import etree
 from lxml.builder import E
 # get our custom config object and the logger function
 from . import postprocess as pp
-from .utils.utils import make_hash, get_combos, IdFilter, get_incident_amplitude
+from .utils.utils import (
+    make_hash,
+    get_combos,
+    IdFilter,
+    get_incident_amplitude,
+)
 from .utils.config import Config
 from .utils.geometry import Layer, get_layers
 
@@ -390,7 +395,7 @@ class SimulationManager:
         total_mem = psutil.virtual_memory().total
         # If we have hardcoded in a fixed number of samples, we can compute the
         # number of data points here.
-        samps = [self.gconf['Simulation'][s] for s in ('x_samples',
+        samps = [self.gconf['General'][s] for s in ('x_samples',
                                                        'y_samples',
                                                        'z_samples')]
         # We can multiply by the ones that are hardcoded. For those
@@ -789,6 +794,9 @@ class Simulator():
         self.build_device()
         self.set_excitation()
 
+    def get_layers(self):
+        self.layers = get_layers(self)
+
     def make_coord_arrays(self):
         """
         Set the attributes that define the spatial coordinate arrays. We can't
@@ -797,9 +805,9 @@ class Simulator():
         config
         """
 
-        self.xsamps = self.conf['Simulation']['x_samples']
-        self.ysamps = self.conf['Simulation']['y_samples']
-        self.zsamps = self.conf['Simulation']['z_samples']
+        self.xsamps = self.conf['General']['x_samples']
+        self.ysamps = self.conf['General']['y_samples']
+        self.zsamps = self.conf['General']['z_samples']
         self.X = np.linspace(0, self.period, self.xsamps)
         self.Y = np.linspace(0, self.period, self.ysamps)
         max_depth = self.conf['Simulation']['max_depth']
@@ -815,6 +823,19 @@ class Simulator():
         self.dy = self.Y[1] - self.Y[0]
         self.dz = self.Z[1] - self.Z[0]
         self.data.update({"xcoords": self.X, "ycoords": self.Y, "zcoords": self.Z})
+
+    def add_interpolator(self, key, method='linear'):
+        """
+        Add an interpolator method to this object for the data located at
+        self.data[key]. The data must reside on a regular grid, but the grid
+        points do not need to be evenly spaced
+        """
+
+        values = self.data[key]
+        points = (self.Z, self.X, self.Y)
+        rgi = spi.RegularGridInterpolator(points, values, method=method,
+                                          bounds_error=True)
+        setattr(self, key, rgi)
 
     def open_hdf5(self):
         fpath = os.path.join(self.dir, 'sim.hdf5')
@@ -1333,10 +1354,13 @@ class Simulator():
         print(fname)
         if os.path.isfile(fname):
             self.log.info("Loading from: %s"%fname)
+            print("Loading from: %s"%fname)
             self.s4.LoadSolution(Filename=fname)
             self.log.info("Solution loaded!")
+            print("Solution loaded!")
         else:
             self.log.warning("Solution file does not exist. Cannot load")
+            print("Solution file does not exist. Cannot load")
 
     def save_state(self):
         """
@@ -1347,11 +1371,11 @@ class Simulator():
         sdir = self.conf['General']['sim_dir']
         fname = os.path.expandvars(os.path.join(sdir, sfile))
         self.log.info("Saving to: %s" % fname)
-        # if os.path.isfile(fname):
-        #     self.log.info("State file exists, skipping save")
-        # else:
-        #     self.s4.SaveSolution(Filename=fname)
-        #     self.log.info("Solution saved!")
+        if os.path.isfile(fname):
+            self.log.info("State file exists, skipping save")
+        else:
+            self.s4.SaveSolution(Filename=fname)
+            self.log.info("Solution saved!")
         self.s4.SaveSolution(Filename=fname)
         self.log.info("Solution saved!")
     # def get_integrals(self):

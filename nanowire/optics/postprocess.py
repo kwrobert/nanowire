@@ -123,9 +123,9 @@ class Simulation:
         self.failed = False
         self.avgs = {}
         # Compute and store dx, dy, dz at attributes
-        self.zsamps = int(self.conf['Simulation']['z_samples'])
-        self.xsamps = int(self.conf['Simulation']['x_samples'])
-        self.ysamps = int(self.conf['Simulation']['y_samples'])
+        self.zsamps = int(self.conf['General']['z_samples'])
+        self.xsamps = int(self.conf['General']['x_samples'])
+        self.ysamps = int(self.conf['General']['y_samples'])
         self.X = self.data['xcoords']
         self.Y = self.data['ycoords']
         self.Z = self.data['zcoords']
@@ -358,8 +358,8 @@ class Simulation:
             except KeyError:
                 pass
         # Get spatial discretization
-        rsamp = self.conf['Simulation']['r_samples']
-        thsamp = self.conf['Simulation']['theta_samples']
+        rsamp = self.conf['General']['r_samples']
+        thsamp = self.conf['General']['theta_samples']
         period = self.conf['Simulation']['params']['array_period']
         # Maximum r value such that circle and square unit cell have equal area
         rmax = period / np.sqrt(np.pi)

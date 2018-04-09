@@ -98,7 +98,7 @@ class Layer:
         self.base_material = base_material
         self.materials = materials
 
-    def _get_nk_dict(self, freq):
+    def get_nk_dict(self, freq):
         """
         Build dictionary where keys are material names and values is a tuple
         containing (n, k) at a given frequency
@@ -141,7 +141,7 @@ class Layer:
         Given the x and y coordinates of a point and the frequency of interest,
         return the n and k values at that point
         """
-        nk = self._get_nk_dict(freq)
+        nk = self.get_nk_dict(freq)
         # If this layer is just a slab of material, return the nk values of the
         # base material
         if not self.shapes:
@@ -163,7 +163,7 @@ class Layer:
         print("Enclosing material: {}".format(material_name))
         return nk[material_name]
 
-    def get_nk_matrix(self, freq):
+    def get_nk_matrix(self, freq, xcoords=None, ycoords=None):
         """
         Returns two 2D matrices containing the real component n and the
         imaginary component k of the index of refraction at a given frequency
@@ -172,14 +172,16 @@ class Layer:
         """
 
         # Get the nk values for all the materials in the layer
-        nk = self._get_nk_dict(freq)
+        nk = self.get_nk_dict(freq)
         # Create the matrix and fill it with the values for the base material
-        n_matrix = np.ones((self.x_samples,
-                            self.y_samples))*nk[self.base_material][0]
-        k_matrix = np.ones((self.x_samples,
-                            self.y_samples))*nk[self.base_material][1]
-        xcoords = np.arange(0, self.period, self.dx)
-        ycoords = np.arange(0, self.period, self.dy)
+        if xcoords is None: 
+            xcoords = np.linspace(0, self.period, self.x_samples)
+        if ycoords is None:
+            ycoords = np.linspace(0, self.period, self.y_samples)
+        n_matrix = np.ones((len(xcoords),
+                            len(ycoords)))*nk[self.base_material][0]
+        k_matrix = np.ones((len(xcoords),
+                            len(ycoords)))*nk[self.base_material][1]
         for name, (shape, mat) in self.shapes.items():
             n = nk[mat][0]
             k = nk[mat][1]

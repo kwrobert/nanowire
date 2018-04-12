@@ -3,7 +3,7 @@
 import os
 import argparse as ap
 import logging
-import logging_tree
+# import logging_tree
 from nanowire.optics.postprocess import Processor
 
 
@@ -69,7 +69,7 @@ def process_optics():
         proc.log.info('Here is the filter dictionary: %s', filt_dict)
         proc.filter_by_param(filt_dict)
     proc.replace()
-    logging_tree.printout()
+    # logging_tree.printout()
     # Now do all the work
     if not args.no_crunch:
         proc.crunch_local_all()

@@ -46,7 +46,8 @@ def get_nk(path, freq):
     values. Columns must be delimited by whitespace.  :param float freq:
     The desired frequency in Hertz
     """
-
+    if path is None:
+        return (1, 0)
     # Get data
     path = os.path.expandvars(path)
     freq_vec, n_vec, k_vec = np.loadtxt(path, unpack=True)
@@ -453,3 +454,20 @@ def cmp_dicts(d1, d2):
             if v1 != v2:
                 return False
     return all(comps)
+
+def find_inds(a, b, unique=False):
+    """
+    Get the indices where we can find the elements of the array a in the array
+    b
+    """
+    return np.where(np.isin(a, b, assume_unique=unique))
+
+def insort(a, b, kind='mergesort'):
+    """
+    Merge arrays a and b, sort them, and return the unique elements
+    """
+    c = np.concatenate((a, b))
+    c.sort(kind=kind)
+    flag = np.ones(len(c), dtype=bool)
+    np.not_equal(c[1:], c[:-1], out=flag[1:])
+    return c[flag]

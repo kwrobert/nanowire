@@ -32,7 +32,12 @@ from .utils.utils import (
     get_incident_amplitude
 )
 from .data_manager import HDF5DataManager, NPZDataManager
-from .utils.geometry import Layer, get_mask, get_layers
+from .utils.geometry import (
+    Layer,
+    get_mask_by_shape,
+    get_mask_by_material,
+    get_layers
+)
 
 # Configure logging for this module
 # Get numeric level safely
@@ -45,7 +50,7 @@ formatter = logging.Formatter('%(asctime)s [%(name)s:%(levelname)s]'
                               ' - %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
 # Create logger
 logger = logging.getLogger(__name__)
-logger.setLevel(warn)
+logger.setLevel(info)
 log_dir, logfile = os.path.split(os.path.expandvars(logfile))
 # Set up file handler
 try:
@@ -338,6 +343,7 @@ class Simulation:
             # geometry
             nmat, kmat = layer.get_nk_matrix(freq)
             gvec[layer.slice] = fact * nmat * kmat * normEsq[layer.slice]
+            # gvec[layer.slice] = nmat * kmat * normEsq[layer.slice]
         self.extend_data('genRate', gvec)
         return gvec
 
@@ -507,13 +513,23 @@ class Simulation:
             # if layer_name == 'Air':
             #     continue
             n_mat, k_mat = layer_obj.get_nk_matrix(freq)
+
+            # nkEsq = n_mat*k_mat*Esq
+            # y_integral = 0
+            # for material in layer_obj.materials:
+            #     mask = get_mask_by_material(layer_obj, material, self.X,
+            #                                 self.Y)
+            #     y_integral += self.integrate_quantity(nkEsq, layer=layer_name,
+            #                                           mask=mask)
+
             # n and k could be functions of space, so we need to multiply the
             # fields by n and k before integrating
             arr_slice = Esq[layer_obj.slice]*n_mat*k_mat
-            z_vals = self.Z[layer_obj.istart:layer_obj.iend]
+            z_vals = self.Z[layer_obj.slice]
             z_integral = intg.trapz(arr_slice, x=z_vals, axis=0)
             x_integral = intg.trapz(z_integral, x=self.X, axis=0)
             y_integral = intg.trapz(x_integral, x=self.Y, axis=0)
+
             # print('Arr slice shape: {}'.format(arr_slice.shape))
             # x_integral = intg.trapz(arr_slice, x=self.X, axis=1)
             # print('X Integral shape: {}'.format(x_integral.shape))
@@ -526,15 +542,19 @@ class Simulation:
             # lengths in base units to SI reference length unit (meters)
             # Factor of 1/2 for time averaging gets canceled by imaginary part
             # of dielectric constant (2*n*k)
+            self.log.info("Pabs Pure Integral Result: {}".format(y_integral))
             Pabs_integ = 2*np.pi*freq*c.epsilon_0*base_unit*y_integral
             # Pabs_integ = 2*np.pi*freq*c.epsilon_0*base_unit*z_integral
             if per_area:
                 Pabs_integ /= self.period**2
             self.log.info("Integrated Absorbed: {}".format(Pabs_integ))
-            diff = np.abs(Pabs_flux - Pabs_integ)
+            diff = np.abs(Pabs_flux - Pabs_integ)/Pabs_flux
             absorb_arr[counter] = (layer_name, Pabs_flux, Pabs_integ, diff)
             counter += 1
         self.log.info("Layer absorption arr: %s", str(absorb_arr))
+        fout = os.path.join(self.dir, 'abs_per_layer.dat')
+        with open(fout, 'w') as f:
+            absorb_arr.tofile(f, sep=', ')
         self.data['abs_per_layer'] = absorb_arr
         return absorb_arr
 
@@ -607,7 +627,7 @@ class Simulation:
 
         :param q: A key in the self.data dict that specifies the quantity you
                   wish to integrate
-        :type q: str
+        :type q: str or np.array
         :param mask: A numpy array of ones and zeros, which can be 2D or 3D. If
                      a 3D array is provided, it will multiply the 3D array of
                      the quantity elementwise before integration. The
@@ -629,10 +649,13 @@ class Simulation:
         :return: Result of :math:`\\int quantity(x, y, z) dV`
         :rtype: float
         """
-        qarr = self.get_scalar_quantity(q)
+        if type(q) == str:
+            qarr = self.get_scalar_quantity(q)
+        else:
+            qarr = q
         if layer is not None:
             l = self.layers[layer]
-            z_vals = self.Z[layer.istart, layer.iend]
+            z_vals = self.Z[l.slice]
             qarr = qarr[l.slice]
             if mask is not None and len(mask.shape) == 3:
                 mask = mask[l.slice]
@@ -995,7 +1018,7 @@ class Simulation:
             fig, ax = plt.subplots()
         else:
             fig = None
-        ax.plot(x, y, label=labels[0])
+        ax.plot(x, y, '--o', label=labels[0])
         ax.set_xlabel(labels[1])
         ax.set_ylabel(labels[2])
         ax.set_title(labels[3])
@@ -1414,6 +1437,7 @@ class SimulationGroup:
             raise ValueError(msg)
 
         base = os.path.expandvars(self.sims[0].conf['General']['results_dir'])
+        period = self.sims[0].conf['Simulation']['params']['array_period']
         self.log.info('Computing photocurrent density for group at %s', base)
         jph_vals = np.zeros(self.num_sims)
         freqs = np.zeros(self.num_sims)
@@ -1425,11 +1449,8 @@ class SimulationGroup:
             E_photon = c.h * freq
             if method == 'flux':
                 arr = sim.data['transmission_data']
-                print(arr.dtype)
-                print(arr)
                 _, ref, trans, absorb = arr[arr.port == port.encode('utf-8')][0]
-                print(ref, trans, absorb)
-                incident_power = get_incident_power(self)
+                incident_power = get_incident_power(sim)
                 jph_vals[i] = incident_power * absorb / E_photon
             else:
                 try:
@@ -1437,7 +1458,7 @@ class SimulationGroup:
                 except KeyError:
                     abs_arr = sim.absorption_per_layer()
                 absorbed_power = np.sum(abs_arr['int_method'])
-                jph_vals[i] = absorbed_power / E_photon
+                jph_vals[i] = absorbed_power / (E_photon*period**2)
             sim.clear_data()
         # factor of 1/10 to convert A*m^-2 to mA*cm^-2
         Jph = .1 * c.e * np.sum(jph_vals)
@@ -1546,6 +1567,72 @@ class SimulationGroup:
             outf.write('# Reflection, Transmission, Absorbtion\n')
             outf.write('%f,%f,%f' % (wght_ref, wght_trans, wght_abs))
         return wght_ref, wght_trans, wght_abs
+
+    def plot_absorption_per_layer(self, input_ax=None, plot_layer=None, quant=None,
+                                  sim_slice=(0, -1)):
+        """
+        Plots absorption per layer and error
+        """
+
+
+        results_dir = self.sims[0].conf['General']['results_dir']
+        results_dict = {}
+        freqs = np.zeros(len(self.sims[sim_slice[0]:sim_slice[1]]))
+        for i, sim in enumerate(self.sims[sim_slice[0]:sim_slice[1]]):
+            freq = sim.conf['Simulation']['params']['frequency']
+            freqs[i] = freq
+            abs_arr = sim.data['abs_per_layer']
+            flux_total = 0
+            integ_total = 0
+            for (layer, flux, integ, diff) in abs_arr:
+                layer = layer.decode('utf-8')
+                # print('Layer: {}'.format(layer))
+                # print('Flux: {}'.format(flux.real))
+                # print('Integ: {}'.format(integ.real))
+                # print('Diff: {}'.format(diff.real))
+                if layer in results_dict:
+                    results_dict[layer][0].append(flux.real)
+                    results_dict[layer][1].append(integ.real)
+                    results_dict[layer][2].append(diff.real)
+                else:
+                    results_dict[layer] = [[flux.real], [integ.real], [diff.real]]
+                flux_total += flux.real
+                integ_total += integ.real
+            total_diff = np.abs(flux_total.real - integ_total.real)/flux_total.real
+            if 'total' in results_dict:
+                results_dict['total'][0].append(flux_total.real)
+                results_dict['total'][1].append(integ_total.real)
+                results_dict['total'][2].append(total_diff.real)
+            else:
+                results_dict['total'] = [[flux_total.real], [integ_total.real],
+                                         [total_diff.real]]
+        layers = results_dict.keys()
+        if plot_layer is not None:
+            layers = [l for l in layers if l == plot_layer]
+
+        quants = {'fluxmethod_absorption': 0,
+                  'integralmethod_absorption': 1,
+                  'relativediff': 2}
+        if quant is not None:
+            quants = {q: ind for q, ind in quants.items() if q == quant}
+        for layer in layers:
+            results = results_dict[layer]
+            for name, ind in quants.items():
+                if input_ax is None:
+                    fig, ax = plt.subplots()
+                else:
+                    ax = input_ax
+                pfile = os.path.join(results_dir,
+                                     '{}_{}.png'.format(layer, name))
+                numbasis = self.sims[0].conf['Simulation']['params']['numbasis']
+                lab = "Numbasis = {}".format(numbasis)
+                ax.plot(freqs, results[ind], '--o', label=lab)
+                ax.set_ylabel(name)
+                ax.set_xlabel("Frequency (Hz)")
+                ax.set_title(layer)
+                plt.savefig(pfile)
+        return ax
+
 
     def convergence(self, quantity, err_type='global', scale='linear'):
         """Plots the convergence of a field across all available simulations"""
@@ -1855,6 +1942,7 @@ class Processor(object):
         specified key"""
 
         self.log.info('Grouping sims against: %s', str(key))
+        print('Calling group against!')
         # We need only need a shallow copy of the list containing all the sim
         # objects We don't want to modify the orig list but we wish to share
         # the sim objects the two lists contain
@@ -1865,12 +1953,17 @@ class Processor(object):
             # Get the comparison dict for this sim
             sim = sims.pop()
             val1 = sim.conf[key]
+            # print('Group against value: {}'.format(val1))
             # We want the specified key to vary, so we remove it from the
             # comparison dict
             del sim.conf[key]
             cmp1 = {'Simulation': sim.conf['Simulation'],
                     'Layers': sim.conf['Layers'],
                     'Solver': sim.conf['Solver']}
+            try:
+                del cmp1['Solver']['BasisFieldDumpPrefix']
+            except KeyError:
+                pass
             match = False
             # Loop through each group, checking if this sim belongs in the
             # group
@@ -1879,8 +1972,12 @@ class Processor(object):
                 val2 = sim2.conf[key]
                 del sim2.conf[key]
                 cmp2 = {'Simulation': group[0].conf['Simulation'],
-                        'Layers': group[0].conf['Layers'], 
+                        'Layers': group[0].conf['Layers'],
                         'Solver': group[0].conf['Solver']}
+                try:
+                    del cmp2['Solver']['BasisFieldDumpPrefix']
+                except KeyError:
+                    pass
                 params_same = cmp_dicts(cmp1, cmp2)
                 if params_same:
                     match = True
@@ -1896,14 +1993,13 @@ class Processor(object):
                 sim_groups.append([sim])
         # Get the params that will define the path in the results dir for each
         # group that will be stored
-        ag_key = tuple(key[0:-1])
-        result_pars = [var for var in variable_params if var != ag_key]
+        result_pars = [var for var in variable_params if var != key]
         for group in sim_groups:
             # Sort the individual sims within a group in increasing order of
             # the parameter we are grouping against a
             group.sort(key=lambda sim: sim.conf[key])
             path = '{}/grouped_against_{}'.format(group[0].conf['General']['base_dir'],
-                                                  ag_key[-1])
+                                                  key[-1])
             path = os.path.expandvars(path)
             # If the only variable param is the one we grouped against, make
             # the top dir

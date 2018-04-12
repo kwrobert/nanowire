@@ -10,7 +10,7 @@ from collections import OrderedDict
 from .utils import get_nk
 
 
-def get_mask(shape, xcoords, ycoords):
+def get_mask_by_shape(shape, xcoords, ycoords):
     """
     Given a sympy shape object (Circle, Triangle, etc) and two 1D arrays
     containing the x and y coordinates, return a mask that determines whether
@@ -27,6 +27,27 @@ def get_mask(shape, xcoords, ycoords):
         polygon = Path(shape.vertices)
         mask = polygon.contains_points(list(itertools.product(xcoords,
                                                               ycoords)))
+    return mask
+
+
+def get_mask_by_material(layer, material, x, y):
+    """
+    Given a layer object, the name of a material in the layer and two 1D arrays
+    containing the x and y coordinates, return a mask that determines whether
+    or not a given (x, y) point in within the given material. True means
+    inside, False means outside
+    """
+    if material == layer.base_material:
+        mask = np.ones((len(x), len(y)))
+    else:
+        mask = np.zeros((len(x), len(y)))
+
+    for shape_name, (shape_obj, mat_name) in layer.shapes.items():
+        shape_mask = get_mask_by_shape(shape_obj, x, y)
+        if mat_name == material:
+            mask[shape_mask == 1] = 1
+        else:
+            mask[shape_mask == 1] = 0
     return mask
 
 
@@ -70,7 +91,8 @@ def get_layers(sim):
                               start_ind, end_ind, sim.period,
                               sim.xsamps, sim.ysamps, sim.dz,
                               base_material=ldata['base_material'],
-                              geometry=g, materials=materials)
+                              materials=materials,
+                              geometry=g)
         start = end
     return layers
 
@@ -86,17 +108,21 @@ class Layer:
         self.istart = istart
         self.iend = iend
         self.slice = (slice(self.istart, self.iend), ...)
-        if geometry:
-            self.collect_shapes(geometry)
+        self.base_material = base_material
+        self.materials = {}
+        if base_material == 'vacuum':
+            self.materials[base_material] = None
         else:
-            self.shapes = {}
+            self.materials[base_material] = materials[base_material]
         self.x_samples = xsamples
         self.y_samples = ysamples
         self.dx = period/xsamples
         self.dy = period/ysamples
         self.dz = dz
-        self.base_material = base_material
-        self.materials = materials
+        if geometry:
+            self.collect_shapes(geometry, materials)
+        else:
+            self.shapes = {}
 
     def get_nk_dict(self, freq):
         """
@@ -105,7 +131,6 @@ class Layer:
         """
         nk = {mat: (get_nk(matpath, freq)) for mat, matpath in
               self.materials.items()}
-        nk['vacuum'] = (1, 0)
         return nk
 
     def is_in_layer(self, z):
@@ -114,7 +139,7 @@ class Layer:
         """
         return self.start < z < self.end
 
-    def collect_shapes(self, d):
+    def collect_shapes(self, d, materials):
         """
         Collect and instantiate the dictionary stored in the shapes attribute
         given a dictionary describing the shapes in the layer
@@ -129,6 +154,8 @@ class Layer:
                 center = Point(data['center']['x'], data['center']['y'])
                 radius = data['radius']
                 material = data['material']
+                if material not in self.materials:
+                    self.materials[material] = materials[material]
                 shape_obj = Circle(center, radius)
             else:
                 raise NotImplementedError('Can only handle circles right now')
@@ -186,7 +213,7 @@ class Layer:
             n = nk[mat][0]
             k = nk[mat][1]
             # Get a mask that is True inside the shape and False outside
-            mask = get_mask(shape, xcoords, ycoords)
+            mask = get_mask_by_shape(shape, xcoords, ycoords)
             # print(mask)
             shape_nvals = mask*n
             shape_kvals = mask*k

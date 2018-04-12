@@ -924,8 +924,9 @@ class Simulator():
         """Configure options for the RCWA solver"""
         if self.conf['General']['output_pattern']:
             prefix = os.path.join(self.id[0:10], "VectorField")
-            self.conf['Solver']['BasisFieldDumpPrefix'] = prefix
-        self.s4.SetOptions(**self.conf['Solver'])
+            self.s4.SetOptions(BasisFieldDumpPrefix=prefix, **self.conf['Solver'])
+        else:
+            self.s4.SetOptions(**self.conf['Solver'])
 
     def _get_epsilon(self, path):
         """Returns complex dielectric constant for a material by pulling in nk
@@ -1264,6 +1265,19 @@ class Simulator():
         diff = end - start
         self.log.info("Time to compute fields: %f seconds", diff)
 
+    def update_fields(self):
+        """
+        Update the field arrays stored on disk with new data. This is useful if
+        you have changed the location of the sampling points, but do not want
+        to delete all the old data. This will still preserve the regularity of
+        the gridded data because each x-y plane will have the same sampling
+        scheme, however the spacing between grid points in any direction may be
+        nonuniform
+        """
+        if self.hdf5 is None:
+            self.open_hdf5()
+        
+
     def get_fluxes(self):
         """
         Get the fluxes at the top and bottom of each layer. This is a surface
@@ -1351,16 +1365,16 @@ class Simulator():
         sfile = self.conf['General']['solution_file']
         sdir = self.conf['General']['sim_dir']
         fname = os.path.expandvars(os.path.join(sdir, sfile))
-        print(fname)
+        # print(fname)
         if os.path.isfile(fname):
             self.log.info("Loading from: %s"%fname)
-            print("Loading from: %s"%fname)
+            # print("Loading from: %s"%fname)
             self.s4.LoadSolution(Filename=fname)
             self.log.info("Solution loaded!")
-            print("Solution loaded!")
+            # print("Solution loaded!")
         else:
             self.log.warning("Solution file does not exist. Cannot load")
-            print("Solution file does not exist. Cannot load")
+            # print("Solution file does not exist. Cannot load")
 
     def save_state(self):
         """
@@ -1538,14 +1552,14 @@ class Simulator():
         elif self.conf['General']['save_as'] == 'hdf5':
             self.log.debug('Saving conf to HDF5 file')
             self.conf.write(os.path.join(self.dir, 'sim_conf.yml'))
-            path = '/sim_{}'.format(self.id[0:10])
-            try:
-                node = self.hdf5.get_node(path)
-            except tb.NoSuchNodeError:
-                self.log.warning('You need to create the group for this '
-                'simulation before you can set attributes on it. Creating now')
-                node = self.hdf5.create_group(path)
-            node._v_attrs['conf'] = self.conf.dump()
+            # path = '/sim_{}'.format(self.id[0:10])
+            # try:
+            #     node = self.hdf5.get_node(path)
+            # except tb.NoSuchNodeError:
+            #     self.log.warning('You need to create the group for this '
+            #     'simulation before you can set attributes on it. Creating now')
+            #     node = self.hdf5.create_group(path)
+            # node._v_attrs['conf'] = self.conf.dump()
             # attr_name = 'conf'
             # tup = ('save_attr', (self.conf.dump(), path, attr_name), {})
             # self.q.put(tup, block=True)
@@ -1642,7 +1656,6 @@ class Simulator():
         mant, base, expo = self.s4.GetSMatrixDeterminant()
         self.log.debug('Matissa: %s'%str(mant))
         self.log.debug('Base: %s'%str(base))
-        self.log.debug('Exponent: %s'%str(expo))
         res = mant*base**expo
         self.log.debug('Result: %s'%str(res))
 
@@ -1656,10 +1669,12 @@ class Simulator():
         start = time.time()
         if update:
             self.update_thicknesses()
-        # state_file = os.path.join(self.id[0:10], 'solution.xml')
-        # if os.path.isfile(state_file):
-        #     self.log.debug("State file exists: %s"%state_file)
-        #     self.load_state()
+        state_file = os.path.join(self.dir,
+                                  self.conf['General']['solution_file'])
+        if os.path.isfile(state_file):
+            self.log.debug("State file exists: %s"%state_file)
+            print("State file exists: %s"%state_file)
+            self.load_state()
         self.get_field()
         self.get_fluxes()
         self.get_fourier_coefficients()
@@ -1668,7 +1683,7 @@ class Simulator():
         self.open_hdf5()
         self.save_data()
         self.save_conf()
-        # self.save_state()
+        self.save_state()
         end = time.time()
         self.runtime = end - start
         self.save_time()

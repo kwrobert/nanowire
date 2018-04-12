@@ -1,10 +1,18 @@
 import os
+import numpy
 # import logging
 import ruamel.yaml as yaml
 import re
 from collections import MutableMapping, OrderedDict
 from copy import deepcopy
 import pprint
+
+def numpy_float64_representer(dumper, data):
+    node = dumper.represent_scalar(u'tag:yaml.org,2002:float',
+                                   data.__repr__())
+    return node
+
+yaml.add_representer(numpy.float64, numpy_float64_representer)
 
 
 def get_env_variable(match):
@@ -174,11 +182,7 @@ class Config(MutableMapping):
             # location to the new string
             pattern = '%\({}\)s'.format(ref)
             rep_par = re.sub(pattern, str(repl_val), entry_to_repl)
-            # Make sure we store as a float if possible
-            try:
-                self[rep_seq] = float(rep_par)
-            except:
-                self[rep_seq] = rep_par
+            self[rep_seq] = rep_par
 
     def _check_resolved(self, refs):
         """Checks if a list of references have all been resolved"""
@@ -272,7 +276,7 @@ class Config(MutableMapping):
     def _find_params(self, indict={}, keypath=[]):
         if not indict:
             keyset = set(self.data.keys())
-            exclude = set(['Postprocessing', 'General'])
+            exclude = set(['Postprocessing'])
             keys = keyset.difference(exclude)
             indict = self.data
         else:
@@ -305,7 +309,7 @@ class Config(MutableMapping):
         self.variable_thickness = []
         self.optimized = []
         self._find_params()
-    
+
     def __getitem__(self, key):
         """This setup allows us to get a value using a sequence with the usual
         [] operator"""

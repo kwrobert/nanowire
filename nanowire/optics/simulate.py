@@ -9,7 +9,7 @@ import multiprocessing as mp
 import threading
 try:
     import Queue
-except:
+except ImportError:
     import queue as Queue
 import numpy as np
 import scipy.optimize as optz
@@ -425,8 +425,8 @@ class SimulationManager:
         # If we have hardcoded in a fixed number of samples, we can compute the
         # number of data points here.
         samps = [self.gconf['General'][s] for s in ('x_samples',
-                                                       'y_samples',
-                                                       'z_samples')]
+                                                    'y_samples',
+                                                    'z_samples')]
         # We can multiply by the ones that are hardcoded. For those
         # that are not, we have no way of evaluating the string expressions yet
         # so we'll just assume that they are 150 points
@@ -871,21 +871,25 @@ class Simulator():
 
         self.xsamps = self.conf['General']['x_samples']
         self.ysamps = self.conf['General']['y_samples']
-        self.zsamps = self.conf['General']['z_samples']
+        if type(self.conf['General']['z_samples']) == list: 
+            self.zsamps = len(self.conf['General']['z_samples'])
+            # print(self.conf['General']['z_samples'])
+            self.Z = np.asarray(self.conf['General']['z_samples'])
+        else:
+            self.zsamps = self.conf['General']['z_samples']
+            max_depth = self.conf['Simulation']['max_depth']
+            if max_depth:
+                self.log.debug('Computing up to depth of {} '
+                               'microns'.format(max_depth))
+                self.Z = np.linspace(0, max_depth, self.zsamps)
+            else:
+                self.log.debug('Computing for entire device')
+                height = self.get_height()
+                self.Z = np.linspace(0, height, self.zsamps)
         self.X = np.linspace(0, self.period, self.xsamps)
         self.Y = np.linspace(0, self.period, self.ysamps)
-        max_depth = self.conf['Simulation']['max_depth']
-        if max_depth:
-            self.log.debug('Computing up to depth of {} '
-                           'microns'.format(max_depth))
-            self.Z = np.linspace(0, max_depth, self.zsamps)
-        else:
-            self.log.debug('Computing for entire device')
-            height = self.get_height()
-            self.Z = np.linspace(0, height, self.zsamps)
         self.dx = self.X[1] - self.X[0]
         self.dy = self.Y[1] - self.Y[0]
-        self.dz = self.Z[1] - self.Z[0]
         self.data.update({"xcoords": self.X, "ycoords": self.Y, "zcoords": self.Z})
 
     def add_interpolator(self, key, method='linear'):
@@ -1736,7 +1740,7 @@ class Simulator():
         while percent_diff > max_diff and iter_count < max_iter:
             new_basis = start_basis + basis_step
             self.log.debug('Checking error between {} and {} basis'
-                          ' terms'.format(start_basis, new_basis))
+                           ' terms'.format(start_basis, new_basis))
             self.set_basis(new_basis)
             self.build_device()
             self.set_excitation()

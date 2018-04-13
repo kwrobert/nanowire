@@ -199,7 +199,6 @@ class HDF5DataManager(DataManager):
                     row.append()
                 table.flush()
             elif isinstance(obj, np.ndarray):
-                print(key)
                 self.log.info('Writing data for array %s', key)
                 try:
                     existing_arr = self._dfile.get_node(self.gpath, name=key)

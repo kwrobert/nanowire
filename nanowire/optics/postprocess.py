@@ -128,7 +128,10 @@ class Simulation:
         self.failed = False
         self.avgs = {}
         # Compute and store dx, dy, dz at attributes
-        self.zsamps = int(self.conf['General']['z_samples'])
+        if type(self.conf['General']['z_samples']) == list:
+            self.zsamps = len(self.conf['General']['z_samples'])
+        else:
+            self.zsamps = int(self.conf['General']['z_samples'])
         self.xsamps = int(self.conf['General']['x_samples'])
         self.ysamps = int(self.conf['General']['y_samples'])
         self.X = self.data['xcoords']

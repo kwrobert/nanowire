@@ -1,6 +1,7 @@
 import shutil
 # import psutil
 import os
+import posixpath 
 import sys
 import copy
 from multiprocessing.pool import Pool
@@ -35,6 +36,8 @@ from .utils.utils import (
     get_combos,
     IdFilter,
     get_incident_amplitude,
+    find_inds, 
+    merge_and_sort
 )
 from .utils.config import Config
 from .utils.geometry import Layer, get_layers
@@ -143,6 +146,32 @@ def parse_file(path):
     conf = yaml.load(text, Loader=yaml.Loader)
     return conf
 
+def update_sim(conf, samples, q=None):
+    """
+    Wrapper for updating field arrays for a simulation. Expects the Config
+    for the simulation as an argument.
+    """
+    
+    try:
+        log = logging.getLogger(__name__)
+        start = time.time()
+        conf['General']['z_samples'] = samples
+        sim = Simulator(copy.deepcopy(conf))
+        sim.setup()
+        log.info('Updating arrays for sim %s', sim.id[0:10])
+        sim.update_zsamples()
+    except:
+        trace = traceback.format_exc()
+        msg = 'Sim {} raised the following exception:\n{}'.format(sim.id,
+                                                                  trace)
+        log.error(msg)
+        # We might encounter an exception before the logger instance for this
+        # sim gets created
+        try:
+            sim.log.error(trace)
+        except AttributeError:
+            pass
+        raise
 
 def run_sim(conf, q=None):
     """
@@ -454,11 +483,43 @@ class SimulationManager:
                 sim_conf[self.gconf.variable[i]] = combo
             self.sim_confs.append(sim_conf)
 
-    def execute_jobs(self):
-        """Given a list of configuration dictionaries, run them either serially or in
-        parallel by applying run_sim to each dict. We do this instead of applying
-        to an actual Simulator object because the Simulator objects are not
-        pickeable and thus cannot be parallelized by the multiprocessing lib"""
+    def load_confs(self):
+        """
+        Collect all the simulations beneath the base of the directory tree
+        """
+
+        sims = []
+        failed_sims = []
+        # Find the data files and instantiate Config objects
+        base = os.path.expandvars(self.gconf['General']['base_dir'])
+        self.log.info(base)
+        for root, dirs, files in os.walk(base):
+            conf_path = os.path.join(root, 'sim_conf.yml')
+            if 'sim_conf.yml' in files and 'sim.hdf5' in files:
+                self.log.info('Gather sim at %s', root)
+                conf_obj = Config(conf_path)
+                # sim_obj.conf.expand_vars()
+                sims.append(conf_obj)
+            elif 'sim_conf.yml' in files:
+                conf_obj = Config(conf_path)
+                self.log.error('The following sim is missing its data file: %s',
+                               sim_obj.conf['General']['sim_dir'])
+                failed_sims.append(conf_obj)
+        self.sim_confs = sims
+        self.failed_sims = failed_sims
+        if not sims:
+            self.log.error('Unable to find any successful simulations')
+            raise RuntimeError('Unable to find any successful simulations')
+        return sims, failed_sims
+
+    def execute_jobs(self, *args, func=run_sim, **kwargs):
+        """
+        Given a list of configuration dictionaries, run them either serially or
+        in parallel by applying the provided func (default run_sim) to each
+        dict. We do this instead of applying to an actual Simulator object
+        because the Simulator objects are not pickeable and thus cannot be
+        parallelized by the multiprocessing lib
+        """
 
         if self.gconf['General']['execution'] == 'serial':
             self.log.info('Executing sims serially')
@@ -469,7 +530,7 @@ class SimulationManager:
             # else:
             #     self.make_queue()
             for conf in self.sim_confs:
-                run_sim(conf, q=self.write_queue)
+                func(conf, q=self.write_queue)
             # self.write_queue.put(None, block=True)
             # if self.reader is not None:
             #     self.log.info('Joining FileWriter thread')
@@ -500,8 +561,8 @@ class SimulationManager:
             inds = []
             try:
                 for ind, conf in enumerate(self.sim_confs):
-                    res = pool.apply_async(run_sim, (conf, ),
-                                           {'q':self.write_queue},
+                    res = pool.apply_async(func, (conf, *args),
+                                           {'q':self.write_queue, **kwargs},
                                            callback=callback)
                     results[ind] = res
                     inds.append(ind)
@@ -716,17 +777,20 @@ class SimulationManager:
         self.write_queue.put(None, block=True)
         return opt_val.x
 
-    def run(self):
+    def run(self, *args, load=False, func=run_sim, **kwargs):
         """
-        The main run methods that decides what kind of simulation to run based on the
-        provided config objects
+        The main run methods that decides what kind of simulation to run based
+        on the provided config objects
         """
 
         if not self.gconf.optimized:
             # Get all the sims
-            self.make_confs()
+            if load:
+                self.load_confs()
+            else:
+                self.make_confs()
             self.log.info("Executing job campaign")
-            self.execute_jobs()
+            self.execute_jobs(func=func, *args, **kwargs)
         elif self.gconf.optimized:
             self.run_optimization()
         else:
@@ -839,7 +903,7 @@ class Simulator():
 
     def open_hdf5(self):
         fpath = os.path.join(self.dir, 'sim.hdf5')
-        self.hdf5 = tb.open_file(fpath, 'w')
+        self.hdf5 = tb.open_file(fpath, 'a')
 
     def clean_sim(self):
         try:
@@ -1265,18 +1329,61 @@ class Simulator():
         diff = end - start
         self.log.info("Time to compute fields: %f seconds", diff)
 
-    def update_fields(self):
+    def update_zsamples(self):
         """
-        Update the field arrays stored on disk with new data. This is useful if
-        you have changed the location of the sampling points, but do not want
-        to delete all the old data. This will still preserve the regularity of
-        the gridded data because each x-y plane will have the same sampling
-        scheme, however the spacing between grid points in any direction may be
-        nonuniform
+        Update the field arrays stored on disk with data at new z sampling
+        points. This is useful if you have changed the location of the sampling
+        points, but do not want to delete all the old data, but rather merge
+        the two datasets. This will still preserve the regularity of the
+        gridded data because the x-y sampling remains unchanged, however the
+        gridding may become nonuniform in the z direction
         """
         if self.hdf5 is None:
             self.open_hdf5()
-        
+        pbase = '/sim_{}'.format(self.id[0:10]) 
+        # Make sure we have the field arrays
+        if self.conf["General"]["compute_h"]:
+            fields = ('Ex', 'Ey', 'Ez', 'Hx', 'Hy', 'Hz') 
+        else:
+            fields = ('Ex', 'Ey', 'Ez') 
+        self.get_field()
+        # Merge the old and the new coordinates, removing duplicates and
+        # sorting
+        old_z = self.hdf5.get_node(posixpath.join(pbase, 'zcoords')).read()
+        new_z = merge_and_sort(self.Z, old_z)
+        old_z_inds = find_inds(old_z, new_z)[0]
+        curr_z_inds = find_inds(self.Z, new_z)[0]
+        for field in fields:
+            fpath = posixpath.join(pbase, field)
+            # old_arr = self.hdf5.get_node(fpath)
+            old_arr = self.hdf5.get_node(fpath).read()
+            new_arr = np.zeros((len(new_z), old_arr.shape[1],
+                                old_arr.shape[2]), dtype=np.complex128)
+            curr_arr = self.data[field]
+            # for i, zi in enumerate(old_z_inds):
+            #     new_arr[zi, :, :] = old_arr[i, :, :]
+            new_arr[old_z_inds, :, :] = old_arr[:, :, :]
+            # for i, zi in enumerate(curr_z_inds):
+            #     new_arr[zi, :, :] = curr_arr[i, :, :]
+            new_arr[curr_z_inds, :, :] = curr_arr[:, :, :]
+            self.data[field] = new_arr
+            self.hdf5.remove_node(fpath)
+        self.Z = new_z
+        # Keep xy samples from old array
+        self.conf['General']['x_samples'] = new_arr.shape[1]
+        self.conf['General']['y_samples'] = new_arr.shape[2]
+        self.conf['General']['z_samples'] = len(new_z)
+        # self.data.update({"xcoords": old_x, "ycoords": old_y, "zcoords":
+        #                   new_z})
+        self.data.update({"zcoords": new_z})
+        # Finally, save the new data
+        # for c in ('xcoords', 'ycoords', 'zcoords'):
+        #     self.hdf5.remove_node(posixpath.join(pbase, c))
+        self.hdf5.remove_node(posixpath.join(pbase, 'zcoords'))
+
+        self.save_data()
+        self.save_conf()
+        self.hdf5.close()
 
     def get_fluxes(self):
         """
@@ -1539,6 +1646,7 @@ class Simulator():
                    # {'createparents': True,
                     # 'expectedrows': len(list(self.conf['Layers'].keys()))})
             # self.q.put(tup, block=True)
+            self.hdf5.flush()
         else:
             raise ValueError('Invalid file type specified in config')
 
@@ -1687,7 +1795,6 @@ class Simulator():
         end = time.time()
         self.runtime = end - start
         self.save_time()
-        self.hdf5.flush()
         self.hdf5.close()
         self.log.info('Simulation {} completed in {:.2}'
                       ' seconds!'.format(self.id[0:10], self.runtime))

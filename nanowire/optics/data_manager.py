@@ -1,4 +1,5 @@
 import os
+import posixpath
 import numpy as np
 import tables as tb
 from collections import MutableMapping
@@ -198,10 +199,21 @@ class HDF5DataManager(DataManager):
                     row.append()
                 table.flush()
             elif isinstance(obj, np.ndarray):
+                print(key)
                 self.log.info('Writing data for array %s', key)
                 try:
                     existing_arr = self._dfile.get_node(self.gpath, name=key)
-                    existing_arr[...] = obj
+                    if existing_arr.shape == obj.shape:
+                        existing_arr[...] = obj
+                    else:
+                        self._dfile.remove_node(self.gpath, name=key)
+                        if self.conf['General']['compression']:
+                            filt = tb.Filters(complevel=4, complib='zlib')
+                            self._dfile.create_carray(self.gpath, key, obj=obj,
+                                                      filters=filt,
+                                                      atom=tb.Atom.from_dtype(obj.dtype))
+                        else:
+                            self._dfile.create_array(self.gpath, key, obj)
                 except tb.NoSuchNodeError:
                     if self.conf['General']['compression']:
                         filt = tb.Filters(complevel=4, complib='zlib')

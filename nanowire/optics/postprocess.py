@@ -899,9 +899,12 @@ class Simulation:
         """Plots a heatmap of a fixed 2D plane"""
         self.log.info('Plotting plane')
         pval = int(pval)
-        x = np.arange(0, self.period, self.dx)
-        y = np.arange(0, self.period, self.dy)
-        z = np.arange(0, self.height + self.dz, self.dz)
+        # x = np.arange(0, self.period, self.dx)
+        # y = np.arange(0, self.period, self.dy)
+        # z = np.arange(0, self.height + self.dz, self.dz)
+        x = self.X
+        y = self.Y
+        z = self.Z
         # Get the scalar values
         freq = self.conf['Simulation']['params']['frequency']
         wvlgth = (c.c / freq) * 1E9
@@ -1569,7 +1572,7 @@ class SimulationGroup:
         return wght_ref, wght_trans, wght_abs
 
     def plot_absorption_per_layer(self, input_ax=None, plot_layer=None, quant=None,
-                                  sim_slice=(0, -1)):
+                                  sim_slice=(0, None)):
         """
         Plots absorption per layer and error
         """
@@ -1942,7 +1945,6 @@ class Processor(object):
         specified key"""
 
         self.log.info('Grouping sims against: %s', str(key))
-        print('Calling group against!')
         # We need only need a shallow copy of the list containing all the sim
         # objects We don't want to modify the orig list but we wish to share
         # the sim objects the two lists contain

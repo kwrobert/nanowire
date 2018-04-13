@@ -460,9 +460,9 @@ def find_inds(a, b, unique=False):
     Get the indices where we can find the elements of the array a in the array
     b
     """
-    return np.where(np.isin(a, b, assume_unique=unique))
+    return np.where(np.isin(b, a, assume_unique=unique))
 
-def insort(a, b, kind='mergesort'):
+def merge_and_sort(a, b, kind='mergesort'):
     """
     Merge arrays a and b, sort them, and return the unique elements
     """

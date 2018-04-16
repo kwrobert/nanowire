@@ -857,6 +857,7 @@ class Simulator():
         self.configure()
         self.build_device()
         self.set_excitation()
+        self.get_layers()
 
     def get_layers(self):
         self.layers = get_layers(self)
@@ -1148,30 +1149,33 @@ class Simulator():
             self.s4.SetLayerThickness(Layer=layer, Thickness=thickness)
 
     # @do_profile(out='$nano/tests/profile_writing/line_profiler.txt', follow=[])
-    def compute_fields(self):
+    def compute_fields(self, zvals=None):
         """
         Constructs and returns a full 3D numpy array for each vector component
         of the electric field (return order Ex, Ey, Ez) according to the real
         space sampling points specified in the config file.
         """
 
+        if zvals is None:
+            zvals = self.Z
+
         self.log.debug('Computing fields ...')
-        Ex = np.zeros((self.zsamps, self.xsamps, self.ysamps),
+        Ex = np.zeros((len(zvals), self.xsamps, self.ysamps),
                       dtype=np.complex128)
-        Ey = np.zeros((self.zsamps, self.xsamps, self.ysamps),
+        Ey = np.zeros((len(zvals), self.xsamps, self.ysamps),
                       dtype=np.complex128)
-        Ez = np.zeros((self.zsamps, self.xsamps, self.ysamps),
+        Ez = np.zeros((len(zvals), self.xsamps, self.ysamps),
                       dtype=np.complex128)
         if self.conf["General"]["compute_h"]:
-            Hx = np.zeros((self.zsamps, self.xsamps, self.ysamps),
+            Hx = np.zeros((len(zvals), self.xsamps, self.ysamps),
                           dtype=np.complex128)
-            Hy = np.zeros((self.zsamps, self.xsamps, self.ysamps),
+            Hy = np.zeros((len(zvals), self.xsamps, self.ysamps),
                           dtype=np.complex128)
-            Hz = np.zeros((self.zsamps, self.xsamps, self.ysamps),
+            Hz = np.zeros((len(zvals), self.xsamps, self.ysamps),
                           dtype=np.complex128)
         else:
             Hx, Hy, Hz = None, None, None
-        for zcount, z in enumerate(self.Z):
+        for zcount, z in enumerate(zvals):
             if self.conf["General"]["compute_h"]:
                 E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(self.xsamps-1,
                                                                 self.ysamps-1),
@@ -1258,6 +1262,32 @@ class Simulator():
             E = self.s4.GetFields(x, y, z)[0]
             H = (None, None, None)
         return E[0], E[1], E[2], H[0], H[1], H[2]
+
+    def compute_fields_by_layer(self, sample_dict):
+        """
+        Compute fields within each layer such that a z sample falls exactly on
+        the start and end of a layer. The purpose of this it to reduce
+        integration errors
+
+        :param sample_dict: A dictionary whose keys are strings of layer names
+        and whose values are integers indicating the number of z sampling
+        points to use in that layer
+        :type sample_dict: dict[str] int
+        :return: A dictionary whose keys are layers names, and whose values are
+        dictionaries containing all the field components
+        :rtype: dict[str] dict
+        """
+
+        results = {}
+        for lname, layer in self.layers.items():
+            z_vals = np.linspace(layer.start, layer.end, sample_dict[lname])
+            Ex, Ey, Ez, Hx, Hy, Hz = self.compute_fields(zvals=z_vals)
+            results[lname] = {'Ex':Ex, 'Ey':Ey, 'Ez':Ez, 'Hx':Hx, 'Hy':Hy,
+                              'Hz':Hz}
+            self.data.update({'{}_{}'.format(lname, fname): arr for fname, arr in
+                             (('Ex',Ex), ('Ey',Ey), ('Ez',Ez), ('Hx',Hx), ('Hy',Hy),
+                              ('Hz',Hz))})
+        return results
 
     def compute_fields_on_plane(self, z, xsamples, ysamples):
         """
@@ -1479,13 +1509,13 @@ class Simulator():
         # print(fname)
         if os.path.isfile(fname):
             self.log.info("Loading from: %s"%fname)
-            # print("Loading from: %s"%fname)
+            print("Loading from: %s"%fname)
             self.s4.LoadSolution(Filename=fname)
             self.log.info("Solution loaded!")
             # print("Solution loaded!")
         else:
             self.log.warning("Solution file does not exist. Cannot load")
-            # print("Solution file does not exist. Cannot load")
+            print("Solution file does not exist. Cannot load")
 
     def save_state(self):
         """
@@ -1788,6 +1818,7 @@ class Simulator():
             print("State file exists: %s"%state_file)
             self.load_state()
         self.get_field()
+        self.compute_fields_by_layer(self.conf['General']['sample_dict'])
         self.get_fluxes()
         self.get_fourier_coefficients()
         if self.conf['General']['dielectric_profile']:

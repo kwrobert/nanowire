@@ -79,67 +79,38 @@ def get_layers(sim):
         # Things are discretized, so start needs to be a location that we
         # have a grid point on, and not the continuous starting point of
         # the real physical layer
-        start_ind = np.searchsorted(sim.Z, start)
-        quantized_start = sim.Z[start_ind]
-        end_ind = np.searchsorted(sim.Z, end)
-        quantized_end = sim.Z[end_ind]
         if 'geometry' in ldata:
             g = ldata['geometry']
         else:
             g = {}
-        layers[layer] = Layer(layer, start, end,
-                              start_ind, end_ind, sim.period,
-                              sim.xsamps, sim.ysamps, sim.dz,
+        layers[layer] = Layer(layer, start, end, sim.period,
                               base_material=ldata['base_material'],
-                              materials=materials,
-                              geometry=g)
+                              materials=materials, geometry=g)
         start = end
     return layers
 
+
 class Layer:
 
-    def __init__(self, name, start, end, istart, iend, period, xsamples,
-                 ysamples, dz, base_material=None, materials={}, geometry={}):
+    def __init__(self, name, start, end, period, base_material=None,
+                 materials={}, geometry={}):
         self.name = name
         self.start = start
         self.end = end
         self.thickness = end - start
         self.period = period
-        self.istart = istart
-        self.iend = iend
-        self.slice = (slice(self.istart, self.iend), ...)
         self.base_material = base_material
         self.materials = {}
         if base_material == 'vacuum':
             self.materials[base_material] = None
         else:
             self.materials[base_material] = materials[base_material]
-        self.x_samples = xsamples
-        self.y_samples = ysamples
-        self.dx = period/xsamples
-        self.dy = period/ysamples
-        self.dz = dz
         if geometry:
-            self.collect_shapes(geometry, materials)
+            self._collect_shapes(geometry, materials)
         else:
             self.shapes = {}
-
-    def get_nk_dict(self, freq):
-        """
-        Build dictionary where keys are material names and values is a tuple
-        containing (n, k) at a given frequency
-        """
-        nk = {mat: (get_nk(matpath, freq)) for mat, matpath in
-              self.materials.items()}
-        return nk
-
-    def is_in_layer(self, z):
-        """
-        Determine if a given z coordinate lies within this layer
-        """
-        return self.start < z < self.end
-
-    def collect_shapes(self, d, materials):
+            
+    def _collect_shapes(self, d, materials):
         """
         Collect and instantiate the dictionary stored in the shapes attribute
         given a dictionary describing the shapes in the layer
@@ -162,6 +133,34 @@ class Layer:
             shapes[name] = (shape_obj, material)
         self.shapes = shapes
         return shapes
+
+    def get_slice(self, zcoords):
+        """
+        Given a set of z coordinates, get a length 3 tuple can be used to
+        retrieve the chunk of a 3D array that falls within this layer. This
+        assumes the z direction is along the zeroth axis (i.e arr[z, x, y]). 
+        So, one can slice out the chunk of the 3D array with
+        arr[layer.get_slice()]
+        """
+
+        start_ind = np.searchsorted(zcoords, self.start)
+        end_ind = np.searchsorted(zcoords, self.end)
+        return (slice(start_ind, end_ind), ...)
+
+    def get_nk_dict(self, freq):
+        """
+        Build dictionary where keys are material names and values is a tuple
+        containing (n, k) at a given frequency
+        """
+        nk = {mat: (get_nk(matpath, freq)) for mat, matpath in
+              self.materials.items()}
+        return nk
+
+    def is_in_layer(self, z):
+        """
+        Determine if a given z coordinate lies within this layer
+        """
+        return self.start < z < self.end
 
     def get_nk_at_point(self, x, y, freq):
         """
@@ -190,7 +189,7 @@ class Layer:
         print("Enclosing material: {}".format(material_name))
         return nk[material_name]
 
-    def get_nk_matrix(self, freq, xcoords=None, ycoords=None):
+    def get_nk_matrix(self, freq, xcoords, ycoords):
         """
         Returns two 2D matrices containing the real component n and the
         imaginary component k of the index of refraction at a given frequency
@@ -201,10 +200,6 @@ class Layer:
         # Get the nk values for all the materials in the layer
         nk = self.get_nk_dict(freq)
         # Create the matrix and fill it with the values for the base material
-        if xcoords is None: 
-            xcoords = np.linspace(0, self.period, self.x_samples)
-        if ycoords is None:
-            ycoords = np.linspace(0, self.period, self.y_samples)
         n_matrix = np.ones((len(xcoords),
                             len(ycoords)))*nk[self.base_material][0]
         k_matrix = np.ones((len(xcoords),

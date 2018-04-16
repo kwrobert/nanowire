@@ -341,13 +341,13 @@ class Simulation:
         for name, layer in self.layers.items():
             self.log.debug('LAYER: %s', name)
             self.log.debug('LAYER T: %f', layer.thickness)
-            self.log.debug('START: %i', layer.istart)
-            self.log.debug('END: %i', layer.iend)
+            self.log.debug('START: %f', layer.start)
+            self.log.debug('END: %f', layer.end)
             # Use the layer object to get the nk matrix with correct material
             # geometry
-            nmat, kmat = layer.get_nk_matrix(freq)
-            gvec[layer.slice] = fact * nmat * kmat * normEsq[layer.slice]
-            # gvec[layer.slice] = nmat * kmat * normEsq[layer.slice]
+            nmat, kmat = layer.get_nk_matrix(freq, self.X, self.Y)
+            gvec[layer.get_slice(self.Z)] = fact * nmat * kmat * normEsq[layer.get_slice(self.Z)]
+            # gvec[layer.get_slice()] = nmat * kmat * normEsq[layer.get_slice(self.Z)]
         self.extend_data('genRate', gvec)
         return gvec
 
@@ -450,12 +450,12 @@ class Simulation:
 
     def integrate_layer(self, lname, layer):
         freq = self.conf[('Simulation', 'params', 'frequency')]
-        n_mat, k_mat = layer.get_nk_matrix(freq)
+        n_mat, k_mat = layer.get_nk_matrix(freq, self.X, self.Y)
         try:
             Esq = self.data['normEsquared']
         except KeyError:
             Esq = self.normEsquared()
-        nkEsq = n_mat*k_mat*Esq[layer.slice]
+        nkEsq = n_mat*k_mat*Esq[layer.get_slice(self.Z)]
         results = {}
         for mat in layer.materials.keys(): 
             mask = get_mask_by_material(layer, mat, self.X, self.Y) 
@@ -469,18 +469,19 @@ class Simulation:
             # plt.title("nkEsq Layer: {}, Material: {}".format(lname, mat))
             # plt.colorbar()
             # plt.show()
-            points = (self.Z[layer.slice], self.X, self.Y)
+            points = (self.Z[layer.get_slice(self.Z)], self.X, self.Y)
             rgi = interpolate.RegularGridInterpolator(points, values, 
                                                       method='linear',
                                                       bounds_error=True)
-            z = self.Z[layer.slice]
+            z = self.Z[layer.get_slice(self.Z)]
             # x = self.X
             # y = self.Y
-            print('z[0]', self.Z[layer.slice][0])
-            print('z[-1]', self.Z[layer.slice][-1])
+            print('z[0]', self.Z[layer.get_slice(self.Z)][0])
+            print('z[-1]', self.Z[layer.get_slice(self.Z)][-1])
             print("Layer Start:", layer.start)
             print("Layer End:", layer.end)
-            z = np.linspace(self.Z[layer.slice][0], self.Z[layer.slice][-1], len(z)*2) 
+            z = np.linspace(self.Z[layer.get_slice(self.Z)][0],
+                            self.Z[layer.get_slice(self.Z)][-1], len(z)*2) 
             x = np.linspace(self.X[0], self.X[-1], len(self.X)*2)
             y = np.linspace(self.Y[0], self.Y[-1], len(self.Y)*2)
             pts = cartesian_product((z, x, y))
@@ -566,8 +567,14 @@ class Simulation:
             # Method 2: Go through integral of field intensity
             # if layer_name == 'Air':
             #     continue
-            # n_mat, k_mat = layer_obj.get_nk_matrix(freq)
-
+            n_mat, k_mat = layer_obj.get_nk_matrix(freq, self.X, self.Y)
+            keys = ['{}_{}'.format(layer_name, f) for f in ("Ex", "Ey", "Ez")]
+            fields = {k[-2:]:self.data[k] for k in keys}
+            Esq = np.abs(fields['Ex'])**2 + np.abs(fields['Ey'])**2 + np.abs(fields['Ez'])**2
+            z = np.linspace(layer_obj.start, layer_obj.end, Esq.shape[0])
+            y_integral = integrate3d(n_mat*k_mat*Esq, self.X, self.Y, z,
+                                     meth=intg.simps)
+            # abs_dict[lname] = result
             # nkEsq = n_mat*k_mat*Esq
             # y_integral = 0
             # for material in layer_obj.materials:
@@ -578,12 +585,12 @@ class Simulation:
 
             # n and k could be functions of space, so we need to multiply the
             # fields by n and k before integrating
-            # arr_slice = Esq[layer_obj.slice]*n_mat*k_mat
-            # z_vals = self.Z[layer_obj.slice]
+            # arr_slice = Esq[layer_obj.get_slice(self.Z)]*n_mat*k_mat
+            # z_vals = self.Z[layer_obj.get_slice(self.Z)]
             # z_integral = intg.trapz(arr_slice, x=z_vals, axis=0)
             # x_integral = intg.trapz(z_integral, x=self.X, axis=0)
             # y_integral = intg.trapz(x_integral, x=self.Y, axis=0)
-            y_integral = self.integrate_layer(layer_name, layer_obj)
+            # y_integral = self.integrate_layer(layer_name, layer_obj)
 
             # print('Arr slice shape: {}'.format(arr_slice.shape))
             # x_integral = intg.trapz(arr_slice, x=self.X, axis=1)
@@ -710,10 +717,10 @@ class Simulation:
             qarr = q
         if layer is not None:
             l = self.layers[layer]
-            z_vals = self.Z[l.slice]
-            qarr = qarr[l.slice]
+            z_vals = self.Z[l.get_slice(self.Z)]
+            qarr = qarr[l.get_slice(self.Z)]
             if mask is not None and len(mask.shape) == 3:
-                mask = mask[l.slice]
+                mask = mask[l.get_slice(self.Z)]
         else:
             z_vals = self.Z
         if mask is not None:
@@ -1829,6 +1836,28 @@ class SimulationGroup:
         plt.ylim((0, 1.0))
         plt.savefig(figp)
         plt.close()
+
+
+def integrate1d(arr, xvals, meth=intg.trapz):
+    x_integral = meth(arr, x=xvals, axis=0)
+    return x_integral
+
+
+def integrate2d(arr, xvals, yvals, meth=intg.trapz):
+    x_integral = meth(arr, x=xvals, axis=0)
+    y_integral = meth(x_integral, x=yvals, axis=0)
+    return y_integral
+
+
+def integrate3d(arr, xvals, yvals, zvals, meth=intg.trapz):
+    ##print("Layer: {}".format(layer_obj.name))
+    ##print("Layer Start Ind: {}".format(layer_obj.istart))
+    ##print("Layer End Ind: {}".format(layer_obj.iend))
+    ##print(z_vals)
+    z_integral = meth(arr, x=zvals, axis=0)
+    x_integral = meth(z_integral, x=xvals, axis=0)
+    y_integral = meth(x_integral, x=yvals, axis=0)
+    return y_integral
 
 
 def counted(fn):

@@ -29,7 +29,8 @@ from .utils.utils import (
     make_hash,
     get_nk,
     get_incident_power,
-    get_incident_amplitude
+    get_incident_amplitude,
+    cartesian_product
 )
 from .data_manager import HDF5DataManager, NPZDataManager
 from .utils.geometry import (
@@ -447,6 +448,56 @@ class Simulation:
         self.data[key] = avgs
         return avgs
 
+    def integrate_layer(self, lname, layer):
+        freq = self.conf[('Simulation', 'params', 'frequency')]
+        n_mat, k_mat = layer.get_nk_matrix(freq)
+        try:
+            Esq = self.data['normEsquared']
+        except KeyError:
+            Esq = self.normEsquared()
+        nkEsq = n_mat*k_mat*Esq[layer.slice]
+        results = {}
+        for mat in layer.materials.keys(): 
+            mask = get_mask_by_material(layer, mat, self.X, self.Y) 
+            # mask = np.where(mask, 1, np.nan)
+            # plt.matshow(mask)
+            # plt.colorbar()
+            # plt.title("Mask Layer: {}, Material: {}".format(lname, material))
+            # plt.show()
+            values = nkEsq*mask 
+            # plt.matshow(values[0, :, :])
+            # plt.title("nkEsq Layer: {}, Material: {}".format(lname, mat))
+            # plt.colorbar()
+            # plt.show()
+            points = (self.Z[layer.slice], self.X, self.Y)
+            rgi = interpolate.RegularGridInterpolator(points, values, 
+                                                      method='linear',
+                                                      bounds_error=True)
+            z = self.Z[layer.slice]
+            # x = self.X
+            # y = self.Y
+            print('z[0]', self.Z[layer.slice][0])
+            print('z[-1]', self.Z[layer.slice][-1])
+            print("Layer Start:", layer.start)
+            print("Layer End:", layer.end)
+            z = np.linspace(self.Z[layer.slice][0], self.Z[layer.slice][-1], len(z)*2) 
+            x = np.linspace(self.X[0], self.X[-1], len(self.X)*2)
+            y = np.linspace(self.Y[0], self.Y[-1], len(self.Y)*2)
+            pts = cartesian_product((z, x, y))
+            vals = rgi(pts).reshape((len(z), len(x), len(y)))
+            print(vals.shape)
+            # plt.matshow(vals[0, :, :])
+            # plt.title("nkEsq interp Layer: {}, Material: {}".format(lname, mat))
+            # plt.colorbar()
+            # plt.show()
+            z_integral = intg.trapz(vals, x=z, axis=0)
+            x_integral = intg.trapz(z_integral, x=x, axis=0)
+            y_integral = intg.trapz(x_integral, x=y, axis=0)
+            results[mat] = y_integral
+        print(results)
+        result = sum(results.values())
+        return result
+
     def absorption_per_layer(self, per_area=True):
         """
         Computes the absorption in each layer of the device using two methods.
@@ -482,10 +533,10 @@ class Simulation:
         fluxes = self.data['fluxes']
         base_unit = self.conf['Simulation']['base_unit']
         Zo = consts.physical_constants['characteristic impedance of vacuum'][0]
-        try:
-            Esq = self.data['normEsquared']
-        except KeyError:
-            Esq = self.normEsquared()
+        # try:
+        #     Esq = self.data['normEsquared']
+        # except KeyError:
+        #     Esq = self.normEsquared()
         freq = self.conf[('Simulation', 'params', 'frequency')]
         dt = [('layer', 'S25'), ('flux_method', 'c16'), ('int_method', 'c16'),
               ('difference', 'f8')]
@@ -515,7 +566,7 @@ class Simulation:
             # Method 2: Go through integral of field intensity
             # if layer_name == 'Air':
             #     continue
-            n_mat, k_mat = layer_obj.get_nk_matrix(freq)
+            # n_mat, k_mat = layer_obj.get_nk_matrix(freq)
 
             # nkEsq = n_mat*k_mat*Esq
             # y_integral = 0
@@ -527,11 +578,12 @@ class Simulation:
 
             # n and k could be functions of space, so we need to multiply the
             # fields by n and k before integrating
-            arr_slice = Esq[layer_obj.slice]*n_mat*k_mat
-            z_vals = self.Z[layer_obj.slice]
-            z_integral = intg.trapz(arr_slice, x=z_vals, axis=0)
-            x_integral = intg.trapz(z_integral, x=self.X, axis=0)
-            y_integral = intg.trapz(x_integral, x=self.Y, axis=0)
+            # arr_slice = Esq[layer_obj.slice]*n_mat*k_mat
+            # z_vals = self.Z[layer_obj.slice]
+            # z_integral = intg.trapz(arr_slice, x=z_vals, axis=0)
+            # x_integral = intg.trapz(z_integral, x=self.X, axis=0)
+            # y_integral = intg.trapz(x_integral, x=self.Y, axis=0)
+            y_integral = self.integrate_layer(layer_name, layer_obj)
 
             # print('Arr slice shape: {}'.format(arr_slice.shape))
             # x_integral = intg.trapz(arr_slice, x=self.X, axis=1)

@@ -6,7 +6,7 @@ import logging
 import itertools
 import tempfile as tmp
 import numpy as np
-
+from itertools import accumulate, repeat, chain, product
 from collections import Iterable, OrderedDict
 from contextlib import contextmanager
 from scipy import interpolate
@@ -228,7 +228,7 @@ def get_combos(conf, keysets):
     # Consuming a list of lists/tuples where each inner list/tuple contains all
     # the values for a particular parameter, returns a list of tuples
     # containing all the unique combos for that set of parameters
-    combos = list(itertools.product(*valuelist))
+    combos = list(product(*valuelist))
     # log.debug('The list of parameter combos: %s', str(combos))
     # Gotta map to float cuz yaml writer doesn't like numpy data types
     return keys, combos
@@ -455,12 +455,14 @@ def cmp_dicts(d1, d2):
                 return False
     return all(comps)
 
+
 def find_inds(a, b, unique=False):
     """
     Get the indices where we can find the elements of the array a in the array
     b
     """
     return np.where(np.isin(b, a, assume_unique=unique))
+
 
 def merge_and_sort(a, b, kind='mergesort'):
     """
@@ -471,3 +473,17 @@ def merge_and_sort(a, b, kind='mergesort'):
     flag = np.ones(len(c), dtype=bool)
     np.not_equal(c[1:], c[:-1], out=flag[1:])
     return c[flag]
+
+
+def cartesian_product(arrays, out=None):
+    la = len(arrays)
+    L = *map(len, arrays), la
+    dtype = np.result_type(*arrays)
+    arr = np.empty(L, dtype=dtype)
+    arrs = *accumulate(chain((arr,), repeat(0, la-1)), np.ndarray.__getitem__),
+    idx = slice(None), *repeat(None, la-1)
+    for i in range(la-1, 0, -1):
+        arrs[i][..., i] = arrays[i][idx[:la-i]]
+        arrs[i-1][1:] = arrs[i]
+    arr[..., 0] = arrays[0][idx]
+    return arr.reshape(-1, la)

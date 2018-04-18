@@ -1,6 +1,13 @@
 nanowire package
 ================
 
+Subpackages
+-----------
+
+.. toctree::
+
+    nanowire.optics
+
 Module contents
 ---------------
 

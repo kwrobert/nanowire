@@ -24,11 +24,22 @@ def run_optics():
                              "only upate the sampling in z because there is "
                              "no way to update in x-y without destroying the "
                              "regularity of the grid")
+    parser.add_argument('--filter_by', nargs='*',
+                        help="""Only run simulations whose parameter match the 
+                                list of parameters you wish to filter by,
+                                specified like: p1:v1,v2,v3 p2:v1,v2,v3""")
     args = parser.parse_args()
 
     if not os.path.isfile(args.config_file):
         print("\n The file you specified does not exist! \n")
         quit()
+
+    filt_dict = {}
+    if args.filter_by:
+        for item in args.filter_by:
+            par, vals = item.split(':')
+            vals = vals.split(',')
+            filt_dict[par] = vals
 
     if args.single:
         conf = Config(path=args.config_file)
@@ -37,10 +48,10 @@ def run_optics():
         manager = SimulationManager(args.config_file, log_level=args.log_level)
         samps = [manager.gconf['General']['{}_samples'.format(s)] for s in
                  ('x', 'y', 'z')] 
-        manager.run(func=update_sim, load=True)
+        manager.run(filter_dict=filt_dict, func=update_sim, load=True)
     else:
         manager = SimulationManager(args.config_file, log_level=args.log_level)
-        manager.run()
+        manager.run(filter_dict=filt_dict)
 
 
 if __name__ == '__main__':

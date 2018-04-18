@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cmx
 import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
-import scipy.constants as c
+import scipy.constants as consts
 import scipy.integrate as intg
 import numpy as np
 np.set_printoptions(precision=3, threshold=100000)
@@ -109,7 +109,7 @@ class Simulation:
             self.conf = conf
         else:
             self.conf = copy.deepcopy(simulator.conf)
-        self.id = make_hash(self.conf.data)
+        self.id = self.conf['General']['sim_dir'][-10:]
         self.dir = os.path.expandvars(self.conf['General']['sim_dir'])
         self.fhandler = logging.FileHandler(os.path.join(self.dir, 'postprocess.log'))
         self.fhandler.addFilter(IdFilter(ID=self.id))
@@ -334,7 +334,7 @@ class Simulation:
         normEsq = self.get_scalar_quantity('normEsquared')
         # Prefactor for generation rate. Note we gotta convert from m^3 to
         # cm^3, hence 1e6 factor
-        fact = c.epsilon_0 / (c.hbar * 1e6)
+        fact = consts.epsilon_0 / (consts.hbar * 1e6)
         gvec = np.zeros_like(normEsq)
         # Main loop to compute generation in each layer
         freq = self.conf[('Simulation', 'params', 'frequency')]
@@ -605,8 +605,8 @@ class Simulation:
             # Factor of 1/2 for time averaging gets canceled by imaginary part
             # of dielectric constant (2*n*k)
             self.log.info("Pabs Pure Integral Result: {}".format(y_integral))
-            Pabs_integ = 2*np.pi*freq*c.epsilon_0*base_unit*y_integral
-            # Pabs_integ = 2*np.pi*freq*c.epsilon_0*base_unit*z_integral
+            Pabs_integ = 2*np.pi*freq*consts.epsilon_0*base_unit*y_integral
+            # Pabs_integ = 2*np.pi*freq*consts.epsilon_0*base_unit*z_integral
             if per_area:
                 Pabs_integ /= self.period**2
             self.log.info("Integrated Absorbed: {}".format(Pabs_integ))
@@ -732,7 +732,7 @@ class Simulation:
 
     def jsc_contrib(self, port='Substrate_bottom'):
         self.log.info('Computing Jsc contrib')
-        wv_fact = c.e / (c.c * c.h * 10)
+        wv_fact = consts.e / (consts.c * consts.h * 10)
         # Unpack data for the port we passed in as an argument
         try:
             arr = self.data['transmission_data']
@@ -740,7 +740,7 @@ class Simulation:
         except KeyError:
             ref, trans, absorb = self.transmissionData(port=port)
         freq = self.conf['Simulation']['params']['frequency']
-        wvlgth = c.c / freq
+        wvlgth = consts.c / freq
         wvlgth_nm = wvlgth * 1e9
         # Get solar power from chosen spectrum
         sun_pow = get_incident_amplitude(self)
@@ -773,7 +773,7 @@ class Simulation:
         sun_pow = get_incident_amplitude(self)
         self.log.info('Sun power = %f', sun_pow)
         self.log.info('Integral = %f', y_integral)
-        Jsc = 1000*(c.e/(self.period*1e-4)**2)*y_integral
+        Jsc = 1000*(consts.e/(self.period*1e-4)**2)*y_integral
         outf = os.path.join(self.dir, 'jsc_integrated_contrib.dat')
         with open(outf, 'w') as out:
             out.write('%f\n' % Jsc)
@@ -795,7 +795,7 @@ class Simulation:
         freq = self.conf['Simulation']['params']['frequency']
         # TODO: Assuming incident amplitude and therefore incident power is
         # just 1 for now
-        fact = -.5 * freq * c.epsilon_0
+        fact = -.5 * freq * consts.epsilon_0
         with open(inpath, 'r') as inf:
             lines = inf.readlines()
             # Remove header line
@@ -969,7 +969,7 @@ class Simulation:
         z = self.Z
         # Get the scalar values
         freq = self.conf['Simulation']['params']['frequency']
-        wvlgth = (c.c / freq) * 1E9
+        wvlgth = (consts.c / freq) * 1E9
         title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(
             freq, wvlgth)
         # Get the plane we wish to plot
@@ -1124,7 +1124,7 @@ class Simulation:
             # x along rows, y along columns
             pos_data = self.Z
         freq = self.conf['Simulation']['params']['frequency']
-        wvlgth = (c.c / freq) * 1E9
+        wvlgth = (consts.c / freq) * 1E9
         title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(
             freq, wvlgth)
         ptype = "%s_line_plot_%i_%i" % (direction, coord1, coord2)
@@ -1433,7 +1433,7 @@ class SimulationGroup:
             # Unpack data for the port we passed in as an argument
             ref, trans, absorb = sim.data['transmission_data'][port]
             freq = sim.conf['Simulation']['params']['frequency']
-            wvlgth = c.c / freq
+            wvlgth = consts.c / freq
             wvlgth_nm = wvlgth * 1e9
             freqs[i] = freq
             wvlgths[i] = wvlgth
@@ -1452,7 +1452,7 @@ class SimulationGroup:
         integrated_absorbtion = intg.trapz(vals, x=wvlgths * 1e9)
         power = intg.trapz(spectra, x=wvlgths * 1e9)
         # factor of 1/10 to convert A*m^-2 to mA*cm^-2
-        #wv_fact = c.e/(c.c*c.h*10)
+        #wv_fact = consts.e/(consts.c*consts.h*10)
         #wv_fact = .1
         #Jsc = (Jsc*wv_fact)/power
         frac_absorb = integrated_absorbtion / power
@@ -1511,7 +1511,7 @@ class SimulationGroup:
         for i, sim in enumerate(self.sims):
             freq = sim.conf['Simulation']['params']['frequency']
             freqs[i] = freq
-            E_photon = c.h * freq
+            E_photon = consts.h * freq
             if method == 'flux':
                 arr = sim.data['transmission_data']
                 _, ref, trans, absorb = arr[arr.port == port.encode('utf-8')][0]
@@ -1526,7 +1526,7 @@ class SimulationGroup:
                 jph_vals[i] = absorbed_power / (E_photon*period**2)
             sim.clear_data()
         # factor of 1/10 to convert A*m^-2 to mA*cm^-2
-        Jph = .1 * c.e * np.sum(jph_vals)
+        Jph = .1 * consts.e * np.sum(jph_vals)
         outf = os.path.join(base, 'jph_{}.dat'.format(method))
         with open(outf, 'w') as out:
             out.write('%f\n' % Jph)
@@ -1550,7 +1550,7 @@ class SimulationGroup:
             # x_integral = intg.simps(z_integral, x=x_vals, axis=0)
             # y_integral = intg.simps(x_integral, x=y_vals, axis=0)
             # Convert period to cm and current to mA
-            Jsc = 1000*(c.e/(sim.period*1e-4)**2)*y_integral
+            Jsc = 1000*(consts.e/(sim.period*1e-4)**2)*y_integral
             self.log.info('Sim %s Jsc Integrate Value: %f', sim.id, Jsc)
 
 
@@ -1579,7 +1579,7 @@ class SimulationGroup:
         # x_integral = intg.simps(z_integral, x=x_vals, axis=0)
         # y_integral = intg.simps(x_integral, x=y_vals, axis=0)
         # Convert period to cm and current to mA
-        Jsc = 1000*(c.e/(self.sims[0].period*1e-4)**2)*y_integral
+        Jsc = 1000*(consts.e/(self.sims[0].period*1e-4)**2)*y_integral
         outf = os.path.join(base, 'jsc_integrated.dat')
         with open(outf, 'w') as out:
             out.write('%f\n' % Jsc)
@@ -1607,7 +1607,7 @@ class SimulationGroup:
         for i, sim in enumerate(self.sims):
             ref, trans, absorb = sim.data['transmission_data'][port]
             freq = sim.conf['Simulation']['params']['frequency']
-            wvlgth = c.c / freq
+            wvlgth = consts.c / freq
             wvlgth_nm = wvlgth * 1e9
             freqs[i] = freq
             wvlgths[i] = wvlgth
@@ -1695,6 +1695,7 @@ class SimulationGroup:
                 ax.set_ylabel(name)
                 ax.set_xlabel("Frequency (Hz)")
                 ax.set_title(layer)
+                print("Saving to {}".format(pfile))
                 plt.savefig(pfile)
         return ax
 
@@ -1818,7 +1819,7 @@ class SimulationGroup:
             trans_l[i] = trans
             refl_l[i] = ref
             absorb_l[i] = absorb
-        freqs = (c.c / freqs[::-1]) * 1e9
+        freqs = (consts.c / freqs[::-1]) * 1e9
         refl_l = refl_l[::-1]
         absorb_l = absorb_l[::-1]
         trans_l = trans_l[::-1]
@@ -1868,30 +1869,6 @@ def counted(fn):
     wrapper.__name__ = fn.__name__
     return wrapper
 
-def _crunch_local(sim, gconf):
-    sim = Simulation(Config(sim))
-    _process(sim, "Cruncher", gconf)
-    sim.write_data()
-    sim.clear_data()
-
-def _plot_local(sim, gconf):
-    sim = Simulation(Config(sim))
-    _process(sim, "Plotter", gconf)
-    sim.clear_data()
-
-def _crunch_global(sim_group, gconf):
-    sims = [Simulation(Config(path)) for path in sim_group]
-    sim_group = SimulationGroup(sims)
-    _process(sim_group, "Global_Cruncher", gconf)
-    for sim in sim_group.sims:
-        sim.clear_data()
-
-def _plot_global(sim_group, gconf):
-    sims = [Simulation(Config(path)) for path in sim_group]
-    sim_group = SimulationGroup(sims)
-    _process(sim_group, "Global_Plotter", gconf)
-    for sim in sim_group.sims:
-        sim.clear_data()
 
 def _call_func(quantity, obj, args):
     """
@@ -1902,35 +1879,79 @@ def _call_func(quantity, obj, args):
     try:
         result = getattr(obj, quantity)(*args)
     except AttributeError:
-        log.error("Unable to call the following function: %s", quantity)
+        log.error("Object %s has no method: %s", str(obj), quantity)
+        raise
+    except:
+        log.error("Error while calling method %s of object %s", quantity,
+                  str(obj))
         raise
     return result
 
-def _process(obj, process, gconf):
+
+def execute_plan(conf, plan):
     """
-    Calls a process on an object. The object could be a Simulation object,
-    or a SimulationGroup object. It just loops through the functions
-    defined in the process subsection of the Postprocessing section in the
-    config file, and uses call_func to call the object's method with the
-    names defined in the config.
+    Executes the given plan for the given Config object or list/tuple of Config 
+    objects. If conf is a single Config object, a Simulation object will
+    created and the provided plan will be executed for it. If a list or tuple
+    of Config objects is given, a SimulationGroup object will be created and
+    the provided plan will be executed for it. 
+    
+    `plan` must be a dictionary with the following structure::
+
+        {'crunch':
+            'funcA':
+                compute: True
+                args: [['list', 'of', 'args'], ['another', 'set']]
+            'funcB':
+                compute: False
+                args: [['this function is skipped']]
+         'plot': 'same structure as crunch'
+        }
+
+    For each of the keys under the `crunch` and `plot` sections, a method of
+    the created Simulation/SimulationGroup object with the same name will be
+    called for each set of provided arguments. No attempts are made to validate
+    the given plan before raising exceptions
     """
 
-    to_compute = {quant: data for quant, data in
-                  gconf['Postprocessing'][process].items() if
-                  data['compute']}
-    for quant, data in to_compute.items():
-        argsets = data['args']
-        if argsets and isinstance(argsets[0], list):
-            for argset in argsets:
-                if argset:
-                    _call_func(quant, obj, argset)
-                else:
-                    _call_func(quant, obj, [])
-        else:
-            if argsets:
-                _call_func(quant, obj, argsets)
+    log = logging.getLogger(__name__)
+    if isinstance(conf, list) or isinstance(conf, tuple):
+        log.info("Executing SimulationGroup plan")
+        obj = SimulationGroup([Simulation(c) for c in conf])
+        ID = str(obj)
+    else:
+        log.info("Executing Simulation plan")
+        obj = Simulation(conf=conf)
+        ID = obj.id[0:10]
+    
+    for task_name, task in plan.items():
+        log.info("Beginning %s for obj %s", task_name, ID)
+        for func, data in task.items():
+            if not data['compute']:
+                continue
             else:
-                _call_func(quant, obj, [])
+                argsets = data['args']
+            if argsets and isinstance(argsets[0], list):
+                for argset in argsets:
+                    if argset:
+                        _call_func(func, obj, argset)
+                    else:
+                        _call_func(func, obj, [])
+            else:
+                if argsets:
+                    _call_func(func, obj, argsets)
+                else:
+                    _call_func(func, obj, [])
+        log.info("Completed %s for obj %s", task_name, ID)
+    log.info("Plan execution for obj %s complete", ID)
+    if isinstance(obj, Simulation):
+        log.info("Saving and clearing data for Simulation %s", ID)
+        obj.write_data()
+        obj.clear_data()
+    else:
+        log.info("Clearing data for SimulationGroup %s", ID)
+        for sim in obj.sims:
+            sim.clear_data()
 
 
 class Processor(object):
@@ -1953,12 +1974,12 @@ class Processor(object):
         # data file)
         self.failed_sims = failed_sims
 
-    def collect_sims(self):
+    def collect_confs(self):
         """
         Collect all the simulations beneath the base of the directory tree
         """
 
-        sims = []
+        sim_confs = []
         failed_sims = []
         ftype = self.gconf['General']['save_as']
         # Get correct data file name
@@ -1975,20 +1996,22 @@ class Processor(object):
             conf_path = os.path.join(root, 'sim_conf.yml')
             if 'sim_conf.yml' in files and datfile in files:
                 self.log.info('Gather sim at %s', root)
-                sim_obj = Simulation(Config(conf_path))
+                # sim_obj = Simulation(Config(conf_path))
+                conf = Config(conf_path)
                 # sim_obj.conf.expand_vars()
-                sims.append(sim_obj)
+                sim_confs.append(conf)
             elif 'sim_conf.yml' in files:
-                sim_obj = Simulation(Config(conf_path))
-                self.log.error('The following sim is missing its data file: %s',
-                               sim_obj.conf['General']['sim_dir'])
-                failed_sims.append(sim_obj)
-        self.sims = sims
+                # sim_obj = Simulation(Config(conf_path))
+                conf = Config(conf_path)
+                self.log.error('Sim %s is missing its data file',
+                               conf['General']['sim_dir'])
+                failed_sims.append(conf)
+        self.sim_confs = sim_confs
         self.failed_sims = failed_sims
-        if not sims:
+        if not sim_confs:
             self.log.error('Unable to find any successful simulations')
             raise RuntimeError('Unable to find any successful simulations')
-        return sims, failed_sims
+        return sim_confs, failed_sims
 
     def get_param_vals(self, parseq):
         """
@@ -1996,8 +2019,8 @@ class Processor(object):
         """
 
         vals = []
-        for sim in self.sims:
-            val = sim.conf[parseq]
+        for conf in self.sim_confs:
+            val = conf[parseq]
             if val not in vals:
                 vals.append(val)
         return vals
@@ -2010,14 +2033,18 @@ class Processor(object):
 
         assert(type(pars) == dict)
         for par, vals in pars.items():
-            self.sims = [sim for sim in self.sims if sim.conf[par] in vals]
+            print(par)
+            print(vals)
+            vals = [type(self.sim_confs[0][par])(v) for v in vals]
+            self.sim_confs = [conf for conf in self.sim_confs if conf[par] in vals]
             groups = []
             for group in self.sim_groups:
-                filt_group = [sim for sim in group if sim.conf[par] in vals]
+                filt_group = [conf for conf in group if conf[par] in vals]
                 groups.append(filt_group)
             self.sim_groups = groups
-        assert(len(self.sims) >= 1)
-        return self.sims, self.sim_groups
+        assert(len(self.sim_confs) >= 1)
+        print(len(self.sim_confs))
+        return self.sim_confs, self.sim_groups
 
     def group_against(self, key, variable_params, sort_key=None):
         """Groups simulations by against particular parameter. Within each
@@ -2030,22 +2057,22 @@ class Processor(object):
 
         self.log.info('Grouping sims against: %s', str(key))
         # We need only need a shallow copy of the list containing all the sim
-        # objects We don't want to modify the orig list but we wish to share
+        # objects. We don't want to modify the orig list but we wish to share
         # the sim objects the two lists contain
-        sims = copy.copy(self.sims)
-        sim_groups = [[sims.pop()]]
+        sim_confs = copy.copy(self.sim_confs)
+        sim_groups = [[sim_confs.pop()]]
         # While there are still sims that havent been assigned to a group
-        while sims:
+        while sim_confs:
             # Get the comparison dict for this sim
-            sim = sims.pop()
-            val1 = sim.conf[key]
+            conf = sim_confs.pop()
+            val1 = conf[key]
             # print('Group against value: {}'.format(val1))
             # We want the specified key to vary, so we remove it from the
             # comparison dict
-            del sim.conf[key]
-            cmp1 = {'Simulation': sim.conf['Simulation'],
-                    'Layers': sim.conf['Layers'],
-                    'Solver': sim.conf['Solver']}
+            del conf[key]
+            cmp1 = {'Simulation': conf['Simulation'],
+                    'Layers': conf['Layers'],
+                    'Solver': conf['Solver']}
             try:
                 del cmp1['Solver']['BasisFieldDumpPrefix']
             except KeyError:
@@ -2054,12 +2081,12 @@ class Processor(object):
             # Loop through each group, checking if this sim belongs in the
             # group
             for group in sim_groups:
-                sim2 = group[0]
-                val2 = sim2.conf[key]
-                del sim2.conf[key]
-                cmp2 = {'Simulation': group[0].conf['Simulation'],
-                        'Layers': group[0].conf['Layers'],
-                        'Solver': group[0].conf['Solver']}
+                conf2 = group[0]
+                val2 = conf2[key]
+                del conf2[key]
+                cmp2 = {'Simulation': group[0]['Simulation'],
+                        'Layers': group[0]['Layers'],
+                        'Solver': group[0]['Solver']}
                 try:
                     del cmp2['Solver']['BasisFieldDumpPrefix']
                 except KeyError:
@@ -2069,22 +2096,22 @@ class Processor(object):
                     match = True
                     # We need to restore the param we removed from the
                     # configuration earlier
-                    sim.conf[key] = val1
-                    group.append(sim)
-                group[0].conf[key] = val2
+                    conf[key] = val1
+                    group.append(conf)
+                group[0][key] = val2
             # If we didnt find a matching group, we need to create a new group
             # for this simulation
             if not match:
-                sim.conf[key] = val1
-                sim_groups.append([sim])
+                conf[key] = val1
+                sim_groups.append([conf])
         # Get the params that will define the path in the results dir for each
         # group that will be stored
         result_pars = [var for var in variable_params if var != key]
         for group in sim_groups:
             # Sort the individual sims within a group in increasing order of
             # the parameter we are grouping against a
-            group.sort(key=lambda sim: sim.conf[key])
-            path = '{}/grouped_against_{}'.format(group[0].conf['General']['base_dir'],
+            group.sort(key=lambda aconf: aconf[key])
+            path = '{}/grouped_against_{}'.format(group[0]['General']['base_dir'],
                                                   key[-1])
             path = os.path.expandvars(path)
             # If the only variable param is the one we grouped against, make
@@ -2100,22 +2127,23 @@ class Processor(object):
                     # All sims in the group will have the same values for
                     # result_pars so we can just use the first sim in the group
                     path = os.path.join(path, '{}_{}/'.format(par[-1],
-                                                                  group[0].conf[par]))
+                                                                  group[0][par]))
                     self.log.info('RESULTS DIR: %s', path)
                     try:
                         os.makedirs(path)
                     except OSError:
                         pass
-            for sim in group:
-                sim.conf['General']['results_dir'] = path
-                outpath = os.path.join(sim.conf['General']['sim_dir'],
-                                       'sim_conf.yml')
-                outpath = os.path.expandvars(outpath)
-                sim.conf.write(outpath)
+            # Need this so the results_dir parameter gets written to conf file
+            for conf in group:
+                conf['General']['results_dir'] = path
+                # outpath = os.path.join(conf['General']['sim_dir'],
+                #                        'sim_conf.yml')
+                # outpath = os.path.expandvars(outpath)
+                # conf.write(outpath)
         # Sort the groups in increasing order of the provided sort key
         if sort_key:
-            sim_groups.sort(key=lambda group: group[0].conf[key])
-        sim_groups = [SimulationGroup(sims) for sims in sim_groups]
+            sim_groups.sort(key=lambda agroup: agroup[0][key])
+        # sim_groups = [SimulationGroup(sims) for sims in sim_groups]
         self.sim_groups = sim_groups
         return sim_groups
 
@@ -2151,15 +2179,15 @@ class Processor(object):
         # This works by storing the different values of the specifed parameter
         # as keys, and a list of sims whose value matches the key as the value
         pdict = {}
-        for sim in self.sims:
-            if sim.conf[key] in pdict:
-                pdict[sim.conf[key]].append(sim)
+        for conf in self.sim_confs:
+            if conf[key] in pdict:
+                pdict[conf[key]].append(conf)
             else:
-                pdict[sim.conf[key]] = [sim]
+                pdict[conf[key]] = [conf]
         # Now all the sims with matching values for the provided key are just
         # the lists located at each key. We sort the groups in increasing order
         # of the provided key
-        groups = sorted(pdict.values(), key=lambda group: group[0].conf[key])
+        groups = sorted(pdict.values(), key=lambda group: group[0][key])
         # If specified, sort the sims within each group in increasing order of
         # the provided sorting key
         if sort_key:
@@ -2168,24 +2196,24 @@ class Processor(object):
                     group.sort(key=sort_key)
             else:
                 for group in groups:
-                    group.sort(key=lambda sim: sim.conf[sort_key])
-        groups = [SimulationGroup(sims) for sims in groups]
+                    group.sort(key=lambda sim: conf[sort_key])
+        # groups = [SimulationGroup(sims) for sims in groups]
         if repopulate:
             self.sim_groups = groups
         return groups
 
-    def replace(self):
-        for i, sim in enumerate(self.sims):
-            path = os.path.join(sim.conf['General']['sim_dir'], 'sim_conf.yml')
-            self.sims[i] = path
+    # def replace(self):
+    #     for i, sim in enumerate(self.sims):
+    #         path = os.path.join(sim.conf['General']['sim_dir'], 'sim_conf.yml')
+    #         self.sims[i] = path
 
-        for i, group in enumerate(self.sim_groups):
-            new_group = []
-            for sim in group.sims:
-                new_group.append(os.path.join(sim.conf['General']['sim_dir'],
-                                              'sim_conf.yml'))
+    #     for i, group in enumerate(self.sim_groups):
+    #         new_group = []
+    #         for sim in group.sims:
+    #             new_group.append(os.path.join(sim.conf['General']['sim_dir'],
+    #                                           'sim_conf.yml'))
 
-            self.sim_groups[i] = new_group
+    #         self.sim_groups[i] = new_group
 
     def call_func(self, quantity, obj, args):
         """
@@ -2199,6 +2227,46 @@ class Processor(object):
                            quantity, exc_info=True, stack_info=True)
             raise
         return result
+
+    def process(self, crunch=True, plot=True, gcrunch=True, gplot=True):
+        # Create pool if processing in parallel
+        if self.gconf['General']['post_parallel']:
+            num_procs = self.gconf['General']['num_cores']
+            pool = mp.Pool(processes=num_procs)
+        # First process all the sims
+        self.log.info('Beginning processing for all sims ...')
+        plan = copy.deepcopy(self.gconf['Postprocessing']['Single'])
+        if not crunch:
+            del plan['crunch']
+        if not plot:
+            del plan['plot']
+        if not self.gconf['General']['post_parallel']:
+            for conf in self.sim_confs:
+                execute_plan(conf, plan)
+        else:
+            self.log.info('Plotting sims in parallel using %s cores ...',
+                          str(num_procs))
+            args_list = list(zip(self.sim_confs, repeat(plan)))
+            pool.starmap(execute_plan, args_list)
+        # Process groups
+        print("processing groups")
+        plan = copy.deepcopy(self.gconf['Postprocessing']['Group'])
+        if not gcrunch:
+            del plan['crunch']
+        if not gplot:
+            del plan['plot']
+        if not self.gconf['General']['post_parallel']:
+            for group in self.sim_groups:
+                execute_plan(group, plan)
+        else:
+            self.log.info('Plotting sims in parallel using %s cores ...',
+                          str(num_procs))
+            args_list = list(zip(self.sim_groups, repeat(plan)))
+            pool.starmap(execute_plan, args_list)
+        if self.gconf['General']['post_parallel']:
+            pool.close()
+            pool.join()
+
 
     def _process(self, obj, process):
         """

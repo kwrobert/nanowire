@@ -50,7 +50,17 @@ def process_optics():
     # Collect the sims once up here and reuse them later
     proc = Processor(args.config_file)
     proc.log.info('Collecting sims')
-    proc.collect_sims()
+    proc.collect_confs()
+    # Filter if specified
+    if args.filter_by:
+        filt_dict = {}
+        for item in args.filter_by:
+            par, vals = item.split(':')
+            vals = vals.split(',')
+            par = tuple(par.split('.'))
+            filt_dict[par] = vals
+        proc.log.info('Here is the filter dictionary: %s', filt_dict)
+        proc.filter_by_param(filt_dict)
     # First we need to group against if specified. Grouping against corresponds
     # to "leaves" in the tree
     if args.group_against:
@@ -59,26 +69,11 @@ def process_optics():
     # set of leaf groups
     if args.group_by:
         proc.group_by(group_by)
-    # Filter if specified
-    if args.filter_by:
-        filt_dict = {}
-        for item in args.filter_by:
-            par, vals = item.split(':')
-            vals = vals.split(',')
-            filt_dict[par] = vals
-        proc.log.info('Here is the filter dictionary: %s', filt_dict)
-        proc.filter_by_param(filt_dict)
-    proc.replace()
     # logging_tree.printout()
     # Now do all the work
-    if not args.no_crunch:
-        proc.crunch_local_all()
-    if not args.no_gcrunch:
-        proc.crunch_global_all()
-    if not args.no_plot:
-        proc.plot_local_all()
-    if not args.no_gplot:
-        proc.plot_global_all()
+    kwargs = {'crunch': not args.no_crunch, 'plot': not args.no_plot,
+              'gcrunch': not args.no_gcrunch, 'gplot': not args.no_gplot}
+    proc.process(**kwargs)
 
-
-process_optics()
+if __name__ == '__main__':
+    process_optics()

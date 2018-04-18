@@ -130,7 +130,10 @@ class HDF5DataManager(DataManager):
         self._dfile = tb.open_file(path, 'a')
         ID = os.path.basename(self.conf['General']['sim_dir'])
         self.gpath = '/sim_{}'.format(ID)
-        self.gobj = self._dfile.get_node(self.gpath, classname='Group')
+        try:
+            self.gobj = self._dfile.get_node(self.gpath, classname='Group')
+        except tb.NoSuchNodeError:
+            self.gobj = self._dfile.create_group('/', self.gpath[1:])
         self._update_keys()
         self._updated = {key:False for key in self._data.keys()}
 
@@ -176,6 +179,7 @@ class HDF5DataManager(DataManager):
         # Filter out the original data so we don't resave it
         keys = [key for key in self._data.keys() if key not in blacklist and
                 self._updated[key]]
+        self.log.info(keys)
         for key in keys:
             obj = self._data[key]
             # Check for recarry first cuz it is a subclass of ndarray

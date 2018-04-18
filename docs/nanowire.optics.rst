@@ -1,27 +1,35 @@
-nanowire\.optics package
-========================
+nanowire.optics package
+=======================
+
+Subpackages
+-----------
+
+.. toctree::
+
+    nanowire.optics.scripts
+    nanowire.optics.utils
 
 Submodules
 ----------
 
-nanowire\.optics\.data\_manager module
---------------------------------------
+nanowire.optics.data\_manager module
+------------------------------------
 
 .. automodule:: nanowire.optics.data_manager
     :members:
     :undoc-members:
     :show-inheritance:
 
-nanowire\.optics\.postprocess module
-------------------------------------
+nanowire.optics.postprocess module
+----------------------------------
 
 .. automodule:: nanowire.optics.postprocess
     :members:
     :undoc-members:
     :show-inheritance:
 
-nanowire\.optics\.simulate module
----------------------------------
+nanowire.optics.simulate module
+-------------------------------
 
 .. automodule:: nanowire.optics.simulate
     :members:

@@ -51,7 +51,7 @@ Simulation:
     input_power: '$HOME/software/nanowire/nanowire/spectra/am15g_freq.txt'
     input_power_wv: '$HOME/software/nanowire/nanowire/spectra/ASTMG173.csv'
     params:
-        bandwidth: 0.
+        bandwidth: 13086178722222.223
         polar_angle: 0
         azimuthal_angle:  0
         array_period: .25 
@@ -97,7 +97,7 @@ Layers:
             shell:
                 order: 1
                 type: 'circle'
-                radius: '%(Layers.NW_AlShell.params.shell_radius)s'
+                radius: '`%(Layers.NW_AlShell.params.shell_radius)s`'
                 center:
                     x: '`%(Simulation.params.array_period)s/2`'
                     y: '`%(Simulation.params.array_period)s/2`'
@@ -105,7 +105,7 @@ Layers:
             core:
                 order: 2
                 type: 'circle'
-                radius: '%(Layers.NW_AlShell.params.core_radius)s'
+                radius: '`%(Layers.NW_AlShell.params.core_radius)s`'
                 center:
                     x: '`%(Simulation.params.array_period)s/2`'
                     y: '`%(Simulation.params.array_period)s/2`'

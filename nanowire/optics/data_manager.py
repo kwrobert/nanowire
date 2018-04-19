@@ -225,6 +225,7 @@ class HDF5DataManager(DataManager):
                                                   atom=tb.Atom.from_dtype(obj.dtype))
                     else:
                         self._dfile.create_array(self.gpath, key, obj)
+        self._dfile.flush()
 
 class NPZDataManager(DataManager):
 

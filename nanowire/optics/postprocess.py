@@ -16,6 +16,7 @@ import matplotlib.patches as mpatches
 import scipy.constants as consts
 import scipy.integrate as intg
 import numpy as np
+import naturalneighbor as nn
 np.set_printoptions(precision=3, threshold=100000)
 from mpl_toolkits.mplot3d import Axes3D
 from itertools import repeat
@@ -125,7 +126,8 @@ class Simulation:
         if conf is not None:
             self.data = self._get_data_manager()
         else:
-            self.data = copy.deepcopy(simulator.data)
+            # self.data = copy.deepcopy(simulator.data)
+            self.data = simulator.data
         self.failed = False
         self.avgs = {}
         # Compute and store dx, dy, dz at attributes
@@ -448,6 +450,161 @@ class Simulation:
         self.data[key] = avgs
         return avgs
 
+    def integrate_nanowire(self, nkEsq=None):
+        """
+        Use natural neighbor interpolation to integrate nk|E|^2 inside the
+        nanowire in shell in polar coordinates for optimum accuracy
+        """
+
+        nw_layer = self.layers['NW_AlShell']
+        core_rad = self.conf['Layers']['NW_AlShell']['params']['core_radius']
+        shell_rad = self.conf['Layers']['NW_AlShell']['params']['shell_radius']
+        period = self.conf['Simulation']['params']['array_period']
+        # shell_rad = self.conf['Layers']['NW_AlShell']['params']['shell_radius']
+        # Extract nkEsq data in layer
+        if nkEsq is None:
+            nkEsq = self.data['nknormEsq'][nw_layer.get_slice(self.Z)]
+            zvals = self.Z[nw_layer.get_slice(self.Z)]
+        else:
+            zvals = np.linspace(nw_layer.start, nw_layer.end, nkEsq.shape[0])
+        print("nkEsq shape: ", nkEsq.shape)
+        # Get masks for each region
+        core_mask = get_mask_by_material(nw_layer, 'GaAs', self.X, self.Y)
+        print("core mask shape = {}".format(core_mask.shape))
+        shell_mask = get_mask_by_material(nw_layer, 'AlInP', self.X, self.Y)
+        cyc_mask = np.logical_not(np.logical_or(core_mask, shell_mask))
+        print("shell mask shape = {}".format(shell_mask.shape))
+        print("cyc mask shape = {}".format(cyc_mask.shape))
+        core_mask3d = np.broadcast_to(core_mask,
+                                      (nkEsq.shape[0],
+                                       core_mask.shape[0],
+                                       core_mask.shape[1]))
+        print("core mask 3d shape = {}".format(core_mask3d.shape))
+        shell_mask3d = np.broadcast_to(shell_mask,
+                                       (nkEsq.shape[0],
+                                        shell_mask.shape[0],
+                                        shell_mask.shape[1]))
+        print("shell mask 3d shape = {}".format(shell_mask3d.shape))
+        cyc_mask3d = np.broadcast_to(cyc_mask,
+                                     (nkEsq.shape[0],
+                                      cyc_mask.shape[0],
+                                      cyc_mask.shape[1]))
+        print("cyc mask 3d shape = {}".format(cyc_mask3d.shape))
+        # Finally the cyclotene
+        cyc_vals = nkEsq*cyc_mask
+        print("cyc_vals shape = {}".format(cyc_vals.shape))
+        plt.matshow(cyc_vals[0, :, :])
+        plt.colorbar()
+        plt.show()
+        cyc_z = np.linspace(nw_layer.start, nw_layer.end, nkEsq.shape[0])
+        cyc_result = integrate3d(cyc_vals, self.X, self.Y, cyc_z)
+        # Extract vals in each region from nkEsq array
+        core_inds = np.where(core_mask3d)
+        shell_inds = np.where(shell_mask3d)
+        print("core_inds: ", core_inds)
+        print("shell_inds: ", shell_inds)
+        core_vals = nkEsq[core_inds]
+        shell_vals = nkEsq[shell_inds]
+        print("core_vals shape: ", core_vals.shape)
+        print("max core val = {}".format(np.amax(core_vals)))
+        # print(core_vals)
+        pts = cartesian_product((zvals, self.X, self.Y))
+        # print(pts)
+        # Shift x and y values so origin is at center of nanowire
+        # core_pts_inds = np.where((core_pts[:, 1] - period/2)**2 + (core_pts[:, 2] - period/2)**2 <= core_rad**2)
+        pts[:, 2] -= period/2.0
+        pts[:, 1] -= period/2.0
+        core_pts_inds = np.where(pts[:, 1]**2 + pts[:, 2]**2 <= core_rad**2)
+        shell_pts_inds = np.where((core_rad**2 <= pts[:, 1]**2 + pts[:, 2]**2)
+                                  &
+                                  (pts[:, 1]**2 + pts[:, 2]**2 <= shell_rad**2))
+        # print(core_pts_inds)
+        print("pts shape: ", pts[0].shape)
+        core_pts = pts[core_pts_inds[0], :]
+        print("cartesian core_pts shape: ", core_pts.shape)
+        print("core_pts inds shape: ", core_pts_inds[0].shape)
+        shell_pts = pts[shell_pts_inds[0], :]
+        # core_pts = core_pts[core_pts_inds[0], core_pts
+        # print("yy shape: ", yy.shape)
+        # print("zz shape: ", zz.shape)
+        # core_pts = np.column_stack((xx[core_inds[1], core_inds[2], core_inds[0]],
+        #                        yy[core_inds[1], core_inds[2], core_inds[0]],
+        #                        zz[core_inds[1], core_inds[2], core_inds[0]]))
+        # Transform cartesian points into polar coordinates.
+        # polar_pts[r, theta, z]
+        core_polar_pts = np.zeros_like(core_pts)
+        core_polar_pts[:, 0] = np.sqrt(core_pts[:, 2]**2 + core_pts[:, 1]**2)
+        # This returns angles on [-pi, pi], so shift them
+        core_polar_pts[:, 1] = np.arctan2(core_pts[:, 2], core_pts[:, 1])
+        core_polar_pts[:, 1][core_polar_pts[:, 1] < 0] += 2*np.pi
+        core_polar_pts[:, 2] = core_pts[:, 0]
+        # Same for the shell
+        shell_polar_pts = np.zeros_like(shell_pts)
+        shell_polar_pts[:, 0] = np.sqrt(shell_pts[:, 2]**2 + shell_pts[:, 1]**2)
+        # This returns angles on [-pi, pi], so shift them
+        shell_polar_pts[:, 1] = np.arctan2(shell_pts[:, 2], shell_pts[:, 1])
+        shell_polar_pts[:, 1][shell_polar_pts[:, 1] < 0] += 2*np.pi
+        shell_polar_pts[:, 2] = shell_pts[:, 0]
+        # fig, ax = scatter3d(pts[:, 0], pts[:, 1], pts[:, 2])
+        # plt.show()
+        # Extract interpolated points on a polar grid
+        print('core_polar_pts shape: ', core_polar_pts.shape)
+        # print(core_polar_pts)
+        rstart = .0001
+        core_numr = 90
+        shell_numr = 30
+        numtheta = 85
+        numz = 95
+        # If the last element of each range is complex, the ranges behave like
+        # np.linspace
+        # ranges = [[rstart, core_rad, 1j*numr], [-np.pi, np.pi, 1j*numtheta],
+        #           [nw_layer.start, nw_layer.end, 1j*numz]]
+        ranges = [[rstart, core_rad, 1j*core_numr], [0, 2*np.pi, 1j*numtheta],
+                  [nw_layer.start, nw_layer.end, 1j*numz]]
+        core_interp = nn.griddata(core_polar_pts, core_vals, ranges)
+        ranges = [[core_rad, shell_rad, 1j*shell_numr], [0, 2*np.pi, 1j*numtheta],
+                  [nw_layer.start, nw_layer.end, 1j*numz]]
+        shell_interp = nn.griddata(shell_polar_pts, shell_vals, ranges)
+        print("Core interp vals shape: ", core_interp.shape)
+        print("Core interp minimum: ", np.amin(core_interp))
+        print("Shell interp vals shape: ", shell_interp.shape)
+        print("Shell interp minimum: ", np.amin(shell_interp))
+        # plt.figure()
+        # plt.imshow(core_interp[:, 0, :])
+        # plt.colorbar()
+        # plt.show()
+        # input("Continue?")
+        # # Multiply by area factor in polar coords to get integrand
+        core_rvals = np.linspace(rstart, core_rad, core_numr)
+        thetavals = np.linspace(0, 2*np.pi, numtheta)
+        intzvals = np.linspace(nw_layer.start, nw_layer.end, numz)
+        rr, tt = np.meshgrid(thetavals, core_rvals)
+        print('rr shape: ', rr.shape)
+        print('tt shape: ', tt.shape)
+        print(np.amin(rr[:, :, None]*np.sin(tt[:, :, None])))
+        integrand = core_interp*rr[:, :, None]*np.sin(tt[:, :, None])
+        # integrand = core_interp*rr[:, :, None]
+        print("Integrand min: ", np.amin(integrand))
+        core_result = integrate3d(integrand, thetavals, intzvals, core_rvals)
+        # Shell integral
+        shell_rvals = np.linspace(core_rad, shell_rad, shell_numr)
+        rr, tt = np.meshgrid(thetavals, shell_rvals)
+        print('rr shape: ', rr.shape)
+        print('tt shape: ', tt.shape)
+        print(np.amin(rr[:, :, None]*np.sin(tt[:, :, None])))
+        integrand = shell_interp*rr[:, :, None]*np.sin(tt[:, :, None])
+        # integrand = core_interp*rr[:, :, None]
+        print("Integrand min: ", np.amin(integrand))
+        shell_result = integrate3d(integrand, thetavals, intzvals, shell_rvals)
+        # print("result = {}".format(result))
+        #plt.matshow(shell_mask3d[1, :, :])
+        #plt.show()
+        #plt.matshow(shell_mask)
+        #plt.show()
+        return sum(core_result, shell_result, cyc_result)
+        # return (core_rvals, shell_rvals, thetavals, zvals, core_interp,
+        #         shell_interp, core_result, shell_result, cyc_result)
+
     def integrate_layer(self, lname, layer):
         freq = self.conf[('Simulation', 'params', 'frequency')]
         n_mat, k_mat = layer.get_nk_matrix(freq, self.X, self.Y)
@@ -457,20 +614,20 @@ class Simulation:
             Esq = self.normEsquared()
         nkEsq = n_mat*k_mat*Esq[layer.get_slice(self.Z)]
         results = {}
-        for mat in layer.materials.keys(): 
-            mask = get_mask_by_material(layer, mat, self.X, self.Y) 
+        for mat in layer.materials.keys():
+            mask = get_mask_by_material(layer, mat, self.X, self.Y)
             # mask = np.where(mask, 1, np.nan)
             # plt.matshow(mask)
             # plt.colorbar()
             # plt.title("Mask Layer: {}, Material: {}".format(lname, material))
             # plt.show()
-            values = nkEsq*mask 
+            values = nkEsq*mask
             # plt.matshow(values[0, :, :])
             # plt.title("nkEsq Layer: {}, Material: {}".format(lname, mat))
             # plt.colorbar()
             # plt.show()
             points = (self.Z[layer.get_slice(self.Z)], self.X, self.Y)
-            rgi = interpolate.RegularGridInterpolator(points, values, 
+            rgi = interpolate.RegularGridInterpolator(points, values,
                                                       method='linear',
                                                       bounds_error=True)
             z = self.Z[layer.get_slice(self.Z)]
@@ -481,7 +638,7 @@ class Simulation:
             print("Layer Start:", layer.start)
             print("Layer End:", layer.end)
             z = np.linspace(self.Z[layer.get_slice(self.Z)][0],
-                            self.Z[layer.get_slice(self.Z)][-1], len(z)*2) 
+                            self.Z[layer.get_slice(self.Z)][-1], len(z)*2)
             x = np.linspace(self.X[0], self.X[-1], len(self.X)*2)
             y = np.linspace(self.Y[0], self.Y[-1], len(self.Y)*2)
             pts = cartesian_product((z, x, y))
@@ -572,8 +729,11 @@ class Simulation:
             fields = {k[-2:]:self.data[k] for k in keys}
             Esq = np.abs(fields['Ex'])**2 + np.abs(fields['Ey'])**2 + np.abs(fields['Ez'])**2
             z = np.linspace(layer_obj.start, layer_obj.end, Esq.shape[0])
-            y_integral = integrate3d(n_mat*k_mat*Esq, self.X, self.Y, z,
-                                     meth=intg.simps)
+            if layer_name == "NW_AlShell":
+                y_integral = self.integrate_nanowire(nkEsq=n_mat*k_mat*Esq)
+            else:
+                y_integral = integrate3d(n_mat*k_mat*Esq, self.X, self.Y, z,
+                                         meth=intg.simps)
             # abs_dict[lname] = result
             # nkEsq = n_mat*k_mat*Esq
             # y_integral = 0
@@ -1839,6 +1999,21 @@ class SimulationGroup:
         plt.close()
 
 
+def scatter3d(x, y, z, cs=None, colorsMap='jet'):
+    fig = plt.figure()
+    ax = Axes3D(fig)
+    if cs is not None:
+        cm = plt.get_cmap(colorsMap)
+        cNorm = matplotlib.colors.Normalize(vmin=min(cs), vmax=max(cs))
+        scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
+        ax.scatter(x, y, z, c=scalarMap.to_rgba(cs))
+        scalarMap.set_array(cs)
+        fig.colorbar(scalarMap)
+    else:
+        ax.scatter(x, y, z)
+    return fig, ax
+
+
 def integrate1d(arr, xvals, meth=intg.trapz):
     x_integral = meth(arr, x=xvals, axis=0)
     return x_integral
@@ -1859,6 +2034,7 @@ def integrate3d(arr, xvals, yvals, zvals, meth=intg.trapz):
     x_integral = meth(z_integral, x=xvals, axis=0)
     y_integral = meth(x_integral, x=yvals, axis=0)
     return y_integral
+
 
 
 def counted(fn):
@@ -1890,12 +2066,12 @@ def _call_func(quantity, obj, args):
 
 def execute_plan(conf, plan):
     """
-    Executes the given plan for the given Config object or list/tuple of Config 
+    Executes the given plan for the given Config object or list/tuple of Config
     objects. If conf is a single Config object, a Simulation object will
     created and the provided plan will be executed for it. If a list or tuple
     of Config objects is given, a SimulationGroup object will be created and
-    the provided plan will be executed for it. 
-    
+    the provided plan will be executed for it.
+
     `plan` must be a dictionary with the following structure::
 
         {'crunch':
@@ -1923,7 +2099,7 @@ def execute_plan(conf, plan):
         log.info("Executing Simulation plan")
         obj = Simulation(conf=conf)
         ID = obj.id[0:10]
-    
+
     for task_name, task in plan.items():
         log.info("Beginning %s for obj %s", task_name, ID)
         for func, data in task.items():
@@ -2264,103 +2440,5 @@ class Processor(object):
             args_list = list(zip(self.sim_groups, repeat(plan)))
             pool.starmap(execute_plan, args_list)
         if self.gconf['General']['post_parallel']:
-            pool.close()
-            pool.join()
-
-
-    def _process(self, obj, process):
-        """
-        Calls a process on an object. The object could be a Simulation object,
-        or a SimulationGroup object. It just loops through the functions
-        defined in the process subsection of the Postprocessing section in the
-        config file, and uses call_func to call the object's method with the
-        names defined in the config.
-        """
-
-        self.log.info('Running %s process for obj %s', process, str(obj))
-        to_compute = {quant: data for quant, data in
-                      self.gconf['Postprocessing'][process].items() if
-                      data['compute']}
-        for quant, data in to_compute.items():
-            argsets = data['args']
-            self.log.info('Calling %s with args %s', str(quant), str(argsets))
-            if argsets and isinstance(argsets[0], list):
-                for argset in argsets:
-                    self.log.info('Calling with individual argset %s', str(argset))
-                    if argset:
-                        self.call_func(quant, obj, argset)
-                    else:
-                        self.call_func(quant, obj, [])
-            else:
-                if argsets:
-                    self.call_func(quant, obj, argsets)
-                else:
-                    self.call_func(quant, obj, [])
-
-    def crunch_local(self, sim):
-        _crunch_local(sim, self.gconf)
-
-    def crunch_local_all(self):
-        self.log.info('Beginning data crunch for all sims ...')
-        if not self.gconf['General']['post_parallel']:
-            for sim in self.sims:
-                _crunch_local(sim, self.gconf)
-        else:
-            num_procs = self.gconf['General']['num_cores']
-            self.log.info('Crunching sims in parallel using %s cores ...', str(num_procs))
-            args_list = list(zip(self.sims, repeat(self.gconf)))
-            pool = mp.Pool(processes=num_procs)
-            pool.starmap(_crunch_local, args_list)
-            pool.close()
-            pool.join()
-
-    def plot_local(self, sim):
-        _plot_local(sim, self.gconf)
-
-    def plot_local_all(self):
-        self.log.info('Beginning local plotting for all sims ...')
-        if not self.gconf['General']['post_parallel']:
-            for sim in self.sims:
-                _plot_local(sim, self.gconf)
-        else:
-            num_procs = self.gconf['General']['num_cores']
-            self.log.info('Plotting sims in parallel using %s cores ...', str(num_procs))
-            pool = mp.Pool(processes=num_procs)
-            args_list = list(zip(self.sims, repeat(self.gconf)))
-            pool.starmap(_plot_local, args_list)
-            pool.close()
-            pool.join()
-
-    def crunch_global(self, sim_group):
-        _process(sim_group, "Global_Cruncher", self.gconf)
-
-    def crunch_global_all(self):
-        self.log.info('Beginning global data crunch for all sim groups ...')
-        if not self.gconf['General']['post_parallel']:
-            for group in self.sim_groups:
-                _crunch_global(group, self.gconf)
-        else:
-            num_procs = self.gconf['General']['num_cores']
-            self.log.info('Crunching sim groups in parallel using %s cores ...', str(num_procs))
-            pool = mp.Pool(processes=num_procs)
-            args_list = list(zip(self.sim_groups, repeat(self.gconf)))
-            pool.starmap(_crunch_global, args_list)
-            pool.close()
-            pool.join()
-
-    def plot_global(self, sim_group):
-        _process(sim_group, "Global_Plotter", self.gconf)
-
-    def plot_global_all(self):
-        self.log.info('Beginning global data plot for all sim groups ...')
-        if not self.gconf['General']['post_parallel']:
-            for group in self.sim_groups:
-                _plot_global(group, self.gconf)
-        else:
-            num_procs = self.gconf['General']['num_cores']
-            self.log.info('Plotting sim groups in parallel using %s cores ...', str(num_procs))
-            pool = mp.Pool(processes=num_procs)
-            args_list = list(zip(self.sim_groups, repeat(self.gconf)))
-            pool.starmap(_plot_global, args_list)
             pool.close()
             pool.join()

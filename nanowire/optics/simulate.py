@@ -1311,6 +1311,9 @@ class Simulator():
 
         results = {}
         for lname, layer in self.layers.items():
+            if lname not in sample_dict:
+                self.log.info("Layer %s not in sample dict, skipping", lname)
+                continue
             self.log.info("Computing fields in layer %s using %i samples", lname,
                           sample_dict[lname])
             z_vals = np.linspace(layer.start, layer.end, sample_dict[lname])

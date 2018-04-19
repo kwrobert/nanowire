@@ -467,62 +467,67 @@ class Simulation:
             zvals = self.Z[nw_layer.get_slice(self.Z)]
         else:
             zvals = np.linspace(nw_layer.start, nw_layer.end, nkEsq.shape[0])
-        print("nkEsq shape: ", nkEsq.shape)
+        # print("nkEsq shape: ", nkEsq.shape)
         # Get masks for each region
         core_mask = get_mask_by_material(nw_layer, 'GaAs', self.X, self.Y)
-        print("core mask shape = {}".format(core_mask.shape))
+        # print("core mask shape = {}".format(core_mask.shape))
         shell_mask = get_mask_by_material(nw_layer, 'AlInP', self.X, self.Y)
         cyc_mask = np.logical_not(np.logical_or(core_mask, shell_mask))
-        print("shell mask shape = {}".format(shell_mask.shape))
-        print("cyc mask shape = {}".format(cyc_mask.shape))
+        # print("shell mask shape = {}".format(shell_mask.shape))
+        # print("cyc mask shape = {}".format(cyc_mask.shape))
         core_mask3d = np.broadcast_to(core_mask,
                                       (nkEsq.shape[0],
                                        core_mask.shape[0],
                                        core_mask.shape[1]))
-        print("core mask 3d shape = {}".format(core_mask3d.shape))
+        # print("core mask 3d shape = {}".format(core_mask3d.shape))
         shell_mask3d = np.broadcast_to(shell_mask,
                                        (nkEsq.shape[0],
                                         shell_mask.shape[0],
                                         shell_mask.shape[1]))
-        print("shell mask 3d shape = {}".format(shell_mask3d.shape))
+        # print("shell mask 3d shape = {}".format(shell_mask3d.shape))
         cyc_mask3d = np.broadcast_to(cyc_mask,
                                      (nkEsq.shape[0],
                                       cyc_mask.shape[0],
                                       cyc_mask.shape[1]))
-        print("cyc mask 3d shape = {}".format(cyc_mask3d.shape))
+        # print("cyc mask 3d shape = {}".format(cyc_mask3d.shape))
         # Finally the cyclotene
-        cyc_vals = nkEsq*cyc_mask
-        print("cyc_vals shape = {}".format(cyc_vals.shape))
-        plt.matshow(cyc_vals[0, :, :])
-        plt.colorbar()
-        plt.show()
+        cyc_vals = nkEsq*cyc_mask3d
+        # print("cyc_vals shape = {}".format(cyc_vals.shape))
+        # plt.matshow(cyc_vals[0, :, :])
+        # plt.colorbar()
+        # plt.show()
         cyc_z = np.linspace(nw_layer.start, nw_layer.end, nkEsq.shape[0])
         cyc_result = integrate3d(cyc_vals, self.X, self.Y, cyc_z)
         # Extract vals in each region from nkEsq array
         core_inds = np.where(core_mask3d)
         shell_inds = np.where(shell_mask3d)
-        print("core_inds: ", core_inds)
-        print("shell_inds: ", shell_inds)
+        # print("core_inds: ", core_inds)
+        # print("shell_inds: ", shell_inds)
         core_vals = nkEsq[core_inds]
         shell_vals = nkEsq[shell_inds]
-        print("core_vals shape: ", core_vals.shape)
-        print("max core val = {}".format(np.amax(core_vals)))
+        # print("core_vals shape: ", core_vals.shape)
+        # print("max core val = {}".format(np.amax(core_vals)))
         # print(core_vals)
         pts = cartesian_product((zvals, self.X, self.Y))
         # print(pts)
         # Shift x and y values so origin is at center of nanowire
         # core_pts_inds = np.where((core_pts[:, 1] - period/2)**2 + (core_pts[:, 2] - period/2)**2 <= core_rad**2)
-        pts[:, 2] -= period/2.0
-        pts[:, 1] -= period/2.0
+        p2 = period/2.0
+        pts[:, 2] -= p2
+        pts[:, 1] -= p2
         core_pts_inds = np.where(pts[:, 1]**2 + pts[:, 2]**2 <= core_rad**2)
         shell_pts_inds = np.where((core_rad**2 <= pts[:, 1]**2 + pts[:, 2]**2)
                                   &
                                   (pts[:, 1]**2 + pts[:, 2]**2 <= shell_rad**2))
+        # core_pts_inds = np.where((pts[:, 1]-p2)**2 + (pts[:, 2]-p2)**2 <= core_rad**2)
+        # shell_pts_inds = np.where((core_rad**2 <= (pts[:, 1]-p2)**2 + (pts[:, 2]-p2)**2)
+        #                           &
+        #                           ((pts[:, 1]-p2)**2 + (pts[:, 2]-p2)**2 <= shell_rad**2))
         # print(core_pts_inds)
-        print("pts shape: ", pts[0].shape)
+        # print("pts shape: ", pts[0].shape)
         core_pts = pts[core_pts_inds[0], :]
-        print("cartesian core_pts shape: ", core_pts.shape)
-        print("core_pts inds shape: ", core_pts_inds[0].shape)
+        # print("cartesian core_pts shape: ", core_pts.shape)
+        # print("core_pts inds shape: ", core_pts_inds[0].shape)
         shell_pts = pts[shell_pts_inds[0], :]
         # core_pts = core_pts[core_pts_inds[0], core_pts
         # print("yy shape: ", yy.shape)
@@ -548,13 +553,13 @@ class Simulation:
         # fig, ax = scatter3d(pts[:, 0], pts[:, 1], pts[:, 2])
         # plt.show()
         # Extract interpolated points on a polar grid
-        print('core_polar_pts shape: ', core_polar_pts.shape)
+        # print('core_polar_pts shape: ', core_polar_pts.shape)
         # print(core_polar_pts)
-        rstart = .0001
-        core_numr = 90
-        shell_numr = 30
-        numtheta = 85
-        numz = 95
+        rstart = 0 
+        core_numr = 120
+        shell_numr = 40
+        numtheta = 120
+        numz = 200
         # If the last element of each range is complex, the ranges behave like
         # np.linspace
         # ranges = [[rstart, core_rad, 1j*numr], [-np.pi, np.pi, 1j*numtheta],
@@ -565,10 +570,10 @@ class Simulation:
         ranges = [[core_rad, shell_rad, 1j*shell_numr], [0, 2*np.pi, 1j*numtheta],
                   [nw_layer.start, nw_layer.end, 1j*numz]]
         shell_interp = nn.griddata(shell_polar_pts, shell_vals, ranges)
-        print("Core interp vals shape: ", core_interp.shape)
-        print("Core interp minimum: ", np.amin(core_interp))
-        print("Shell interp vals shape: ", shell_interp.shape)
-        print("Shell interp minimum: ", np.amin(shell_interp))
+        # print("Core interp vals shape: ", core_interp.shape)
+        # print("Core interp minimum: ", np.amin(core_interp))
+        # print("Shell interp vals shape: ", shell_interp.shape)
+        # print("Shell interp minimum: ", np.amin(shell_interp))
         # plt.figure()
         # plt.imshow(core_interp[:, 0, :])
         # plt.colorbar()
@@ -579,29 +584,32 @@ class Simulation:
         thetavals = np.linspace(0, 2*np.pi, numtheta)
         intzvals = np.linspace(nw_layer.start, nw_layer.end, numz)
         rr, tt = np.meshgrid(thetavals, core_rvals)
-        print('rr shape: ', rr.shape)
-        print('tt shape: ', tt.shape)
-        print(np.amin(rr[:, :, None]*np.sin(tt[:, :, None])))
+        # print('rr shape: ', rr.shape)
+        # print('tt shape: ', tt.shape)
+        # print(np.amin(rr[:, :, None]*np.sin(tt[:, :, None])))
         integrand = core_interp*rr[:, :, None]*np.sin(tt[:, :, None])
         # integrand = core_interp*rr[:, :, None]
-        print("Integrand min: ", np.amin(integrand))
+        # print("Integrand min: ", np.amin(integrand))
         core_result = integrate3d(integrand, thetavals, intzvals, core_rvals)
         # Shell integral
         shell_rvals = np.linspace(core_rad, shell_rad, shell_numr)
         rr, tt = np.meshgrid(thetavals, shell_rvals)
-        print('rr shape: ', rr.shape)
-        print('tt shape: ', tt.shape)
-        print(np.amin(rr[:, :, None]*np.sin(tt[:, :, None])))
+        # print('rr shape: ', rr.shape)
+        # print('tt shape: ', tt.shape)
+        # print(np.amin(rr[:, :, None]*np.sin(tt[:, :, None])))
         integrand = shell_interp*rr[:, :, None]*np.sin(tt[:, :, None])
         # integrand = core_interp*rr[:, :, None]
-        print("Integrand min: ", np.amin(integrand))
+        # print("Integrand min: ", np.amin(integrand))
         shell_result = integrate3d(integrand, thetavals, intzvals, shell_rvals)
         # print("result = {}".format(result))
         #plt.matshow(shell_mask3d[1, :, :])
         #plt.show()
         #plt.matshow(shell_mask)
         #plt.show()
-        return sum(core_result, shell_result, cyc_result)
+        print("Core Result = {}".format(core_result))
+        print("Shell Result = {}".format(shell_result))
+        print("Cyc Result = {}".format(cyc_result))
+        return sum((core_result, shell_result, cyc_result))
         # return (core_rvals, shell_rvals, thetavals, zvals, core_interp,
         #         shell_interp, core_result, shell_result, cyc_result)
 
@@ -2100,7 +2108,8 @@ def execute_plan(conf, plan):
         obj = Simulation(conf=conf)
         ID = obj.id[0:10]
 
-    for task_name, task in plan.items():
+    for task_name in ('crunch', 'plot'):
+        task = plan[task_name] 
         log.info("Beginning %s for obj %s", task_name, ID)
         for func, data in task.items():
             if not data['compute']:

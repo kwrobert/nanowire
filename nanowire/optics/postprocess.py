@@ -455,7 +455,10 @@ class Simulation:
         Use natural neighbor interpolation to integrate nk|E|^2 inside the
         nanowire in shell in polar coordinates for optimum accuracy
         """
-
+        
+        if len(self.X) % 2 == 0 or len(self.Y) % 2 == 0:
+            raise ValueError("Need and odd number of x-y samples to use this "
+                             " function")
         nw_layer = self.layers['NW_AlShell']
         core_rad = self.conf['Layers']['NW_AlShell']['params']['core_radius']
         shell_rad = self.conf['Layers']['NW_AlShell']['params']['shell_radius']
@@ -504,6 +507,7 @@ class Simulation:
         # print("core_inds: ", core_inds)
         # print("shell_inds: ", shell_inds)
         core_vals = nkEsq[core_inds]
+        print("len(shell_inds) = {}".format(len(shell_inds[0])))
         shell_vals = nkEsq[shell_inds]
         # print("core_vals shape: ", core_vals.shape)
         # print("max core val = {}".format(np.amax(core_vals)))
@@ -512,23 +516,26 @@ class Simulation:
         # print(pts)
         # Shift x and y values so origin is at center of nanowire
         # core_pts_inds = np.where((core_pts[:, 1] - period/2)**2 + (core_pts[:, 2] - period/2)**2 <= core_rad**2)
-        p2 = period/2.0
+        p2 = period/2
         pts[:, 2] -= p2
         pts[:, 1] -= p2
         core_pts_inds = np.where(pts[:, 1]**2 + pts[:, 2]**2 <= core_rad**2)
-        shell_pts_inds = np.where((core_rad**2 <= pts[:, 1]**2 + pts[:, 2]**2)
+        shell_pts_inds = np.where((core_rad**2 < pts[:, 1]**2 + pts[:, 2]**2)
                                   &
                                   (pts[:, 1]**2 + pts[:, 2]**2 <= shell_rad**2))
+        print("len(shell_pts_inds) = {}".format(len(shell_pts_inds[0])))
         # core_pts_inds = np.where((pts[:, 1]-p2)**2 + (pts[:, 2]-p2)**2 <= core_rad**2)
         # shell_pts_inds = np.where((core_rad**2 <= (pts[:, 1]-p2)**2 + (pts[:, 2]-p2)**2)
         #                           &
         #                           ((pts[:, 1]-p2)**2 + (pts[:, 2]-p2)**2 <= shell_rad**2))
-        # print(core_pts_inds)
+        print("cartesian pts shape: ", pts.shape)
+        print(len(core_pts_inds[0]))
         # print("pts shape: ", pts[0].shape)
         core_pts = pts[core_pts_inds[0], :]
-        # print("cartesian core_pts shape: ", core_pts.shape)
+        print("cartesian core_pts shape: ", core_pts.shape)
         # print("core_pts inds shape: ", core_pts_inds[0].shape)
         shell_pts = pts[shell_pts_inds[0], :]
+        print("cartesian shell_pts shape: ", shell_pts.shape)
         # core_pts = core_pts[core_pts_inds[0], core_pts
         # print("yy shape: ", yy.shape)
         # print("zz shape: ", zz.shape)
@@ -541,34 +548,65 @@ class Simulation:
         core_polar_pts[:, 0] = np.sqrt(core_pts[:, 2]**2 + core_pts[:, 1]**2)
         # This returns angles on [-pi, pi], so shift them
         core_polar_pts[:, 1] = np.arctan2(core_pts[:, 2], core_pts[:, 1])
-        core_polar_pts[:, 1][core_polar_pts[:, 1] < 0] += 2*np.pi
+        # core_polar_pts[:, 1][core_polar_pts[:, 1] < 0] += 2*np.pi
         core_polar_pts[:, 2] = core_pts[:, 0]
         # Same for the shell
         shell_polar_pts = np.zeros_like(shell_pts)
         shell_polar_pts[:, 0] = np.sqrt(shell_pts[:, 2]**2 + shell_pts[:, 1]**2)
         # This returns angles on [-pi, pi], so shift them
         shell_polar_pts[:, 1] = np.arctan2(shell_pts[:, 2], shell_pts[:, 1])
-        shell_polar_pts[:, 1][shell_polar_pts[:, 1] < 0] += 2*np.pi
+        # shell_polar_pts[:, 1][shell_polar_pts[:, 1] < 0] += 2*np.pi
         shell_polar_pts[:, 2] = shell_pts[:, 0]
+        ###########
+        # Insert S4 data at r = 0 here and all theta values.  
+        # Odd numbers of points guarantee an S4 point at the center of the unit
+        # cell. Use an odd number of points, and take the center value and
+        # replicate it across all thetas for r = 0
+        # 1) Does the weird start in the center go away
+        # 2) Compare integral by material to plain old integral and flux method
+        ###########
+        # Get function value at r = 0
+        # center_inds = np.where((pts[:, 1] == .125) & (pts[:, 2] == .125))
+        # center_inds = np.where(core_polar_pts[:, 0] == 0)
+        # print("center_inds[0].shape = {}".format(center_inds[0].shape))
+        # print("center_inds[0] = {}".format(center_inds[0]))
+        # rzero_core_vals = core_vals[center_inds[0]]
+        # # print("rzero_core_vals = {}".format(rzero_core_vals))
+        # extra_theta = 90
+        # extra_pts = cartesian_product((np.array([0]),
+        #                                np.linspace(-np.pi, np.pi, extra_theta),
+        #                                core_polar_pts[center_inds[0], 2]))
+        # # print("extra_pts = {}".format(extra_pts))
+        # repeated_zero_vals = np.concatenate([rzero_core_vals for i in range(extra_theta)])
+        # core_polar_pts = np.concatenate((core_polar_pts, extra_pts))
+        # core_vals = np.concatenate((core_vals, repeated_zero_vals))
+
+        # if True:
+        #     return None,None,None,None,None,None,None,None,None
+
         # fig, ax = scatter3d(pts[:, 0], pts[:, 1], pts[:, 2])
         # plt.show()
         # Extract interpolated points on a polar grid
         # print('core_polar_pts shape: ', core_polar_pts.shape)
         # print(core_polar_pts)
         rstart = 0 
-        core_numr = 120
+        core_numr = 60
         shell_numr = 40
-        numtheta = 120
-        numz = 200
+        numtheta = 90
+        numz = 100
         # If the last element of each range is complex, the ranges behave like
         # np.linspace
-        # ranges = [[rstart, core_rad, 1j*numr], [-np.pi, np.pi, 1j*numtheta],
+        ranges = [[rstart, core_rad, 1j*core_numr], [-np.pi, np.pi, 1j*numtheta],
+                  [nw_layer.start, nw_layer.end, 1j*numz]]
+        # ranges = [[rstart, core_rad, 1j*core_numr], [0, 2*np.pi, 1j*numtheta],
         #           [nw_layer.start, nw_layer.end, 1j*numz]]
-        ranges = [[rstart, core_rad, 1j*core_numr], [0, 2*np.pi, 1j*numtheta],
-                  [nw_layer.start, nw_layer.end, 1j*numz]]
         core_interp = nn.griddata(core_polar_pts, core_vals, ranges)
-        ranges = [[core_rad, shell_rad, 1j*shell_numr], [0, 2*np.pi, 1j*numtheta],
+        # ranges = [[core_rad, shell_rad, 1j*shell_numr], [0, 2*np.pi, 1j*numtheta],
+        #           [nw_layer.start, nw_layer.end, 1j*numz]]
+        ranges = [[core_rad, shell_rad, 1j*shell_numr], [-np.pi, np.pi, 1j*numtheta],
                   [nw_layer.start, nw_layer.end, 1j*numz]]
+        print("shell_polar_pts.shape = {}".format(shell_polar_pts.shape))
+        print("shell_vals.shape = {}".format(shell_vals.shape))
         shell_interp = nn.griddata(shell_polar_pts, shell_vals, ranges)
         # print("Core interp vals shape: ", core_interp.shape)
         # print("Core interp minimum: ", np.amin(core_interp))
@@ -583,21 +621,24 @@ class Simulation:
         core_rvals = np.linspace(rstart, core_rad, core_numr)
         thetavals = np.linspace(0, 2*np.pi, numtheta)
         intzvals = np.linspace(nw_layer.start, nw_layer.end, numz)
-        rr, tt = np.meshgrid(thetavals, core_rvals)
-        # print('rr shape: ', rr.shape)
-        # print('tt shape: ', tt.shape)
-        # print(np.amin(rr[:, :, None]*np.sin(tt[:, :, None])))
-        integrand = core_interp*rr[:, :, None]*np.sin(tt[:, :, None])
-        # integrand = core_interp*rr[:, :, None]
+        print("zvals = {}".format(zvals))
+        print("intzvals = {}".format(intzvals))
+        rr, tt = np.meshgrid(core_rvals, thetavals, indexing='ij')
+        print('rr shape: ', rr.shape)
+        print('tt shape: ', tt.shape)
+        print('core_interp: ', core_interp.shape)
+        # integrand = core_interp*rr[:, :, None]*np.sin(tt[:, :, None])
+        integrand = core_interp*rr[:, :, None]
         # print("Integrand min: ", np.amin(integrand))
         core_result = integrate3d(integrand, thetavals, intzvals, core_rvals)
         # Shell integral
         shell_rvals = np.linspace(core_rad, shell_rad, shell_numr)
-        rr, tt = np.meshgrid(thetavals, shell_rvals)
-        # print('rr shape: ', rr.shape)
-        # print('tt shape: ', tt.shape)
+        rr, tt = np.meshgrid(shell_rvals, thetavals, indexing='ij')
+        print('rr shape: ', rr.shape)
+        print('tt shape: ', tt.shape)
+        print('shell_interp: ', shell_interp.shape)
         # print(np.amin(rr[:, :, None]*np.sin(tt[:, :, None])))
-        integrand = shell_interp*rr[:, :, None]*np.sin(tt[:, :, None])
+        integrand = shell_interp*rr[:, :, None]
         # integrand = core_interp*rr[:, :, None]
         # print("Integrand min: ", np.amin(integrand))
         shell_result = integrate3d(integrand, thetavals, intzvals, shell_rvals)

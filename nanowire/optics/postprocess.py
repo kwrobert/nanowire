@@ -33,6 +33,7 @@ from .utils.utils import (
     get_incident_amplitude,
     cartesian_product
 )
+from sympy import Point, Circle, Ellipse, Triangle, Polygon, RegularPolygon
 from .data_manager import HDF5DataManager, NPZDataManager
 from .utils.geometry import (
     Layer,
@@ -456,11 +457,13 @@ class Simulation:
         nanowire in shell in polar coordinates for optimum accuracy
         """
         
-        if len(self.X) % 2 == 0 or len(self.Y) % 2 == 0:
-            raise ValueError("Need and odd number of x-y samples to use this "
-                             " function")
+        # if len(self.X) % 2 == 0 or len(self.Y) % 2 == 0:
+        #     raise ValueError("Need and odd number of x-y samples to use this "
+        #                      " function")
+        self.log.info("CALLING INTEGRATE_NANOWIRE")
         nw_layer = self.layers['NW_AlShell']
         core_rad = self.conf['Layers']['NW_AlShell']['params']['core_radius']
+        # print("CALLING INTEGRATE_NANOWIRE")
         shell_rad = self.conf['Layers']['NW_AlShell']['params']['shell_radius']
         period = self.conf['Simulation']['params']['array_period']
         # shell_rad = self.conf['Layers']['NW_AlShell']['params']['shell_radius']
@@ -500,14 +503,15 @@ class Simulation:
         # plt.colorbar()
         # plt.show()
         cyc_z = np.linspace(nw_layer.start, nw_layer.end, nkEsq.shape[0])
-        cyc_result = integrate3d(cyc_vals, self.X, self.Y, cyc_z)
+        cyc_result = integrate3d(cyc_vals, self.X, self.Y, cyc_z,
+                                 meth=intg.simps)
         # Extract vals in each region from nkEsq array
         core_inds = np.where(core_mask3d)
         shell_inds = np.where(shell_mask3d)
         # print("core_inds: ", core_inds)
         # print("shell_inds: ", shell_inds)
         core_vals = nkEsq[core_inds]
-        print("len(shell_inds) = {}".format(len(shell_inds[0])))
+        # print("len(shell_inds) = {}".format(len(shell_inds[0])))
         shell_vals = nkEsq[shell_inds]
         # print("core_vals shape: ", core_vals.shape)
         # print("max core val = {}".format(np.amax(core_vals)))
@@ -523,19 +527,19 @@ class Simulation:
         shell_pts_inds = np.where((core_rad**2 < pts[:, 1]**2 + pts[:, 2]**2)
                                   &
                                   (pts[:, 1]**2 + pts[:, 2]**2 <= shell_rad**2))
-        print("len(shell_pts_inds) = {}".format(len(shell_pts_inds[0])))
+        # print("len(shell_pts_inds) = {}".format(len(shell_pts_inds[0])))
         # core_pts_inds = np.where((pts[:, 1]-p2)**2 + (pts[:, 2]-p2)**2 <= core_rad**2)
         # shell_pts_inds = np.where((core_rad**2 <= (pts[:, 1]-p2)**2 + (pts[:, 2]-p2)**2)
         #                           &
         #                           ((pts[:, 1]-p2)**2 + (pts[:, 2]-p2)**2 <= shell_rad**2))
-        print("cartesian pts shape: ", pts.shape)
-        print(len(core_pts_inds[0]))
+        # print("cartesian pts shape: ", pts.shape)
+        # print(len(core_pts_inds[0]))
         # print("pts shape: ", pts[0].shape)
         core_pts = pts[core_pts_inds[0], :]
-        print("cartesian core_pts shape: ", core_pts.shape)
+        # print("cartesian core_pts shape: ", core_pts.shape)
         # print("core_pts inds shape: ", core_pts_inds[0].shape)
         shell_pts = pts[shell_pts_inds[0], :]
-        print("cartesian shell_pts shape: ", shell_pts.shape)
+        # print("cartesian shell_pts shape: ", shell_pts.shape)
         # core_pts = core_pts[core_pts_inds[0], core_pts
         # print("yy shape: ", yy.shape)
         # print("zz shape: ", zz.shape)
@@ -590,10 +594,10 @@ class Simulation:
         # print('core_polar_pts shape: ', core_polar_pts.shape)
         # print(core_polar_pts)
         rstart = 0 
-        core_numr = 60
+        core_numr = 120
         shell_numr = 40
-        numtheta = 90
-        numz = 100
+        numtheta = 180
+        numz = 200
         # If the last element of each range is complex, the ranges behave like
         # np.linspace
         ranges = [[rstart, core_rad, 1j*core_numr], [-np.pi, np.pi, 1j*numtheta],
@@ -605,8 +609,8 @@ class Simulation:
         #           [nw_layer.start, nw_layer.end, 1j*numz]]
         ranges = [[core_rad, shell_rad, 1j*shell_numr], [-np.pi, np.pi, 1j*numtheta],
                   [nw_layer.start, nw_layer.end, 1j*numz]]
-        print("shell_polar_pts.shape = {}".format(shell_polar_pts.shape))
-        print("shell_vals.shape = {}".format(shell_vals.shape))
+        # print("shell_polar_pts.shape = {}".format(shell_polar_pts.shape))
+        # print("shell_vals.shape = {}".format(shell_vals.shape))
         shell_interp = nn.griddata(shell_polar_pts, shell_vals, ranges)
         # print("Core interp vals shape: ", core_interp.shape)
         # print("Core interp minimum: ", np.amin(core_interp))
@@ -621,35 +625,37 @@ class Simulation:
         core_rvals = np.linspace(rstart, core_rad, core_numr)
         thetavals = np.linspace(0, 2*np.pi, numtheta)
         intzvals = np.linspace(nw_layer.start, nw_layer.end, numz)
-        print("zvals = {}".format(zvals))
-        print("intzvals = {}".format(intzvals))
+        # print("zvals = {}".format(zvals))
+        # print("intzvals = {}".format(intzvals))
         rr, tt = np.meshgrid(core_rvals, thetavals, indexing='ij')
-        print('rr shape: ', rr.shape)
-        print('tt shape: ', tt.shape)
-        print('core_interp: ', core_interp.shape)
+        # print('rr shape: ', rr.shape)
+        # print('tt shape: ', tt.shape)
+        # print('core_interp: ', core_interp.shape)
         # integrand = core_interp*rr[:, :, None]*np.sin(tt[:, :, None])
         integrand = core_interp*rr[:, :, None]
         # print("Integrand min: ", np.amin(integrand))
-        core_result = integrate3d(integrand, thetavals, intzvals, core_rvals)
+        core_result = integrate3d(integrand, thetavals, intzvals, core_rvals,
+                                  meth=intg.simps)
         # Shell integral
         shell_rvals = np.linspace(core_rad, shell_rad, shell_numr)
         rr, tt = np.meshgrid(shell_rvals, thetavals, indexing='ij')
-        print('rr shape: ', rr.shape)
-        print('tt shape: ', tt.shape)
-        print('shell_interp: ', shell_interp.shape)
+        # print('rr shape: ', rr.shape)
+        # print('tt shape: ', tt.shape)
+        # print('shell_interp: ', shell_interp.shape)
         # print(np.amin(rr[:, :, None]*np.sin(tt[:, :, None])))
         integrand = shell_interp*rr[:, :, None]
         # integrand = core_interp*rr[:, :, None]
         # print("Integrand min: ", np.amin(integrand))
-        shell_result = integrate3d(integrand, thetavals, intzvals, shell_rvals)
+        shell_result = integrate3d(integrand, thetavals, intzvals, shell_rvals,
+                                   meth=intg.simps)
         # print("result = {}".format(result))
         #plt.matshow(shell_mask3d[1, :, :])
         #plt.show()
         #plt.matshow(shell_mask)
         #plt.show()
-        print("Core Result = {}".format(core_result))
-        print("Shell Result = {}".format(shell_result))
-        print("Cyc Result = {}".format(cyc_result))
+        self.log.info("Core Integral Result = {}".format(core_result))
+        self.log.info("Shell Integral Result = {}".format(shell_result))
+        self.log.info("Cyc Integral Result = {}".format(cyc_result))
         return sum((core_result, shell_result, cyc_result))
         # return (core_rvals, shell_rvals, thetavals, zvals, core_interp,
         #         shell_interp, core_result, shell_result, cyc_result)
@@ -746,7 +752,8 @@ class Simulation:
         #     Esq = self.normEsquared()
         freq = self.conf[('Simulation', 'params', 'frequency')]
         dt = [('layer', 'S25'), ('flux_method', 'c16'), ('int_method', 'c16'),
-              ('difference', 'f8')]
+              ('int_method_polar', 'c16'), ('difference', 'f8'),
+              ('difference_polar', 'f8')]
         num_rows = len(list(self.layers.keys()))
         absorb_arr = np.recarray((num_rows,), dtype=dt)
         counter = 0
@@ -779,8 +786,11 @@ class Simulation:
             Esq = np.abs(fields['Ex'])**2 + np.abs(fields['Ey'])**2 + np.abs(fields['Ez'])**2
             z = np.linspace(layer_obj.start, layer_obj.end, Esq.shape[0])
             if layer_name == "NW_AlShell":
-                y_integral = self.integrate_nanowire(nkEsq=n_mat*k_mat*Esq)
+                y_integral_polar = self.integrate_nanowire(nkEsq=n_mat*k_mat*Esq)
+                y_integral = integrate3d(n_mat*k_mat*Esq, self.X, self.Y, z,
+                                         meth=intg.simps)
             else:
+                y_integral_polar = 0
                 y_integral = integrate3d(n_mat*k_mat*Esq, self.X, self.Y, z,
                                          meth=intg.simps)
             # abs_dict[lname] = result
@@ -814,13 +824,20 @@ class Simulation:
             # Factor of 1/2 for time averaging gets canceled by imaginary part
             # of dielectric constant (2*n*k)
             self.log.info("Pabs Pure Integral Result: {}".format(y_integral))
+            Pabs_integ_polar = 2*np.pi*freq*consts.epsilon_0*base_unit*y_integral_polar
             Pabs_integ = 2*np.pi*freq*consts.epsilon_0*base_unit*y_integral
             # Pabs_integ = 2*np.pi*freq*consts.epsilon_0*base_unit*z_integral
             if per_area:
                 Pabs_integ /= self.period**2
+                Pabs_integ_polar /= self.period**2
             self.log.info("Integrated Absorbed: {}".format(Pabs_integ))
             diff = np.abs(Pabs_flux - Pabs_integ)/Pabs_flux
-            absorb_arr[counter] = (layer_name, Pabs_flux, Pabs_integ, diff)
+            if layer_name == "NW_AlShell":
+                diff_polar = np.abs(Pabs_flux - Pabs_integ_polar)/Pabs_flux
+            else:
+                diff_polar = 0
+            absorb_arr[counter] = (layer_name, Pabs_flux, Pabs_integ,
+                                   Pabs_integ_polar, diff, diff_polar)
             counter += 1
         self.log.info("Layer absorption arr: %s", str(absorb_arr))
         fout = os.path.join(self.dir, 'abs_per_layer.dat')
@@ -1020,18 +1037,19 @@ class Simulation:
                 absorb = fact * float(vals[1])
                 outf.write('%s,%s\n' % (layer, absorb))
 
-    def _draw_layer_circle(self, ldata, shape_key, start, end, plane, pval, ax_hand):
+    def _draw_layer_circle(self, layer, shape, material, plane, pval, ax_hand):
         """Draws the circle within a layer"""
-        shape_data = ldata['geometry'][shape_key]
-        center = shape_data['center']
-        radius = shape_data['radius']
+        center = shape.center
+        cx = float(shape.center.x)
+        cy = float(shape.center.y)
+        radius = float(shape.radius)
         if plane == 'xy':
-            circle = mpatches.Circle((center['x'], center['y']), radius=radius,
+            circle = mpatches.Circle((center.x, center.y), radius=radius,
                                      fill=False)
             ax_hand.add_artist(circle)
         if plane in ["xz", "zx", "yz", "zy"]:
             plane_x = pval*self.dx
-            plane_to_center = np.abs(center['x'] - plane_x)
+            plane_to_center = np.abs(cx - plane_x)
             self.log.debug('DIST: {}'.format(plane_to_center))
             # Only draw if the observation plane actually intersects with the
             # circle
@@ -1045,27 +1063,27 @@ class Simulation:
                     half_width = radius
                 self.log.debug('HALF WIDTH: {}'.format(half_width))
                 # Vertical lines should span height of the layer
-                z = [self.height - start * self.dz, self.height - end * self.dz]
+                z = [self.height - layer.start + .5, self.height - layer.end +.5]
+                # z = [layer.start+.5, layer.end+.5]
                 # The upper edge
-                x = [center['y'] + half_width, center['y'] + half_width]
+                x = [cy + half_width, cy + half_width]
                 line = mlines.Line2D(x, z, linestyle='solid', linewidth=2.0,
                                      color='grey')
                 ax_hand.add_line(line)
                 # Now the lower edge
-                x = [center['y'] - half_width, center['y'] - half_width]
+                x = [cy - half_width, cy - half_width]
                 line = mlines.Line2D(x, z, linestyle='solid', linewidth=2.0,
                                      color='grey')
                 ax_hand.add_line(line)
         return ax_hand
 
-    def _draw_layer_geometry(self, ldata, start, end, plane, pval, ax_hand):
+    def _draw_layer_geometry(self, layer, plane, pval, ax_hand):
         """Given a dictionary with the data containing the geometry for a
         layer, draw the internal geometry of the layer for a given plane type
         and plane value"""
-        for shape, data in ldata['geometry'].items():
-            if data['type'] == 'circle':
-                ax = self._draw_layer_circle(ldata, shape, start, end,
-                                             plane, pval, ax_hand)
+        for sname, (shape, material) in layer.shapes.items():
+            if isinstance(shape, Circle):
+                ax = self._draw_layer_circle(layer, shape, material, plane, pval, ax_hand)
             else:
                 self.log.warning('Drawing of shape {} not '
                                  'supported'.format(data['type']))
@@ -1075,53 +1093,39 @@ class Simulation:
         """This function draws the layer boundaries and in-plane geometry on 2D
         heatmaps"""
         # Get the layers in order
-        ordered_layers = self.conf.sorted_dict(self.conf['Layers'])
         period = self.conf['Simulation']['params']['array_period']
         # Loop through them
-        boundaries = []
-        count = 0
-        for layer, ldata in ordered_layers.items():
+        air_t = self.layers['Air'].thickness
+        for lname, layer in self.layers.items():
             # If x or y, draw bottom edge and text label now. Layer geometry
             # is handled in its own function
             if plane in ["xz", "zx", "yz", "zy"]:
                 # Get boundaries between layers and their starting and ending
                 # indices
-                layer_t = ldata['params']['thickness']
-                if count == 0:
-                    start = 0
-                    end = int(layer_t / self.dz) + 1
-                    boundaries.append((layer_t, start, end, layer))
-                else:
-                    prev_tup = boundaries[count - 1]
-                    dist = prev_tup[0] + layer_t
-                    start = prev_tup[2]
-                    end = int(dist / self.dz) + 1
-                    boundaries.append((dist, start, end))
+                layer_t = layer.thickness
                 if layer_t > 0:
                     if layer not in skip_list:
                         x = [0, period]
-                        y = [self.height - start * self.dz,
-                             self.height - start * self.dz]
-                        label_y = y[0] + 3*self.dz
-                        label_x = x[-1] - .01
+                        y = [self.height - layer.start + air_t,
+                             self.height - layer.start + air_t]
+                        # y = [layer.start + .5, layer.start + .5]
+                        # label_y = y[0] + 3*self.dz
+                        # label_x = x[-1] - .01
                         # ax_hand.text(label_x, label_y, layer, ha='right',
                         #              family='sans-serif', size=16, color='grey')
                         line = mlines.Line2D(x, y, linestyle='solid', linewidth=2.0,
                                              color='grey')
                         ax_hand.add_line(line)
-                    count += 1
-            else:
-                # If look at a fixed z pval, the start and end values are
-                # nonsensical but we must pass a value in
-                start, end = None, None
             # If we have some internal geometry for this layer, draw it
-            if 'geometry' in ldata:
-                ax_hand = self._draw_layer_geometry(ldata, start, end, plane, pval, ax_hand)
+            # if 'geometry' in ldata:
+            if layer.shapes:
+                ax_hand = self._draw_layer_geometry(layer, plane, pval, ax_hand)
         return ax_hand
 
     def heatmap2d(self, x, y, cs, labels, ptype, pval, save_path=None,
                   show=False, draw=False, fixed=None, colorsMap='jet'):
         """A general utility method for plotting a 2D heat map"""
+        cs = np.flipud(cs)
         cm = plt.get_cmap(colorsMap)
         if np.iscomplexobj(cs):
             self.log.warning('Plotting only real part of %s in heatmap',
@@ -1145,7 +1149,9 @@ class Simulation:
         scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
         fig = plt.figure(figsize=(10, 8))
         ax = fig.add_subplot(111)
-        ax.imshow(cs,cmap=cm,norm=cNorm,extent=[x.min(),x.max(),y.min(),y.max()],aspect='auto')
+        # ax.imshow(cs,cmap=cm,norm=cNorm,extent=[x.min(),x.max(),y.min(),y.max()],aspect='auto')
+        ax.pcolormesh(x, y, cs, cmap=cm, norm=cNorm)
+                      # extent=[x.min(),x.max(),y.min(),y.max()],aspect='auto')
         ax.grid(False)
         scalarMap.set_array(cs)
         # div = make_axes_locatable(ax)
@@ -1159,7 +1165,7 @@ class Simulation:
         ax.set_ylabel(labels[1])
         if draw:
             self.log.info('Beginning geometry drawing routines ...')
-            ax = self.draw_geometry_2d(ptype, pval, ax)
+            # ax = self.draw_geometry_2d(ptype, pval, ax)
         if save_path:
             fig.savefig(save_path, bbox_inches='tight')
         if show:
@@ -1858,7 +1864,8 @@ class SimulationGroup:
             abs_arr = sim.data['abs_per_layer']
             flux_total = 0
             integ_total = 0
-            for (layer, flux, integ, diff) in abs_arr:
+            integ_polar_total = 0
+            for (layer, flux, integ, integ_polar, diff, diff_polar) in abs_arr:
                 layer = layer.decode('utf-8')
                 # print('Layer: {}'.format(layer))
                 # print('Flux: {}'.format(flux.real))
@@ -1868,27 +1875,42 @@ class SimulationGroup:
                     results_dict[layer][0].append(flux.real)
                     results_dict[layer][1].append(integ.real)
                     results_dict[layer][2].append(diff.real)
+                    results_dict[layer][3].append(integ_polar.real)
+                    results_dict[layer][4].append(diff_polar.real)
                 else:
-                    results_dict[layer] = [[flux.real], [integ.real], [diff.real]]
+                    results_dict[layer] = [[flux.real], [integ.real],
+                                           [diff.real], [integ_polar.real],
+                                           [diff_polar.real]]
                 flux_total += flux.real
                 integ_total += integ.real
+                if layer == "NW_AlShell":
+                    integ_polar_total += integ_polar.real
+                else:
+                    integ_polar_total += integ.real
             total_diff = np.abs(flux_total.real - integ_total.real)/flux_total.real
+            total_diff_polar = np.abs(flux_total.real - integ_polar_total.real)/flux_total.real
             if 'total' in results_dict:
                 results_dict['total'][0].append(flux_total.real)
                 results_dict['total'][1].append(integ_total.real)
                 results_dict['total'][2].append(total_diff.real)
+                results_dict['total'][3].append(integ_polar_total.real)
+                results_dict['total'][4].append(total_diff_polar.real)
             else:
                 results_dict['total'] = [[flux_total.real], [integ_total.real],
-                                         [total_diff.real]]
+                                         [total_diff.real], [integ_polar_total.real],
+                                         [total_diff_polar.real]]
         layers = results_dict.keys()
         if plot_layer is not None:
             layers = [l for l in layers if l == plot_layer]
 
         quants = {'fluxmethod_absorption': 0,
                   'integralmethod_absorption': 1,
-                  'relativediff': 2}
+                  'relativediff': 2, 
+                  'integralmethod_absorption_polar': 3,
+                  'relativediff_polar': 4}
         if quant is not None:
-            quants = {q: ind for q, ind in quants.items() if q == quant}
+            quants = {q: ind for q, ind in quants.items() if q in quant}
+        print(quants)
         for layer in layers:
             results = results_dict[layer]
             for name, ind in quants.items():
@@ -1899,7 +1921,8 @@ class SimulationGroup:
                 pfile = os.path.join(results_dir,
                                      '{}_{}.png'.format(layer, name))
                 numbasis = self.sims[0].conf['Simulation']['params']['numbasis']
-                lab = "Numbasis = {}".format(numbasis)
+                # lab = "Numbasis = {}".format(numbasis)
+                lab = name
                 ax.plot(freqs, results[ind], '--o', label=lab)
                 ax.set_ylabel(name)
                 ax.set_xlabel("Frequency (Hz)")
@@ -2147,9 +2170,29 @@ def execute_plan(conf, plan):
     else:
         log.info("Executing Simulation plan")
         obj = Simulation(conf=conf)
+        log.info("LAYERS: %s", str(obj.layers.keys()))
+        for fname in ('Ex', 'Ey', 'Ez'):
+            keys = ['{}_{}'.format(lname, fname) for lname in obj.layers.keys()]
+            obj.data[fname] = np.concatenate([obj.data['{}_{}'.format(lname, fname)] for lname in obj.layers.keys()])
+            log.info("FKEYS: %s", str(keys))
+        zcoords = np.array([])
+        for lname, layer in obj.layers.items():
+            key = '{}_Ex'.format(lname)
+            lzvals = np.linspace(layer.start, layer.end, obj.data[key].shape[0])
+            log.info("lzvals.shape = {}".format(lzvals.shape))
+            zcoords = np.append(zcoords, lzvals)
+        log.info("zcoords.shape = {}".format(zcoords.shape))
+        obj.data['zcoords'] = zcoords
+        obj.Z = zcoords
+        # log.info("DATA KEYS: %s", str(list(obj.data.keys())))
+        # log.info("DATA KEYS: %s", str(obj.data.keys()))
+        for k, v in obj.data.items():
+            log.info("%s shape: %s", k, str(v.shape))
         ID = obj.id[0:10]
 
     for task_name in ('crunch', 'plot'):
+        if task_name not in plan:
+            continue
         task = plan[task_name] 
         log.info("Beginning %s for obj %s", task_name, ID)
         for func, data in task.items():
@@ -2172,6 +2215,13 @@ def execute_plan(conf, plan):
     log.info("Plan execution for obj %s complete", ID)
     if isinstance(obj, Simulation):
         log.info("Saving and clearing data for Simulation %s", ID)
+        for fname in ('Ex', 'Ey', 'Ez'):
+            del obj.data[fname]
+        del obj.data['zcoords']
+        if 'normE' in obj.data:
+            del obj.data['normE']
+        if 'normEsquared' in obj.data:
+            del obj.data['normEsquared']
         obj.write_data()
         obj.clear_data()
     else:
@@ -2186,11 +2236,17 @@ class Processor(object):
     SimulationGroups
     """
 
-    def __init__(self, global_conf, sims=[], sim_groups=[], failed_sims=[]):
-        if os.path.isfile(global_conf):
-            self.gconf = Config(os.path.abspath(global_conf))
+    def __init__(self, path=None, conf=None, sims=[], sim_groups=[], failed_sims=[]):
+        if path is not None:
+            if os.path.isfile(path):
+                self.gconf = Config(os.path.abspath(path))
+            else:
+                raise ValueError("Path {} to conf file doesn't "
+                                 " exist".format(path))
+        elif conf is not None:
+            self.gconf = conf
         else:
-            self.gconf = global_conf
+            raise ValueError("Must pass in either path of conf kwargs")
         # self.gconf.expand_vars()
         self.log = logging.getLogger(__name__)
         self.log.debug("Processor base init")
@@ -2259,8 +2315,6 @@ class Processor(object):
 
         assert(type(pars) == dict)
         for par, vals in pars.items():
-            print(par)
-            print(vals)
             vals = [type(self.sim_confs[0][par])(v) for v in vals]
             self.sim_confs = [conf for conf in self.sim_confs if conf[par] in vals]
             groups = []
@@ -2269,7 +2323,6 @@ class Processor(object):
                 groups.append(filt_group)
             self.sim_groups = groups
         assert(len(self.sim_confs) >= 1)
-        print(len(self.sim_confs))
         return self.sim_confs, self.sim_groups
 
     def group_against(self, key, variable_params, sort_key=None):

@@ -187,10 +187,11 @@ class HDF5DataManager(DataManager):
                 self.log.info('Writing data for recarray %s', key)
                 num_rows = obj.shape[0]
                 try:
-                    tb_path = self.gpath + '/{}'.format(key)
-                    table = self._dfile.get_node(tb_path, classname='Table')
                     # If the table exists, clear it out
-                    table.remove_rows(start=0)
+                    self._dfile.remove_node(self.gpath, name=key)
+                    table = self._dfile.create_table(self.gpath, key,
+                                                     description=obj.dtype,
+                                                     expectedrows=num_rows)
                 except tb.NoSuchNodeError:
                     table = self._dfile.create_table(self.gpath, key,
                                                      description=obj.dtype,
@@ -211,7 +212,7 @@ class HDF5DataManager(DataManager):
                     else:
                         self._dfile.remove_node(self.gpath, name=key)
                         if self.conf['General']['compression']:
-                            filt = tb.Filters(complevel=4, complib='zlib')
+                            filt = tb.Filters(complevel=8, complib='zlib')
                             self._dfile.create_carray(self.gpath, key, obj=obj,
                                                       filters=filt,
                                                       atom=tb.Atom.from_dtype(obj.dtype))
@@ -219,7 +220,7 @@ class HDF5DataManager(DataManager):
                             self._dfile.create_array(self.gpath, key, obj)
                 except tb.NoSuchNodeError:
                     if self.conf['General']['compression']:
-                        filt = tb.Filters(complevel=4, complib='zlib')
+                        filt = tb.Filters(complevel=8, complib='zlib')
                         self._dfile.create_carray(self.gpath, key, obj=obj,
                                                   filters=filt,
                                                   atom=tb.Atom.from_dtype(obj.dtype))

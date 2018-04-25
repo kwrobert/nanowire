@@ -487,3 +487,42 @@ def cartesian_product(arrays, out=None):
         arrs[i-1][1:] = arrs[i]
     arr[..., 0] = arrays[0][idx]
     return arr.reshape(-1, la)
+
+
+def arithmetic_linspace(a, b, dx0, d, endpoint=True):
+    """
+    A numpy.linspace copy whose step sizes increase arithmetically, i.e the
+    step sizes follow an arithmetic progression.
+
+    :param a: The starting value
+    :param b: The ending value
+    :param dx0: The size of the very first step
+    :param d: The amount to increase each step by.
+    :keyword endpoint: Whether or not to include the end point b in the
+    returned
+
+    The stepsizes are calculated using the following formula
+
+    :math:`dx_n = dx_{n-1} + n*d
+    array.
+
+    .. note::
+        The size of the step between the 2nd to last point and the endpoint may
+        not follow the arithmetic progression. This is because it may not be
+        possible to land exactly on the given start and end point for the
+        given initial step size and step increase
+    """
+    cur_step = dx0
+    pts = np.array([a])
+    i = 0
+    while pts[-1] < b:
+        step = cur_step + i*d
+        pts = np.append(pts, pts[-1]+step)
+        i += 1
+        cur_step = step
+    if endpoint:
+        if pts[-1] > b:
+            pts[-1] = b
+    if not endpoint and pts[-1] >= b:
+        pts = pts[0:-1]
+    return pts

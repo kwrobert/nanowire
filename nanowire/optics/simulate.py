@@ -1550,19 +1550,21 @@ class Simulator():
         """
         Load solution from disk
         """
+        log = logging.getLogger(__name__)
         self.log.info("Loading simulation state")
         sfile = self.conf['General']['solution_file']
         sdir = self.conf['General']['sim_dir']
         fname = os.path.expandvars(os.path.join(sdir, sfile))
         # print(fname)
         if os.path.isfile(fname):
-            self.log.info("Loading from: %s"%fname)
-            # print("Loading from: %s"%fname)
-            self.s4.LoadSolution(Filename=fname)
+            self.log.info("Loading from: %s", fname)
+            log.info("Simulator %s loading solution from: %s", self.id[0:10], fname)
+            # self.s4.LoadSolution(Filename=fname)
             self.log.info("Solution loaded!")
-            # print("Solution loaded!")
+            log.info("Solution loaded!")
         else:
             self.log.warning("Solution file does not exist. Cannot load")
+            log.warning("Solution file does not exist. Cannot load")
             # print("Solution file does not exist. Cannot load")
 
     def save_state(self):
@@ -1865,6 +1867,7 @@ class Simulator():
         """Gets all the data for this similation by calling the relevant class
         methods. Basically just a convenient wrapper to execute all the
         functions defined above"""
+        log = logging.getLogger(__name__)
         # TODO: Split this into a get_all and save_all function. Will give more
         # granular sense of timing and also all getting data without having to
         # save
@@ -1875,10 +1878,12 @@ class Simulator():
                                   self.conf['General']['solution_file'])
         if os.path.isfile(state_file):
             self.log.debug("State file exists: %s"%state_file)
-            print("State file exists: %s"%state_file)
+            log.info("State file exists: %s"%state_file)
             self.load_state()
+        else:
+            log.info("State file %s does not exist", state_file)
         # self.get_field()
-        sdict = {"Air": 5, "ITO": 100, "NW_AlShell": 300, "Substrate": 300}
+        sdict = {"Air": 5, "ITO": 100, "NW_AlShell": 200, "Substrate": 300}
         # sdict = {"Air": 5, "ITO": 10, "NW_AlShell": 20, "Substrate": 30}
         # self.compute_fields_by_layer(self.conf['General']['sample_dict'])
         self.compute_fields_by_layer(sdict)
@@ -1896,4 +1901,4 @@ class Simulator():
         self.hdf5.close()
         self.log.info('Simulation {} completed in {:.2}'
                       ' seconds!'.format(self.id[0:10], self.runtime))
-        return
+        return None

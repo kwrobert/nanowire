@@ -1191,7 +1191,7 @@ class Simulation:
             labels = ('y [um]', 'z [um]', quantity, title)
             if self.conf['General']['save_plots']:
                 p = os.path.join(sim_dir,
-                                 '%s_plane_2d_yz_pval%s.pdf' % (quantity,
+                                 '%s_plane_2d_yz_pval%s.png' % (quantity,
                                                                str(pval)))
             self.heatmap2d(y, z, cs, labels, plane, pval,
                            save_path=p, show=show, draw=draw, fixed=fixed)
@@ -1199,7 +1199,7 @@ class Simulation:
             labels = ('x [um]', 'z [um]', quantity, title)
             if self.conf['General']['save_plots']:
                 p = os.path.join(sim_dir,
-                                 '%s_plane_2d_xz_pval%s.pdf' % (quantity,
+                                 '%s_plane_2d_xz_pval%s.png' % (quantity,
                                                                str(pval)))
             self.heatmap2d(x, z, cs, labels, plane, pval,
                            save_path=p, show=show, draw=draw, fixed=fixed)
@@ -1207,7 +1207,7 @@ class Simulation:
             labels = ('y [um]', 'x [um]', quantity, title)
             if self.conf['General']['save_plots']:
                 p = os.path.join(sim_dir,
-                                 '%s_plane_2d_xy_pval%s.pdf' % (quantity,
+                                 '%s_plane_2d_xy_pval%s.png' % (quantity,
                                                                str(pval)))
             self.heatmap2d(x, y, cs, labels, plane, pval,
                            save_path=p, show=show, draw=draw, fixed=fixed)
@@ -1229,7 +1229,7 @@ class Simulation:
         ax.set_zlabel(labels[2])
         fig.suptitle(os.path.basename(self.conf['General']['sim_dir']))
         if self.conf['General']['save_plots']:
-            name = labels[-1] + '_' + ptype + '.pdf'
+            name = labels[-1] + '_' + ptype + '.png'
             path = os.path.join(self.conf['General']['sim_dir'], name)
             fig.savefig(path)
         if self.conf['General']['show_plots']:
@@ -1347,7 +1347,7 @@ class Simulation:
             fig, ax = self.line_plot(pos_data, data, labels)
         ax.legend()
         if self.conf['General']['save_plots']:
-            name = labels[2] + '_' + ptype + '.pdf'
+            name = labels[2] + '_' + ptype + '.png'
             sim_dir = os.path.expandvars(self.conf['General']['sim_dir'])
             path = os.path.join(sim_dir, name)
             fig.savefig(path)
@@ -1945,7 +1945,7 @@ class SimulationGroup:
                     excluded = '_excluded'
                 else:
                     excluded = ''
-                name = '%s_%sconvergence_%s%s.pdf' % (
+                name = '%s_%sconvergence_%s%s.png' % (
                     os.path.basename(base), err_type, quantity, excluded)
                 path = os.path.join(base, name)
                 fig.savefig(path)
@@ -1989,7 +1989,7 @@ class SimulationGroup:
             if plane == 'yz' or plane == 'zy':
                 labels = ('y [um]', 'z [um]', quantity, title)
                 if sim.conf['General']['save_plots']:
-                    fname = 'scalar_reduce_%s_plane_2d_yz.pdf' % quantity
+                    fname = 'scalar_reduce_%s_plane_2d_yz.png' % quantity
                     p = os.path.join(base, fname)
                 show = sim.conf['General']['show_plots']
                 self.sims[0].heatmap2d(y, z, cs, labels, plane, pval,
@@ -1997,7 +1997,7 @@ class SimulationGroup:
             elif plane == 'xz' or plane == 'zx':
                 labels = ('x [um]', 'z [um]', quantity, title)
                 if sim.conf['General']['save_plots']:
-                    fname = 'scalar_reduce_%s_plane_2d_xz.pdf' % quantity
+                    fname = 'scalar_reduce_%s_plane_2d_xz.png' % quantity
                     p = os.path.join(base, fname)
                 show = sim.conf['General']['show_plots']
                 self.sims[0].heatmap2d(sim, x, z, cs, labels, plane, pval,
@@ -2005,7 +2005,7 @@ class SimulationGroup:
             elif plane == 'xy' or plane == 'yx':
                 labels = ('y [um]', 'x [um]', quantity, title)
                 if sim.conf['General']['save_plots']:
-                    fname = 'scalar_reduce_%s_plane_2d_xy.pdf' % quantity
+                    fname = 'scalar_reduce_%s_plane_2d_xy.png' % quantity
                     p = os.path.join(base, fname)
                 self.sims[0].heatmap2d(sim, x, y, cs, labels, plane, pval,
                                save_path=p, show=show, draw=draw, fixed=fixed)
@@ -2041,7 +2041,7 @@ class SimulationGroup:
         if transmission:
             plt.plot(freqs, trans_l, '-o', label='Transmission')
         plt.legend(loc='best')
-        figp = os.path.join(base, 'transmission_plots_port%s.pdf'%port)
+        figp = os.path.join(base, 'transmission_plots_port%s.png'%port)
         plt.xlabel('Wavelength (nm)')
         plt.ylim((0, 1.0))
         plt.savefig(figp)

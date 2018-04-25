@@ -1215,7 +1215,7 @@ class Simulator():
                 # H_arr = np.array(H)
                 E_arr, H_arr = self.s4.GetFieldsOnGridNumpy(z=z,
                                                             NumSamples=(self.xsamps-1,
-                                                                        self.ysamps-1),
+                                                                        self.ysamps-1))
                 Hx[zcount, :-1, :-1] = H_arr[:, :, 0]
                 Hx[zcount, 0:self.xsamps-1, -1] = H_arr[:, 0, 0]
                 Hx[zcount, -1, 0:self.ysamps-1] = H_arr[0, :, 0]

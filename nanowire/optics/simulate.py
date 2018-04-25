@@ -1,7 +1,7 @@
 import shutil
 # import psutil
 import os
-import posixpath 
+import posixpath
 import sys
 import copy
 from multiprocessing.pool import Pool
@@ -36,13 +36,13 @@ from .utils.utils import (
     get_combos,
     IdFilter,
     get_incident_amplitude,
-    find_inds, 
+    find_inds,
     merge_and_sort
 )
 from .utils.config import Config
 from .utils.geometry import Layer, get_layers
 
-# from line_profiler import LineProfiler
+from line_profiler import LineProfiler
 
 def do_profile(follow=[], out=''):
     def inner(func):
@@ -151,7 +151,7 @@ def update_sim(conf, samples, q=None):
     Wrapper for updating field arrays for a simulation. Expects the Config
     for the simulation as an argument.
     """
-    
+
     try:
         log = logging.getLogger(__name__)
         start = time.time()
@@ -872,7 +872,7 @@ class Simulator():
 
         self.xsamps = self.conf['General']['x_samples']
         self.ysamps = self.conf['General']['y_samples']
-        if type(self.conf['General']['z_samples']) == list: 
+        if type(self.conf['General']['z_samples']) == list:
             self.zsamps = len(self.conf['General']['z_samples'])
             # print(self.conf['General']['z_samples'])
             self.Z = np.asarray(self.conf['General']['z_samples'])
@@ -1177,10 +1177,14 @@ class Simulator():
             Hx, Hy, Hz = None, None, None
         for zcount, z in enumerate(zvals):
             if self.conf["General"]["compute_h"]:
-                E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(self.xsamps-1,
-                                                                self.ysamps-1),
-                                               Format='Array')
-                H_arr = np.array(H)
+                # E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(self.xsamps-1,
+                #                                                 self.ysamps-1),
+                #                                Format='Array')
+                # E_arr = np.array(E)
+                # H_arr = np.array(H)
+                E_arr, H_arr = self.s4.GetFieldsOnGridNumpy(z=z,
+                                                            NumSamples=(self.xsamps-1,
+                                                                        self.ysamps-1),
                 Hx[zcount, :-1, :-1] = H_arr[:, :, 0]
                 Hx[zcount, 0:self.xsamps-1, -1] = H_arr[:, 0, 0]
                 Hx[zcount, -1, 0:self.ysamps-1] = H_arr[0, :, 0]
@@ -1195,14 +1199,16 @@ class Simulator():
                 Hz[zcount, -1, -1] = H_arr[0, 0, 2]
             else:
                 start = time.time()
-                E = self.s4.GetFieldsOnGrid(z=z,
-                                            NumSamples=(self.xsamps-1,
-                                                        self.ysamps-1),
-                                            Format='Array')[0]
+                # E = self.s4.GetFieldsOnGrid(z=z, NumSamples=(self.xsamps-1,
+                #                                              self.ysamps-1),
+                #                             Format='Array')[0]
+                # E_arr = np.array(E)
+                E_arr = self.s4.GetFieldsOnGridNumpy(z=z,
+                                                     NumSamples=(self.xsamps-1,
+                                                                 self.ysamps-1))[0]
                 end = time.time()
                 self.log.debug('Time for S4 GetFieldsOnGrid call: %f',
                                end-start)
-            E_arr = np.array(E)
             # Grab the periodic BC, which is always excluded from results
             # returned by S4 above
             Ex[zcount, :-1, :-1] = E_arr[:, :, 0]
@@ -1289,7 +1295,8 @@ class Simulator():
                               ('Hz',Hz))})
         return results
 
-    def compute_fields_on_plane(self, z, xsamples, ysamples):
+    # @do_profile(follow=[])
+    def compute_fields_on_plane(self, z, xs, ys, numpy=False):
         """
         Compute the electric field on an x-y plane at a given z value with a
         given number of samples in the x and y directions and return a tuple
@@ -1297,49 +1304,55 @@ class Simulator():
 
         This function is inclusive of the periodic endpoints at x=xmax and y=ymax
         """
-        Ex = np.zeros((xsamples, ysamples), dtype=np.complex128)
-        Ey = np.zeros((xsamples, ysamples), dtype=np.complex128)
-        Ez = np.zeros((xsamples, ysamples), dtype=np.complex128)
+        Ex = np.zeros((xs, ys), dtype=np.complex128)
+        Ey = np.zeros((xs, ys), dtype=np.complex128)
+        Ez = np.zeros((xs, ys), dtype=np.complex128)
         if self.conf["General"]["compute_h"]:
-            Hx = np.zeros((xsamples, ysamples), dtype=np.complex128)
-            Hy = np.zeros((xsamples, ysamples), dtype=np.complex128)
-            Hz = np.zeros((xsamples, ysamples), dtype=np.complex128)
-            E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(xsamples-1,
-                                                            ysamples-1),
-                                           Format='Array')
-            E_arr = np.array(E)
-            H_arr = np.array(H)
+            Hx = np.zeros((xs, ys), dtype=np.complex128)
+            Hy = np.zeros((xs, ys), dtype=np.complex128)
+            Hz = np.zeros((xs, ys), dtype=np.complex128)
+            # E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(xs-1,
+            #                                                 ys-1),
+            #                                Format='Array')
+            # E_arr = np.array(E)
+            # H_arr = np.array(H)
+            E_arr, H_arr = self.s4.GetFieldsOnGridNumpy(z=z,
+                                                        NumSamples=(xs-1, ys-1))
         else:
-            E = self.s4.GetFieldsOnGrid(z=z, NumSamples=(xsamples-1, ysamples-1),
-                                        Format='Array')[0]
-            E_arr = np.array(E)
+            E_arr = self.s4.GetFieldsOnGridNumpy(z=z,
+                                                 NumSamples=(xs-1, ys-1))[0]
+            # E = self.s4.GetFieldsOnGrid(z=z, NumSamples=(xs-1, ys-1),
+            #                             Format='Array')[0]
+            # E_arr = np.array(E)
+            # print(E_arr.shape)
+            # return E_arr[0, :, :], E_arr[1, :, :], E_arr[2, :, :], None, None, None
             # Grab the periodic BC, which is always excluded from results
             # returned by S4 above
             Ex[:-1, :-1] = E_arr[:, :, 0]
-            Ex[0:xsamples-1, -1] = E_arr[:, 0, 0]
-            Ex[-1, 0:ysamples-1] = E_arr[0, :, 0]
+            Ex[0:xs-1, -1] = E_arr[:, 0, 0]
+            Ex[-1, 0:ys-1] = E_arr[0, :, 0]
             Ex[-1, -1] = E_arr[0, 0, 0]
             Ey[:-1, :-1] = E_arr[:, :, 1]
-            Ey[0:xsamples-1, -1] = E_arr[:, 0, 1]
-            Ey[-1, 0:ysamples-1] = E_arr[0, :, 1]
+            Ey[0:xs-1, -1] = E_arr[:, 0, 1]
+            Ey[-1, 0:ys-1] = E_arr[0, :, 1]
             Ey[-1, -1] = E_arr[0, 0, 1]
             Ez[:-1, :-1] = E_arr[:, :, 2]
-            Ez[0:xsamples-1, -1] = E_arr[:, 0, 2]
-            Ez[-1, 0:ysamples-1] = E_arr[0, :, 2]
+            Ez[0:xs-1, -1] = E_arr[:, 0, 2]
+            Ez[-1, 0:ys-1] = E_arr[0, :, 2]
             Ez[-1, -1] = E_arr[0, 0, 2]
         if self.conf["General"]["compute_h"]:
             H_arr = np.array(H)
             Hx[:-1, :-1] = H_arr[:, :, 0]
-            Hx[0:xsamples-1, -1] = H_arr[:, 0, 0]
-            Hx[-1, 0:ysamples-1] = H_arr[0, :, 0]
+            Hx[0:xs-1, -1] = H_arr[:, 0, 0]
+            Hx[-1, 0:ys-1] = H_arr[0, :, 0]
             Hx[-1, -1] = H_arr[0, 0, 0]
             Hy[:-1, :-1] = H_arr[:, :, 1]
-            Hy[0:xsamples-1, -1] = H_arr[:, 0, 1]
-            Hy[-1, 0:ysamples-1] = H_arr[0, :, 1]
+            Hy[0:xs-1, -1] = H_arr[:, 0, 1]
+            Hy[-1, 0:ys-1] = H_arr[0, :, 1]
             Hy[-1, -1] = H_arr[0, 0, 1]
             Hz[:-1, :-1] = H_arr[:, :, 2]
-            Hz[0:xsamples-1, -1] = H_arr[:, 0, 2]
-            Hz[-1, 0:ysamples-1] = H_arr[0, :, 2]
+            Hz[0:xs-1, -1] = H_arr[:, 0, 2]
+            Hz[-1, 0:ys-1] = H_arr[0, :, 2]
             Hz[-1, -1] = H_arr[0, 0, 2]
         else:
             Hx, Hy, Hz = None, None, None
@@ -1374,12 +1387,12 @@ class Simulator():
         """
         if self.hdf5 is None:
             self.open_hdf5()
-        pbase = '/sim_{}'.format(self.id[0:10]) 
+        pbase = '/sim_{}'.format(self.id[0:10])
         # Make sure we have the field arrays
         if self.conf["General"]["compute_h"]:
-            fields = ('Ex', 'Ey', 'Ez', 'Hx', 'Hy', 'Hz') 
+            fields = ('Ex', 'Ey', 'Ez', 'Hx', 'Hy', 'Hz')
         else:
-            fields = ('Ex', 'Ey', 'Ez') 
+            fields = ('Ex', 'Ey', 'Ez')
         self.get_field()
         # Merge the old and the new coordinates, removing duplicates and
         # sorting
@@ -1414,7 +1427,6 @@ class Simulator():
         # for c in ('xcoords', 'ycoords', 'zcoords'):
         #     self.hdf5.remove_node(posixpath.join(pbase, c))
         self.hdf5.remove_node(posixpath.join(pbase, 'zcoords'))
-
         self.save_data()
         self.save_conf()
         self.hdf5.close()

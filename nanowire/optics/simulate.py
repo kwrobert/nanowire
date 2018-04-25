@@ -1214,8 +1214,8 @@ class Simulator():
                 # E_arr = np.array(E)
                 # H_arr = np.array(H)
                 E_arr, H_arr = self.s4.GetFieldsOnGridNumpy(z=z,
-                                                            NumSamples=(self.xsamps-1,
-                                                                        self.ysamps-1))
+                                                            NumSamples=(self.ysamps-1,
+                                                                        self.xsamps-1))
                 Hx[zcount, :-1, :-1] = H_arr[:, :, 0]
                 Hx[zcount, 0:self.xsamps-1, -1] = H_arr[:, 0, 0]
                 Hx[zcount, -1, 0:self.ysamps-1] = H_arr[0, :, 0]
@@ -1235,8 +1235,8 @@ class Simulator():
                 #                             Format='Array')[0]
                 # E_arr = np.array(E)
                 E_arr = self.s4.GetFieldsOnGridNumpy(z=z,
-                                                     NumSamples=(self.xsamps-1,
-                                                                 self.ysamps-1))[0]
+                                                     NumSamples=(self.ysamps-1,
+                                                                 self.xsamps-1))[0]
                 end = time.time()
                 self.log.debug('Time for S4 GetFieldsOnGrid call: %f',
                                end-start)
@@ -1332,7 +1332,7 @@ class Simulator():
         return results
 
     # @do_profile(follow=[])
-    def compute_fields_on_plane(self, z, xs, ys, numpy=False):
+    def compute_fields_on_plane(self, z, xs, ys):
         """
         Compute the electric field on an x-y plane at a given z value with a
         given number of samples in the x and y directions and return a tuple
@@ -1347,17 +1347,17 @@ class Simulator():
             Hx = np.zeros((xs, ys), dtype=np.complex128)
             Hy = np.zeros((xs, ys), dtype=np.complex128)
             Hz = np.zeros((xs, ys), dtype=np.complex128)
-            # E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(xs-1,
-            #                                                 ys-1),
+            # E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(ys-1,
+            #                                                 xs-1),
             #                                Format='Array')
             # E_arr = np.array(E)
             # H_arr = np.array(H)
             E_arr, H_arr = self.s4.GetFieldsOnGridNumpy(z=z,
-                                                        NumSamples=(xs-1, ys-1))
+                                                        NumSamples=(ys-1, xs-1))
         else:
             E_arr = self.s4.GetFieldsOnGridNumpy(z=z,
-                                                 NumSamples=(xs-1, ys-1))[0]
-            # E = self.s4.GetFieldsOnGrid(z=z, NumSamples=(xs-1, ys-1),
+                                                 NumSamples=(ys-1, xs-1))[0]
+            # E = self.s4.GetFieldsOnGrid(z=z, NumSamples=(ys-1, xs-1),
             #                             Format='Array')[0]
             # E_arr = np.array(E)
             # print(E_arr.shape)

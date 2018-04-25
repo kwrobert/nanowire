@@ -1,0 +1,235 @@
+General:
+    
+    base_dir: '$HOME/software/nanowire/tests'
+    db_name: 'test_run.db'
+    base_name: 'field_data'
+    postprocess: False
+    post_parallel: False
+    execution: 'parallel'
+    adaptive_convergence: False
+    max_iter: 4 
+    max_diff: .02
+    basis_step: 20
+    opt_max_iter: 60
+    opt_tol: 1e-4
+    func_opt_tol: 1e-4
+    opt_keep_intermediates: False
+    num_cores: 20
+    save_plots: True
+    show_plots: False
+    save_as: 'hdf5'
+    save_time: True
+    output_pattern: True
+    compute_h: False
+    compression: True
+    dielectric_profile: False
+    solution_file: 'solution.xml'
+    x_samples: 200
+    y_samples: 200
+    z_samples: 200
+    r_samples : '`int(%(Simulation.params.array_period)s*200)`'
+    theta_samples : 180
+
+Solver:
+
+    Verbosity: 0
+    LatticeTruncation: 'Circular'
+    DiscretizedEpsilon: False
+    DiscretizationResolution: 8
+    PolarizationDecomposition: True
+    PolarizationBasis: 'Default'
+    LanczosSmoothing: False
+    SubpixelSmoothing: False
+    ConserveMemory: False
+    WeismannFormulation: True
+
+Simulation:
+    polarization: 'rhcp'
+    # max_depth: '`%(Layers.Air.params.thickness)s+%(Layers.ITO.params.thickness)s+%(Layers.NW_SiO2.params.thickness)s+%(Layers.NW_AlShell.params.thickness)s+%(Layers.Substrate.params.thickness)s`'
+    max_depth: '`%(Layers.Air.params.thickness)s+%(Layers.ITO.params.thickness)s+%(Layers.NW_AlShell.params.thickness)s+%(Layers.Substrate.params.thickness)s`'
+    base_unit: 1.0E-6
+    input_power: '$HOME/software/nanowire/nanowire/spectra/am15g_freq.txt'
+    input_power_wv: '$HOME/software/nanowire/nanowire/spectra/ASTMG173.csv'
+    params:
+        bandwidth: 13086178722222.223
+        polar_angle: 0
+        azimuthal_angle:  0
+        array_period: .25 
+        frequency: 6.0e+14
+            # type: 'variable'
+            # start: 333102731111111.1
+            # end: 856549880000000.0
+            # step: 10
+            # itertype: 'numsteps'
+        numbasis: 100  
+            # type: 'variable'
+            # start: 200
+            # end: 900
+            # step: 50
+            # itertype: 'stepsize'
+
+Materials:
+    ITO: '$HOME/software/nanowire/nanowire/NK/008_ITO_nk_Hz.txt'
+    Cyclotene: '$HOME/software/nanowire/nanowire/NK/007_Cyclotrene_nk_Hz.txt'
+    GaAs: '$HOME/software/nanowire/nanowire/NK/006_GaAs_nk_Walker_modified_Hz.txt'
+    AlInP: '$HOME/software/nanowire/nanowire/NK/009_AlInP_nk_Hz.txt'
+    SiO2: '$HOME/software/nanowire/nanowire/NK/004_SiO2_nk_Hz.txt'
+
+Layers:
+    Air:
+        order: 1
+        base_material: 'vacuum'
+        params:
+            thickness: .5
+    ITO:
+        order: 2
+        base_material: 'ITO' 
+        params:
+            thickness: 0.3
+    NW_AlShell: 
+        order: 3 
+        base_material: 'Cyclotene'
+        params:
+            thickness:  1.27
+            core_radius: 0.06
+            shell_radius: 0.08
+        geometry:
+            shell:
+                order: 1
+                type: 'circle'
+                radius: '`%(Layers.NW_AlShell.params.shell_radius)s`'
+                center:
+                    x: '`%(Simulation.params.array_period)s/2`'
+                    y: '`%(Simulation.params.array_period)s/2`'
+                material: 'AlInP' 
+            core:
+                order: 2
+                type: 'circle'
+                radius: '`%(Layers.NW_AlShell.params.core_radius)s`'
+                center:
+                    x: '`%(Simulation.params.array_period)s/2`'
+                    y: '`%(Simulation.params.array_period)s/2`'
+                material: 'GaAs' 
+    # NW_SiO2:
+    #     order: 4
+    #     base_material: 'Cyclotene'
+    #     params:
+    #         thickness: 
+    #             type: 'fixed'
+    #             value: .03
+    #         core_radius:
+    #             type: 'fixed'
+    #             value: 0.06
+    #         shell_radius:
+    #             type: 'fixed'
+    #             value: 0.08
+    #     geometry:
+    #         shell:
+    #             order: 1
+    #             type: 'circle'
+    #             radius: '%(Layers.NW_SiO2.params.shell_radius)s'
+    #             center:
+    #                 x: '`%(Simulation.params.array_period)s/2`'
+    #                 y: '`%(Simulation.params.array_period)s/2`'
+    #             material: 'SiO2' 
+    #         core:
+    #             order: 2
+    #             type: 'circle'
+    #             radius: '%(Layers.NW_SiO2.params.core_radius)s'
+    #             center:
+    #                 x: '`%(Simulation.params.array_period)s/2`'
+    #                 y: '`%(Simulation.params.array_period)s/2`'
+    #             material: 'GaAs' 
+    Substrate:
+        order: 5
+        base_material: 'GaAs'
+        params:
+            thickness: 1
+
+Postprocessing:
+    Cruncher:
+        normE:
+            compute: True
+            args:
+        normEsquared:
+            compute: True
+            args:
+        normH:
+            compute: False
+            args:
+        normHsquared:
+            compute: False
+            args:
+        genRate:
+            compute: True
+            args:
+        angularAvg:
+            compute: False
+            args: ['genRate']
+        transmissionData:
+            compute: True
+            args: ['Substrate_bottom']
+        integrated_absorbtion:
+            compute: False
+            args:
+        jsc_contrib:
+            compute: True
+            args:
+        jsc_integrated_contrib:
+            compute: True
+            args:
+
+    
+    Global_Cruncher:
+        local_error:
+            compute: False
+            args: [['E',False],['E',True]]
+        global_error:
+            compute: False
+            args: [['E',False],['E',True]]
+        adjacent_error:
+            compute: False
+            args: [['E',False],['E',True]]
+        scalar_reduce:
+            compute: False
+            args: [['genRate'],['normEsquared']]
+        fractional_absorbtion:
+            compute: False
+            args: ['Substrate_bottom']
+        Jsc:
+            compute: True
+            args: ['Substrate_bottom']
+        Jsc_integrated:
+            compute: False
+            args: 
+        weighted_transmissionData:
+            compute: False
+            args:
+    
+    Plotter:
+        full_3d:
+            compute: False
+            args: ['dielectric_profile']
+        planes_3d: 
+            compute: False
+            args: ['normE', 10, 10]
+        plane_2d:
+            compute: True
+            # args: [['dielectric_profile','yz',62,True,True], ['dielectric_profile','xy',100,True,True], ['normE','yz',62,True,True], ['normE','xy',100,True,True]]
+            args: [['normE','yz',10,True,True], ['normE','xy',10,True,True]]
+        fixed_line:
+            compute: True
+            # args: [['normE','z',62,62], ['normE','x',62,100], ['dielectric_profile','z',62,62], ['dielectric_profile','x',62,100]]
+            args: [['normE','z',10,10], ['normE','x',10,10]]
+    
+    Global_Plotter:
+        convergence:
+            compute: False
+            args: [['E','global','log'],['E','local','log'],['E','adjacent','log']]
+        plot_scalar_reduce: 
+            compute: False
+            args: [['genRate','yz',10],['normEsquared','yz',10]]
+        transmission_data:
+            compute: False
+            args: [True,True,True, 'Substrate_bottom']
+

@@ -31,6 +31,7 @@ from lxml import etree
 from lxml.builder import E
 # get our custom config object and the logger function
 from . import postprocess as pp
+from .data_manager import HDF5DataManager, NPZDataManager
 from .utils.utils import (
     make_hash,
     get_combos,
@@ -777,7 +778,7 @@ class SimulationManager:
         self.write_queue.put(None, block=True)
         return opt_val.x
 
-    def run(self, *args, load=False, func=run_sim, **kwargs):
+    def run(self, *args, filter_dict={}, load=False, func=run_sim, **kwargs):
         """
         The main run methods that decides what kind of simulation to run based
         on the provided config objects
@@ -789,6 +790,16 @@ class SimulationManager:
                 self.load_confs()
             else:
                 self.make_confs()
+
+            if filter_dict:
+                print(filter_dict)
+                print(len(self.sim_confs))
+                for k, vals in filter_dict.items():
+                    par = [ks for ks in k.split('.')]
+                    vals = list(map(type(self.sim_confs[0][par]), vals))
+                    self.sim_confs = [c for c in self.sim_confs if c[par] in vals]
+                    print(len(self.sim_confs))
+                print(len(self.sim_confs))
             self.log.info("Executing job campaign")
             self.execute_jobs(func=func, *args, **kwargs)
         elif self.gconf.optimized:
@@ -814,7 +825,9 @@ class Simulator():
         # self.dir = sim_dir
         self.s4 = S4.New(Lattice=((period, 0), (0, period)),
                          NumBasis=int(round(numbasis)))
-        self.data = {}
+        # self.data = {}
+        # self.data = self._get_data_manager()
+        self.data = None
         self.hdf5 = None
         self.runtime = 0
         self.period = period
@@ -826,6 +839,23 @@ class Simulator():
         eventually use up all the available file descriptors on the system
         """
         self._clean_logger()
+
+    def _get_data_manager(self):
+        """
+        Factory function that instantiates the correct data manager object
+        depending on the file type specified in the config
+        """
+
+        ftype = self.conf['General']['save_as']
+
+        if ftype == 'npz':
+            # return NPZDataManager(self.conf, logging.getLogger(__name__))
+            return NPZDataManager(self.conf, self.log)
+        elif ftype == 'hdf5':
+            # return HDF5DataManager(self.conf, logging.getLogger(__name__))
+            return HDF5DataManager(self.conf, self.log)
+        else:
+            raise ValueError('Invalid file type in config')
 
     def _clean_logger(self):
         """
@@ -853,6 +883,7 @@ class Simulator():
         except OSError:
             pass
         self.make_logger()
+        self.data = self._get_data_manager()
         self.make_coord_arrays()
         self.configure()
         self.build_device()
@@ -1286,6 +1317,11 @@ class Simulator():
 
         results = {}
         for lname, layer in self.layers.items():
+            if lname not in sample_dict:
+                self.log.info("Layer %s not in sample dict, skipping", lname)
+                continue
+            self.log.info("Computing fields in layer %s using %i samples", lname,
+                          sample_dict[lname])
             z_vals = np.linspace(layer.start, layer.end, sample_dict[lname])
             Ex, Ey, Ez, Hx, Hy, Hz = self.compute_fields(zvals=z_vals)
             results[lname] = {'Ex':Ex, 'Ey':Ey, 'Ez':Ez, 'Hx':Hx, 'Hy':Hy,
@@ -1521,13 +1557,13 @@ class Simulator():
         # print(fname)
         if os.path.isfile(fname):
             self.log.info("Loading from: %s"%fname)
-            print("Loading from: %s"%fname)
+            # print("Loading from: %s"%fname)
             self.s4.LoadSolution(Filename=fname)
             self.log.info("Solution loaded!")
             # print("Solution loaded!")
         else:
             self.log.warning("Solution file does not exist. Cannot load")
-            print("Solution file does not exist. Cannot load")
+            # print("Solution file does not exist. Cannot load")
 
     def save_state(self):
         """
@@ -1611,90 +1647,102 @@ class Simulator():
             out.write(etree.tostring(doc, pretty_print=True))
 
     def save_data(self):
-        """Saves the self.data dictionary to an npz file. This dictionary
-        contains all the fields and the fluxes dictionary"""
+        """
+        Writes the data. This is a simple wrapper around the write_data()
+        method of the DataManager object, with some code to compute the time it
+        took to perform the write operation
+        """
 
         start = time.time()
-        if self.hdf5 is None:
-            self.open_hdf5()
-        if self.conf['General']['save_as'] == 'npz':
-            self.log.debug('Saving fields to NPZ')
-            if self.conf['General']['adaptive_convergence']:
-                if self.converged[0]:
-                    out = os.path.join(self.dir, 'converged_at.txt')
-                else:
-                    out = os.path.join(self.dir, 'not_converged_at.txt')
-                self.log.debug('Writing convergence file ...')
-                with open(out, 'w') as outf:
-                    outf.write('{}\n'.format(self.converged[1]))
-            out = os.path.join(self.dir, self.conf["General"]["base_name"])
-            # Compression adds a small amount of time. The time cost is
-            # nonlinear in the file size, meaning the penalty gets larger as the
-            # field grid gets finer. However, the storage gains are enormous!
-            # Compression brought the file from 1.1G to 3.9M in a test case.
-            # I think the compression ratio is so high because npz is a binary
-            # format, and all compression algs benefit from large sections of
-            # repeated characters
-            np.savez_compressed(out, **self.data)
-        elif self.conf['General']['save_as'] == 'hdf5':
-            compression = self.conf['General']['compression']
-            if compression:
-                # filter_obj = tb.Filters(complevel=8, complib='blosc')
-                filter_obj = tb.Filters(complevel=4, complib='zlib')
-            gpath = '/sim_'+self.id[0:10]
-            for name, arr in self.data.items():
-                # Check for recarrays first because they are subclass of
-                # ndarrays
-                if isinstance(arr, np.recarray):
-                    self.log.info("Saving record array %s", name)
-                    num_rows = len(list(self.conf['Layers'].keys()))
-                    table = self.hdf5.create_table(gpath, name,
-                                                   description=arr.dtype,
-                                                   expectedrows=num_rows,
-                                                   createparents=True)
-                    row = table.row
-                    fields = arr.dtype.names
-                    for record in arr:
-                        for (i, el) in enumerate(record):
-                            row[fields[i]] = el
-                        row.append()
-                    table.flush()
-                elif isinstance(arr, np.ndarray):
-                    self.log.debug("Saving array %s", name)
-                    if compression:
-                        self.hdf5.create_carray(gpath, name, createparents=True,
-                                           atom=tb.Atom.from_dtype(arr.dtype),
-                                           obj=arr, filters=filter_obj)
-                    else:
-                        self.hdf5.create_array(gpath, name, createparents=True,
-                                          atom=tb.Atom.from_dtype(arr.dtype),
-                                          obj=arr)
+        self.data.write_data()
+        end = time.time()
+        self.log.info('Write time: %.2f seconds', end - start)
 
-            # Write XMDF xml file for importing into Paraview
-            self.write_xdmf()
-            end = time.time()
-            diff = end - start
-            self.log.info('Time to write data to disk: %f seconds', diff)
-                    # # Save the field arrays
-                    # self.log.debug('Saving fields to HDF5')
-                    # path = '/sim_'+self.id[0:10]
-                    # for name, arr in self.data.items():
-                # self.log.debug("Saving array %s", name)
-                # tup = ('create_array', (path, name),
-                    #    {'compression': self.conf['General']['compression'],
-                    #     'createparents': True, 'obj': arr,
-                    #     'atom': tb.Atom.from_dtype(arr.dtype)})
-                # self.q.put(tup, block=True)
-            # # Save the flux dict to a table
-            # self.log.debug('Saving fluxes to HDF5')
-            # self.log.debug(self.flux_dict)
-            # tup = ('create_flux_table', (self.flux_dict, path, 'fluxes'),
-                   # {'createparents': True,
-                    # 'expectedrows': len(list(self.conf['Layers'].keys()))})
-            # self.q.put(tup, block=True)
-            self.hdf5.flush()
-        else:
-            raise ValueError('Invalid file type specified in config')
+    # def save_data(self):
+    #     """Saves the self.data dictionary to an npz file. This dictionary
+    #     contains all the fields and the fluxes dictionary"""
+
+    #     start = time.time()
+    #     if self.hdf5 is None:
+    #         self.open_hdf5()
+    #     if self.conf['General']['save_as'] == 'npz':
+    #         self.log.debug('Saving fields to NPZ')
+    #         if self.conf['General']['adaptive_convergence']:
+    #             if self.converged[0]:
+    #                 out = os.path.join(self.dir, 'converged_at.txt')
+    #             else:
+    #                 out = os.path.join(self.dir, 'not_converged_at.txt')
+    #             self.log.debug('Writing convergence file ...')
+    #             with open(out, 'w') as outf:
+    #                 outf.write('{}\n'.format(self.converged[1]))
+    #         out = os.path.join(self.dir, self.conf["General"]["base_name"])
+    #         # Compression adds a small amount of time. The time cost is
+    #         # nonlinear in the file size, meaning the penalty gets larger as the
+    #         # field grid gets finer. However, the storage gains are enormous!
+    #         # Compression brought the file from 1.1G to 3.9M in a test case.
+    #         # I think the compression ratio is so high because npz is a binary
+    #         # format, and all compression algs benefit from large sections of
+    #         # repeated characters
+    #         np.savez_compressed(out, **self.data)
+    #     elif self.conf['General']['save_as'] == 'hdf5':
+    #         compression = self.conf['General']['compression']
+    #         if compression:
+    #             # filter_obj = tb.Filters(complevel=8, complib='blosc')
+    #             filter_obj = tb.Filters(complevel=4, complib='zlib')
+    #         gpath = '/sim_'+self.id[0:10]
+    #         for name, arr in self.data.items():
+    #             # Check for recarrays first because they are subclass of
+    #             # ndarrays
+    #             if isinstance(arr, np.recarray):
+    #                 self.log.info("Saving record array %s", name)
+    #                 num_rows = len(list(self.conf['Layers'].keys()))
+    #                 table = self.hdf5.create_table(gpath, name,
+    #                                                description=arr.dtype,
+    #                                                expectedrows=num_rows,
+    #                                                createparents=True)
+    #                 row = table.row
+    #                 fields = arr.dtype.names
+    #                 for record in arr:
+    #                     for (i, el) in enumerate(record):
+    #                         row[fields[i]] = el
+    #                     row.append()
+    #                 table.flush()
+    #             elif isinstance(arr, np.ndarray):
+    #                 self.log.debug("Saving array %s", name)
+    #                 if compression:
+    #                     self.hdf5.create_carray(gpath, name, createparents=True,
+    #                                        atom=tb.Atom.from_dtype(arr.dtype),
+    #                                        obj=arr, filters=filter_obj)
+    #                 else:
+    #                     self.hdf5.create_array(gpath, name, createparents=True,
+    #                                       atom=tb.Atom.from_dtype(arr.dtype),
+    #                                       obj=arr)
+
+    #         # Write XMDF xml file for importing into Paraview
+    #         self.write_xdmf()
+    #         end = time.time()
+    #         diff = end - start
+    #         self.log.info('Time to write data to disk: %f seconds', diff)
+    #                 # # Save the field arrays
+    #                 # self.log.debug('Saving fields to HDF5')
+    #                 # path = '/sim_'+self.id[0:10]
+    #                 # for name, arr in self.data.items():
+    #             # self.log.debug("Saving array %s", name)
+    #             # tup = ('create_array', (path, name),
+    #                 #    {'compression': self.conf['General']['compression'],
+    #                 #     'createparents': True, 'obj': arr,
+    #                 #     'atom': tb.Atom.from_dtype(arr.dtype)})
+    #             # self.q.put(tup, block=True)
+    #         # # Save the flux dict to a table
+    #         # self.log.debug('Saving fluxes to HDF5')
+    #         # self.log.debug(self.flux_dict)
+    #         # tup = ('create_flux_table', (self.flux_dict, path, 'fluxes'),
+    #                # {'createparents': True,
+    #                 # 'expectedrows': len(list(self.conf['Layers'].keys()))})
+    #         # self.q.put(tup, block=True)
+    #         self.hdf5.flush()
+    #     else:
+    #         raise ValueError('Invalid file type specified in config')
 
     def save_conf(self):
         """
@@ -1829,10 +1877,13 @@ class Simulator():
             self.log.debug("State file exists: %s"%state_file)
             print("State file exists: %s"%state_file)
             self.load_state()
-        self.get_field()
-        self.compute_fields_by_layer(self.conf['General']['sample_dict'])
+        # self.get_field()
+        sdict = {"Air": 5, "ITO": 100, "NW_AlShell": 300, "Substrate": 300}
+        # sdict = {"Air": 5, "ITO": 10, "NW_AlShell": 20, "Substrate": 30}
+        # self.compute_fields_by_layer(self.conf['General']['sample_dict'])
+        self.compute_fields_by_layer(sdict)
         self.get_fluxes()
-        self.get_fourier_coefficients()
+        # self.get_fourier_coefficients()
         if self.conf['General']['dielectric_profile']:
             self.compute_dielectric_profile()
         self.open_hdf5()

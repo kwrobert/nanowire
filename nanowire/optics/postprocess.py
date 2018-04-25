@@ -13,9 +13,10 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cmx
 import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
-import scipy.constants as c
+import scipy.constants as consts
 import scipy.integrate as intg
 import numpy as np
+import naturalneighbor as nn
 np.set_printoptions(precision=3, threshold=100000)
 from mpl_toolkits.mplot3d import Axes3D
 from itertools import repeat
@@ -109,7 +110,7 @@ class Simulation:
             self.conf = conf
         else:
             self.conf = copy.deepcopy(simulator.conf)
-        self.id = make_hash(self.conf.data)
+        self.id = self.conf['General']['sim_dir'][-10:]
         self.dir = os.path.expandvars(self.conf['General']['sim_dir'])
         self.fhandler = logging.FileHandler(os.path.join(self.dir, 'postprocess.log'))
         self.fhandler.addFilter(IdFilter(ID=self.id))
@@ -125,7 +126,8 @@ class Simulation:
         if conf is not None:
             self.data = self._get_data_manager()
         else:
-            self.data = copy.deepcopy(simulator.data)
+            # self.data = copy.deepcopy(simulator.data)
+            self.data = simulator.data
         self.failed = False
         self.avgs = {}
         # Compute and store dx, dy, dz at attributes
@@ -334,7 +336,7 @@ class Simulation:
         normEsq = self.get_scalar_quantity('normEsquared')
         # Prefactor for generation rate. Note we gotta convert from m^3 to
         # cm^3, hence 1e6 factor
-        fact = c.epsilon_0 / (c.hbar * 1e6)
+        fact = consts.epsilon_0 / (consts.hbar * 1e6)
         gvec = np.zeros_like(normEsq)
         # Main loop to compute generation in each layer
         freq = self.conf[('Simulation', 'params', 'frequency')]
@@ -448,6 +450,210 @@ class Simulation:
         self.data[key] = avgs
         return avgs
 
+    def integrate_nanowire(self, nkEsq=None):
+        """
+        Use natural neighbor interpolation to integrate nk|E|^2 inside the
+        nanowire in shell in polar coordinates for optimum accuracy
+        """
+        
+        if len(self.X) % 2 == 0 or len(self.Y) % 2 == 0:
+            raise ValueError("Need and odd number of x-y samples to use this "
+                             " function")
+        nw_layer = self.layers['NW_AlShell']
+        core_rad = self.conf['Layers']['NW_AlShell']['params']['core_radius']
+        shell_rad = self.conf['Layers']['NW_AlShell']['params']['shell_radius']
+        period = self.conf['Simulation']['params']['array_period']
+        # shell_rad = self.conf['Layers']['NW_AlShell']['params']['shell_radius']
+        # Extract nkEsq data in layer
+        if nkEsq is None:
+            nkEsq = self.data['nknormEsq'][nw_layer.get_slice(self.Z)]
+            zvals = self.Z[nw_layer.get_slice(self.Z)]
+        else:
+            zvals = np.linspace(nw_layer.start, nw_layer.end, nkEsq.shape[0])
+        # print("nkEsq shape: ", nkEsq.shape)
+        # Get masks for each region
+        core_mask = get_mask_by_material(nw_layer, 'GaAs', self.X, self.Y)
+        # print("core mask shape = {}".format(core_mask.shape))
+        shell_mask = get_mask_by_material(nw_layer, 'AlInP', self.X, self.Y)
+        cyc_mask = np.logical_not(np.logical_or(core_mask, shell_mask))
+        # print("shell mask shape = {}".format(shell_mask.shape))
+        # print("cyc mask shape = {}".format(cyc_mask.shape))
+        core_mask3d = np.broadcast_to(core_mask,
+                                      (nkEsq.shape[0],
+                                       core_mask.shape[0],
+                                       core_mask.shape[1]))
+        # print("core mask 3d shape = {}".format(core_mask3d.shape))
+        shell_mask3d = np.broadcast_to(shell_mask,
+                                       (nkEsq.shape[0],
+                                        shell_mask.shape[0],
+                                        shell_mask.shape[1]))
+        # print("shell mask 3d shape = {}".format(shell_mask3d.shape))
+        cyc_mask3d = np.broadcast_to(cyc_mask,
+                                     (nkEsq.shape[0],
+                                      cyc_mask.shape[0],
+                                      cyc_mask.shape[1]))
+        # print("cyc mask 3d shape = {}".format(cyc_mask3d.shape))
+        # Finally the cyclotene
+        cyc_vals = nkEsq*cyc_mask3d
+        # print("cyc_vals shape = {}".format(cyc_vals.shape))
+        # plt.matshow(cyc_vals[0, :, :])
+        # plt.colorbar()
+        # plt.show()
+        cyc_z = np.linspace(nw_layer.start, nw_layer.end, nkEsq.shape[0])
+        cyc_result = integrate3d(cyc_vals, self.X, self.Y, cyc_z)
+        # Extract vals in each region from nkEsq array
+        core_inds = np.where(core_mask3d)
+        shell_inds = np.where(shell_mask3d)
+        # print("core_inds: ", core_inds)
+        # print("shell_inds: ", shell_inds)
+        core_vals = nkEsq[core_inds]
+        print("len(shell_inds) = {}".format(len(shell_inds[0])))
+        shell_vals = nkEsq[shell_inds]
+        # print("core_vals shape: ", core_vals.shape)
+        # print("max core val = {}".format(np.amax(core_vals)))
+        # print(core_vals)
+        pts = cartesian_product((zvals, self.X, self.Y))
+        # print(pts)
+        # Shift x and y values so origin is at center of nanowire
+        # core_pts_inds = np.where((core_pts[:, 1] - period/2)**2 + (core_pts[:, 2] - period/2)**2 <= core_rad**2)
+        p2 = period/2
+        pts[:, 2] -= p2
+        pts[:, 1] -= p2
+        core_pts_inds = np.where(pts[:, 1]**2 + pts[:, 2]**2 <= core_rad**2)
+        shell_pts_inds = np.where((core_rad**2 < pts[:, 1]**2 + pts[:, 2]**2)
+                                  &
+                                  (pts[:, 1]**2 + pts[:, 2]**2 <= shell_rad**2))
+        print("len(shell_pts_inds) = {}".format(len(shell_pts_inds[0])))
+        # core_pts_inds = np.where((pts[:, 1]-p2)**2 + (pts[:, 2]-p2)**2 <= core_rad**2)
+        # shell_pts_inds = np.where((core_rad**2 <= (pts[:, 1]-p2)**2 + (pts[:, 2]-p2)**2)
+        #                           &
+        #                           ((pts[:, 1]-p2)**2 + (pts[:, 2]-p2)**2 <= shell_rad**2))
+        print("cartesian pts shape: ", pts.shape)
+        print(len(core_pts_inds[0]))
+        # print("pts shape: ", pts[0].shape)
+        core_pts = pts[core_pts_inds[0], :]
+        print("cartesian core_pts shape: ", core_pts.shape)
+        # print("core_pts inds shape: ", core_pts_inds[0].shape)
+        shell_pts = pts[shell_pts_inds[0], :]
+        print("cartesian shell_pts shape: ", shell_pts.shape)
+        # core_pts = core_pts[core_pts_inds[0], core_pts
+        # print("yy shape: ", yy.shape)
+        # print("zz shape: ", zz.shape)
+        # core_pts = np.column_stack((xx[core_inds[1], core_inds[2], core_inds[0]],
+        #                        yy[core_inds[1], core_inds[2], core_inds[0]],
+        #                        zz[core_inds[1], core_inds[2], core_inds[0]]))
+        # Transform cartesian points into polar coordinates.
+        # polar_pts[r, theta, z]
+        core_polar_pts = np.zeros_like(core_pts)
+        core_polar_pts[:, 0] = np.sqrt(core_pts[:, 2]**2 + core_pts[:, 1]**2)
+        # This returns angles on [-pi, pi], so shift them
+        core_polar_pts[:, 1] = np.arctan2(core_pts[:, 2], core_pts[:, 1])
+        # core_polar_pts[:, 1][core_polar_pts[:, 1] < 0] += 2*np.pi
+        core_polar_pts[:, 2] = core_pts[:, 0]
+        # Same for the shell
+        shell_polar_pts = np.zeros_like(shell_pts)
+        shell_polar_pts[:, 0] = np.sqrt(shell_pts[:, 2]**2 + shell_pts[:, 1]**2)
+        # This returns angles on [-pi, pi], so shift them
+        shell_polar_pts[:, 1] = np.arctan2(shell_pts[:, 2], shell_pts[:, 1])
+        # shell_polar_pts[:, 1][shell_polar_pts[:, 1] < 0] += 2*np.pi
+        shell_polar_pts[:, 2] = shell_pts[:, 0]
+        ###########
+        # Insert S4 data at r = 0 here and all theta values.  
+        # Odd numbers of points guarantee an S4 point at the center of the unit
+        # cell. Use an odd number of points, and take the center value and
+        # replicate it across all thetas for r = 0
+        # 1) Does the weird start in the center go away
+        # 2) Compare integral by material to plain old integral and flux method
+        ###########
+        # Get function value at r = 0
+        # center_inds = np.where((pts[:, 1] == .125) & (pts[:, 2] == .125))
+        # center_inds = np.where(core_polar_pts[:, 0] == 0)
+        # print("center_inds[0].shape = {}".format(center_inds[0].shape))
+        # print("center_inds[0] = {}".format(center_inds[0]))
+        # rzero_core_vals = core_vals[center_inds[0]]
+        # # print("rzero_core_vals = {}".format(rzero_core_vals))
+        # extra_theta = 90
+        # extra_pts = cartesian_product((np.array([0]),
+        #                                np.linspace(-np.pi, np.pi, extra_theta),
+        #                                core_polar_pts[center_inds[0], 2]))
+        # # print("extra_pts = {}".format(extra_pts))
+        # repeated_zero_vals = np.concatenate([rzero_core_vals for i in range(extra_theta)])
+        # core_polar_pts = np.concatenate((core_polar_pts, extra_pts))
+        # core_vals = np.concatenate((core_vals, repeated_zero_vals))
+
+        # if True:
+        #     return None,None,None,None,None,None,None,None,None
+
+        # fig, ax = scatter3d(pts[:, 0], pts[:, 1], pts[:, 2])
+        # plt.show()
+        # Extract interpolated points on a polar grid
+        # print('core_polar_pts shape: ', core_polar_pts.shape)
+        # print(core_polar_pts)
+        rstart = 0 
+        core_numr = 60
+        shell_numr = 40
+        numtheta = 90
+        numz = 100
+        # If the last element of each range is complex, the ranges behave like
+        # np.linspace
+        ranges = [[rstart, core_rad, 1j*core_numr], [-np.pi, np.pi, 1j*numtheta],
+                  [nw_layer.start, nw_layer.end, 1j*numz]]
+        # ranges = [[rstart, core_rad, 1j*core_numr], [0, 2*np.pi, 1j*numtheta],
+        #           [nw_layer.start, nw_layer.end, 1j*numz]]
+        core_interp = nn.griddata(core_polar_pts, core_vals, ranges)
+        # ranges = [[core_rad, shell_rad, 1j*shell_numr], [0, 2*np.pi, 1j*numtheta],
+        #           [nw_layer.start, nw_layer.end, 1j*numz]]
+        ranges = [[core_rad, shell_rad, 1j*shell_numr], [-np.pi, np.pi, 1j*numtheta],
+                  [nw_layer.start, nw_layer.end, 1j*numz]]
+        print("shell_polar_pts.shape = {}".format(shell_polar_pts.shape))
+        print("shell_vals.shape = {}".format(shell_vals.shape))
+        shell_interp = nn.griddata(shell_polar_pts, shell_vals, ranges)
+        # print("Core interp vals shape: ", core_interp.shape)
+        # print("Core interp minimum: ", np.amin(core_interp))
+        # print("Shell interp vals shape: ", shell_interp.shape)
+        # print("Shell interp minimum: ", np.amin(shell_interp))
+        # plt.figure()
+        # plt.imshow(core_interp[:, 0, :])
+        # plt.colorbar()
+        # plt.show()
+        # input("Continue?")
+        # # Multiply by area factor in polar coords to get integrand
+        core_rvals = np.linspace(rstart, core_rad, core_numr)
+        thetavals = np.linspace(0, 2*np.pi, numtheta)
+        intzvals = np.linspace(nw_layer.start, nw_layer.end, numz)
+        print("zvals = {}".format(zvals))
+        print("intzvals = {}".format(intzvals))
+        rr, tt = np.meshgrid(core_rvals, thetavals, indexing='ij')
+        print('rr shape: ', rr.shape)
+        print('tt shape: ', tt.shape)
+        print('core_interp: ', core_interp.shape)
+        # integrand = core_interp*rr[:, :, None]*np.sin(tt[:, :, None])
+        integrand = core_interp*rr[:, :, None]
+        # print("Integrand min: ", np.amin(integrand))
+        core_result = integrate3d(integrand, thetavals, intzvals, core_rvals)
+        # Shell integral
+        shell_rvals = np.linspace(core_rad, shell_rad, shell_numr)
+        rr, tt = np.meshgrid(shell_rvals, thetavals, indexing='ij')
+        print('rr shape: ', rr.shape)
+        print('tt shape: ', tt.shape)
+        print('shell_interp: ', shell_interp.shape)
+        # print(np.amin(rr[:, :, None]*np.sin(tt[:, :, None])))
+        integrand = shell_interp*rr[:, :, None]
+        # integrand = core_interp*rr[:, :, None]
+        # print("Integrand min: ", np.amin(integrand))
+        shell_result = integrate3d(integrand, thetavals, intzvals, shell_rvals)
+        # print("result = {}".format(result))
+        #plt.matshow(shell_mask3d[1, :, :])
+        #plt.show()
+        #plt.matshow(shell_mask)
+        #plt.show()
+        print("Core Result = {}".format(core_result))
+        print("Shell Result = {}".format(shell_result))
+        print("Cyc Result = {}".format(cyc_result))
+        return sum((core_result, shell_result, cyc_result))
+        # return (core_rvals, shell_rvals, thetavals, zvals, core_interp,
+        #         shell_interp, core_result, shell_result, cyc_result)
+
     def integrate_layer(self, lname, layer):
         freq = self.conf[('Simulation', 'params', 'frequency')]
         n_mat, k_mat = layer.get_nk_matrix(freq, self.X, self.Y)
@@ -457,20 +663,20 @@ class Simulation:
             Esq = self.normEsquared()
         nkEsq = n_mat*k_mat*Esq[layer.get_slice(self.Z)]
         results = {}
-        for mat in layer.materials.keys(): 
-            mask = get_mask_by_material(layer, mat, self.X, self.Y) 
+        for mat in layer.materials.keys():
+            mask = get_mask_by_material(layer, mat, self.X, self.Y)
             # mask = np.where(mask, 1, np.nan)
             # plt.matshow(mask)
             # plt.colorbar()
             # plt.title("Mask Layer: {}, Material: {}".format(lname, material))
             # plt.show()
-            values = nkEsq*mask 
+            values = nkEsq*mask
             # plt.matshow(values[0, :, :])
             # plt.title("nkEsq Layer: {}, Material: {}".format(lname, mat))
             # plt.colorbar()
             # plt.show()
             points = (self.Z[layer.get_slice(self.Z)], self.X, self.Y)
-            rgi = interpolate.RegularGridInterpolator(points, values, 
+            rgi = interpolate.RegularGridInterpolator(points, values,
                                                       method='linear',
                                                       bounds_error=True)
             z = self.Z[layer.get_slice(self.Z)]
@@ -481,7 +687,7 @@ class Simulation:
             print("Layer Start:", layer.start)
             print("Layer End:", layer.end)
             z = np.linspace(self.Z[layer.get_slice(self.Z)][0],
-                            self.Z[layer.get_slice(self.Z)][-1], len(z)*2) 
+                            self.Z[layer.get_slice(self.Z)][-1], len(z)*2)
             x = np.linspace(self.X[0], self.X[-1], len(self.X)*2)
             y = np.linspace(self.Y[0], self.Y[-1], len(self.Y)*2)
             pts = cartesian_product((z, x, y))
@@ -572,8 +778,11 @@ class Simulation:
             fields = {k[-2:]:self.data[k] for k in keys}
             Esq = np.abs(fields['Ex'])**2 + np.abs(fields['Ey'])**2 + np.abs(fields['Ez'])**2
             z = np.linspace(layer_obj.start, layer_obj.end, Esq.shape[0])
-            y_integral = integrate3d(n_mat*k_mat*Esq, self.X, self.Y, z,
-                                     meth=intg.simps)
+            if layer_name == "NW_AlShell":
+                y_integral = self.integrate_nanowire(nkEsq=n_mat*k_mat*Esq)
+            else:
+                y_integral = integrate3d(n_mat*k_mat*Esq, self.X, self.Y, z,
+                                         meth=intg.simps)
             # abs_dict[lname] = result
             # nkEsq = n_mat*k_mat*Esq
             # y_integral = 0
@@ -605,8 +814,8 @@ class Simulation:
             # Factor of 1/2 for time averaging gets canceled by imaginary part
             # of dielectric constant (2*n*k)
             self.log.info("Pabs Pure Integral Result: {}".format(y_integral))
-            Pabs_integ = 2*np.pi*freq*c.epsilon_0*base_unit*y_integral
-            # Pabs_integ = 2*np.pi*freq*c.epsilon_0*base_unit*z_integral
+            Pabs_integ = 2*np.pi*freq*consts.epsilon_0*base_unit*y_integral
+            # Pabs_integ = 2*np.pi*freq*consts.epsilon_0*base_unit*z_integral
             if per_area:
                 Pabs_integ /= self.period**2
             self.log.info("Integrated Absorbed: {}".format(Pabs_integ))
@@ -732,7 +941,7 @@ class Simulation:
 
     def jsc_contrib(self, port='Substrate_bottom'):
         self.log.info('Computing Jsc contrib')
-        wv_fact = c.e / (c.c * c.h * 10)
+        wv_fact = consts.e / (consts.c * consts.h * 10)
         # Unpack data for the port we passed in as an argument
         try:
             arr = self.data['transmission_data']
@@ -740,7 +949,7 @@ class Simulation:
         except KeyError:
             ref, trans, absorb = self.transmissionData(port=port)
         freq = self.conf['Simulation']['params']['frequency']
-        wvlgth = c.c / freq
+        wvlgth = consts.c / freq
         wvlgth_nm = wvlgth * 1e9
         # Get solar power from chosen spectrum
         sun_pow = get_incident_amplitude(self)
@@ -773,7 +982,7 @@ class Simulation:
         sun_pow = get_incident_amplitude(self)
         self.log.info('Sun power = %f', sun_pow)
         self.log.info('Integral = %f', y_integral)
-        Jsc = 1000*(c.e/(self.period*1e-4)**2)*y_integral
+        Jsc = 1000*(consts.e/(self.period*1e-4)**2)*y_integral
         outf = os.path.join(self.dir, 'jsc_integrated_contrib.dat')
         with open(outf, 'w') as out:
             out.write('%f\n' % Jsc)
@@ -795,7 +1004,7 @@ class Simulation:
         freq = self.conf['Simulation']['params']['frequency']
         # TODO: Assuming incident amplitude and therefore incident power is
         # just 1 for now
-        fact = -.5 * freq * c.epsilon_0
+        fact = -.5 * freq * consts.epsilon_0
         with open(inpath, 'r') as inf:
             lines = inf.readlines()
             # Remove header line
@@ -969,7 +1178,7 @@ class Simulation:
         z = self.Z
         # Get the scalar values
         freq = self.conf['Simulation']['params']['frequency']
-        wvlgth = (c.c / freq) * 1E9
+        wvlgth = (consts.c / freq) * 1E9
         title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(
             freq, wvlgth)
         # Get the plane we wish to plot
@@ -1124,7 +1333,7 @@ class Simulation:
             # x along rows, y along columns
             pos_data = self.Z
         freq = self.conf['Simulation']['params']['frequency']
-        wvlgth = (c.c / freq) * 1E9
+        wvlgth = (consts.c / freq) * 1E9
         title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(
             freq, wvlgth)
         ptype = "%s_line_plot_%i_%i" % (direction, coord1, coord2)
@@ -1433,7 +1642,7 @@ class SimulationGroup:
             # Unpack data for the port we passed in as an argument
             ref, trans, absorb = sim.data['transmission_data'][port]
             freq = sim.conf['Simulation']['params']['frequency']
-            wvlgth = c.c / freq
+            wvlgth = consts.c / freq
             wvlgth_nm = wvlgth * 1e9
             freqs[i] = freq
             wvlgths[i] = wvlgth
@@ -1452,7 +1661,7 @@ class SimulationGroup:
         integrated_absorbtion = intg.trapz(vals, x=wvlgths * 1e9)
         power = intg.trapz(spectra, x=wvlgths * 1e9)
         # factor of 1/10 to convert A*m^-2 to mA*cm^-2
-        #wv_fact = c.e/(c.c*c.h*10)
+        #wv_fact = consts.e/(consts.c*consts.h*10)
         #wv_fact = .1
         #Jsc = (Jsc*wv_fact)/power
         frac_absorb = integrated_absorbtion / power
@@ -1511,7 +1720,7 @@ class SimulationGroup:
         for i, sim in enumerate(self.sims):
             freq = sim.conf['Simulation']['params']['frequency']
             freqs[i] = freq
-            E_photon = c.h * freq
+            E_photon = consts.h * freq
             if method == 'flux':
                 arr = sim.data['transmission_data']
                 _, ref, trans, absorb = arr[arr.port == port.encode('utf-8')][0]
@@ -1526,7 +1735,7 @@ class SimulationGroup:
                 jph_vals[i] = absorbed_power / (E_photon*period**2)
             sim.clear_data()
         # factor of 1/10 to convert A*m^-2 to mA*cm^-2
-        Jph = .1 * c.e * np.sum(jph_vals)
+        Jph = .1 * consts.e * np.sum(jph_vals)
         outf = os.path.join(base, 'jph_{}.dat'.format(method))
         with open(outf, 'w') as out:
             out.write('%f\n' % Jph)
@@ -1550,7 +1759,7 @@ class SimulationGroup:
             # x_integral = intg.simps(z_integral, x=x_vals, axis=0)
             # y_integral = intg.simps(x_integral, x=y_vals, axis=0)
             # Convert period to cm and current to mA
-            Jsc = 1000*(c.e/(sim.period*1e-4)**2)*y_integral
+            Jsc = 1000*(consts.e/(sim.period*1e-4)**2)*y_integral
             self.log.info('Sim %s Jsc Integrate Value: %f', sim.id, Jsc)
 
 
@@ -1579,7 +1788,7 @@ class SimulationGroup:
         # x_integral = intg.simps(z_integral, x=x_vals, axis=0)
         # y_integral = intg.simps(x_integral, x=y_vals, axis=0)
         # Convert period to cm and current to mA
-        Jsc = 1000*(c.e/(self.sims[0].period*1e-4)**2)*y_integral
+        Jsc = 1000*(consts.e/(self.sims[0].period*1e-4)**2)*y_integral
         outf = os.path.join(base, 'jsc_integrated.dat')
         with open(outf, 'w') as out:
             out.write('%f\n' % Jsc)
@@ -1607,7 +1816,7 @@ class SimulationGroup:
         for i, sim in enumerate(self.sims):
             ref, trans, absorb = sim.data['transmission_data'][port]
             freq = sim.conf['Simulation']['params']['frequency']
-            wvlgth = c.c / freq
+            wvlgth = consts.c / freq
             wvlgth_nm = wvlgth * 1e9
             freqs[i] = freq
             wvlgths[i] = wvlgth
@@ -1695,6 +1904,7 @@ class SimulationGroup:
                 ax.set_ylabel(name)
                 ax.set_xlabel("Frequency (Hz)")
                 ax.set_title(layer)
+                print("Saving to {}".format(pfile))
                 plt.savefig(pfile)
         return ax
 
@@ -1818,7 +2028,7 @@ class SimulationGroup:
             trans_l[i] = trans
             refl_l[i] = ref
             absorb_l[i] = absorb
-        freqs = (c.c / freqs[::-1]) * 1e9
+        freqs = (consts.c / freqs[::-1]) * 1e9
         refl_l = refl_l[::-1]
         absorb_l = absorb_l[::-1]
         trans_l = trans_l[::-1]
@@ -1836,6 +2046,21 @@ class SimulationGroup:
         plt.ylim((0, 1.0))
         plt.savefig(figp)
         plt.close()
+
+
+def scatter3d(x, y, z, cs=None, colorsMap='jet'):
+    fig = plt.figure()
+    ax = Axes3D(fig)
+    if cs is not None:
+        cm = plt.get_cmap(colorsMap)
+        cNorm = matplotlib.colors.Normalize(vmin=min(cs), vmax=max(cs))
+        scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
+        ax.scatter(x, y, z, c=scalarMap.to_rgba(cs))
+        scalarMap.set_array(cs)
+        fig.colorbar(scalarMap)
+    else:
+        ax.scatter(x, y, z)
+    return fig, ax
 
 
 def integrate1d(arr, xvals, meth=intg.trapz):
@@ -1860,6 +2085,7 @@ def integrate3d(arr, xvals, yvals, zvals, meth=intg.trapz):
     return y_integral
 
 
+
 def counted(fn):
     def wrapper(self):
         wrapper.called += 1
@@ -1868,30 +2094,6 @@ def counted(fn):
     wrapper.__name__ = fn.__name__
     return wrapper
 
-def _crunch_local(sim, gconf):
-    sim = Simulation(Config(sim))
-    _process(sim, "Cruncher", gconf)
-    sim.write_data()
-    sim.clear_data()
-
-def _plot_local(sim, gconf):
-    sim = Simulation(Config(sim))
-    _process(sim, "Plotter", gconf)
-    sim.clear_data()
-
-def _crunch_global(sim_group, gconf):
-    sims = [Simulation(Config(path)) for path in sim_group]
-    sim_group = SimulationGroup(sims)
-    _process(sim_group, "Global_Cruncher", gconf)
-    for sim in sim_group.sims:
-        sim.clear_data()
-
-def _plot_global(sim_group, gconf):
-    sims = [Simulation(Config(path)) for path in sim_group]
-    sim_group = SimulationGroup(sims)
-    _process(sim_group, "Global_Plotter", gconf)
-    for sim in sim_group.sims:
-        sim.clear_data()
 
 def _call_func(quantity, obj, args):
     """
@@ -1902,35 +2104,80 @@ def _call_func(quantity, obj, args):
     try:
         result = getattr(obj, quantity)(*args)
     except AttributeError:
-        log.error("Unable to call the following function: %s", quantity)
+        log.error("Object %s has no method: %s", str(obj), quantity)
+        raise
+    except:
+        log.error("Error while calling method %s of object %s", quantity,
+                  str(obj))
         raise
     return result
 
-def _process(obj, process, gconf):
+
+def execute_plan(conf, plan):
     """
-    Calls a process on an object. The object could be a Simulation object,
-    or a SimulationGroup object. It just loops through the functions
-    defined in the process subsection of the Postprocessing section in the
-    config file, and uses call_func to call the object's method with the
-    names defined in the config.
+    Executes the given plan for the given Config object or list/tuple of Config
+    objects. If conf is a single Config object, a Simulation object will
+    created and the provided plan will be executed for it. If a list or tuple
+    of Config objects is given, a SimulationGroup object will be created and
+    the provided plan will be executed for it.
+
+    `plan` must be a dictionary with the following structure::
+
+        {'crunch':
+            'funcA':
+                compute: True
+                args: [['list', 'of', 'args'], ['another', 'set']]
+            'funcB':
+                compute: False
+                args: [['this function is skipped']]
+         'plot': 'same structure as crunch'
+        }
+
+    For each of the keys under the `crunch` and `plot` sections, a method of
+    the created Simulation/SimulationGroup object with the same name will be
+    called for each set of provided arguments. No attempts are made to validate
+    the given plan before raising exceptions
     """
 
-    to_compute = {quant: data for quant, data in
-                  gconf['Postprocessing'][process].items() if
-                  data['compute']}
-    for quant, data in to_compute.items():
-        argsets = data['args']
-        if argsets and isinstance(argsets[0], list):
-            for argset in argsets:
-                if argset:
-                    _call_func(quant, obj, argset)
-                else:
-                    _call_func(quant, obj, [])
-        else:
-            if argsets:
-                _call_func(quant, obj, argsets)
+    log = logging.getLogger(__name__)
+    if isinstance(conf, list) or isinstance(conf, tuple):
+        log.info("Executing SimulationGroup plan")
+        obj = SimulationGroup([Simulation(c) for c in conf])
+        ID = str(obj)
+    else:
+        log.info("Executing Simulation plan")
+        obj = Simulation(conf=conf)
+        ID = obj.id[0:10]
+
+    for task_name in ('crunch', 'plot'):
+        task = plan[task_name] 
+        log.info("Beginning %s for obj %s", task_name, ID)
+        for func, data in task.items():
+            if not data['compute']:
+                continue
             else:
-                _call_func(quant, obj, [])
+                argsets = data['args']
+            if argsets and isinstance(argsets[0], list):
+                for argset in argsets:
+                    if argset:
+                        _call_func(func, obj, argset)
+                    else:
+                        _call_func(func, obj, [])
+            else:
+                if argsets:
+                    _call_func(func, obj, argsets)
+                else:
+                    _call_func(func, obj, [])
+        log.info("Completed %s for obj %s", task_name, ID)
+    log.info("Plan execution for obj %s complete", ID)
+    if isinstance(obj, Simulation):
+        log.info("Saving and clearing data for Simulation %s", ID)
+        obj.write_data()
+        obj.clear_data()
+    else:
+        log.info("Clearing data for SimulationGroup %s", ID)
+        for sim in obj.sims:
+            sim.clear_data()
 
 
 class Processor(object):
@@ -1953,12 +2200,12 @@ class Processor(object):
         # data file)
         self.failed_sims = failed_sims
 
-    def collect_sims(self):
+    def collect_confs(self):
         """
         Collect all the simulations beneath the base of the directory tree
         """
 
-        sims = []
+        sim_confs = []
         failed_sims = []
         ftype = self.gconf['General']['save_as']
         # Get correct data file name
@@ -1975,20 +2222,22 @@ class Processor(object):
             conf_path = os.path.join(root, 'sim_conf.yml')
             if 'sim_conf.yml' in files and datfile in files:
                 self.log.info('Gather sim at %s', root)
-                sim_obj = Simulation(Config(conf_path))
+                # sim_obj = Simulation(Config(conf_path))
+                conf = Config(conf_path)
                 # sim_obj.conf.expand_vars()
-                sims.append(sim_obj)
+                sim_confs.append(conf)
             elif 'sim_conf.yml' in files:
-                sim_obj = Simulation(Config(conf_path))
-                self.log.error('The following sim is missing its data file: %s',
-                               sim_obj.conf['General']['sim_dir'])
-                failed_sims.append(sim_obj)
-        self.sims = sims
+                # sim_obj = Simulation(Config(conf_path))
+                conf = Config(conf_path)
+                self.log.error('Sim %s is missing its data file',
+                               conf['General']['sim_dir'])
+                failed_sims.append(conf)
+        self.sim_confs = sim_confs
         self.failed_sims = failed_sims
-        if not sims:
+        if not sim_confs:
             self.log.error('Unable to find any successful simulations')
             raise RuntimeError('Unable to find any successful simulations')
-        return sims, failed_sims
+        return sim_confs, failed_sims
 
     def get_param_vals(self, parseq):
         """
@@ -1996,8 +2245,8 @@ class Processor(object):
         """
 
         vals = []
-        for sim in self.sims:
-            val = sim.conf[parseq]
+        for conf in self.sim_confs:
+            val = conf[parseq]
             if val not in vals:
                 vals.append(val)
         return vals
@@ -2010,14 +2259,18 @@ class Processor(object):
 
         assert(type(pars) == dict)
         for par, vals in pars.items():
-            self.sims = [sim for sim in self.sims if sim.conf[par] in vals]
+            print(par)
+            print(vals)
+            vals = [type(self.sim_confs[0][par])(v) for v in vals]
+            self.sim_confs = [conf for conf in self.sim_confs if conf[par] in vals]
             groups = []
             for group in self.sim_groups:
-                filt_group = [sim for sim in group if sim.conf[par] in vals]
+                filt_group = [conf for conf in group if conf[par] in vals]
                 groups.append(filt_group)
             self.sim_groups = groups
-        assert(len(self.sims) >= 1)
-        return self.sims, self.sim_groups
+        assert(len(self.sim_confs) >= 1)
+        print(len(self.sim_confs))
+        return self.sim_confs, self.sim_groups
 
     def group_against(self, key, variable_params, sort_key=None):
         """Groups simulations by against particular parameter. Within each
@@ -2030,22 +2283,22 @@ class Processor(object):
 
         self.log.info('Grouping sims against: %s', str(key))
         # We need only need a shallow copy of the list containing all the sim
-        # objects We don't want to modify the orig list but we wish to share
+        # objects. We don't want to modify the orig list but we wish to share
         # the sim objects the two lists contain
-        sims = copy.copy(self.sims)
-        sim_groups = [[sims.pop()]]
+        sim_confs = copy.copy(self.sim_confs)
+        sim_groups = [[sim_confs.pop()]]
         # While there are still sims that havent been assigned to a group
-        while sims:
+        while sim_confs:
             # Get the comparison dict for this sim
-            sim = sims.pop()
-            val1 = sim.conf[key]
+            conf = sim_confs.pop()
+            val1 = conf[key]
             # print('Group against value: {}'.format(val1))
             # We want the specified key to vary, so we remove it from the
             # comparison dict
-            del sim.conf[key]
-            cmp1 = {'Simulation': sim.conf['Simulation'],
-                    'Layers': sim.conf['Layers'],
-                    'Solver': sim.conf['Solver']}
+            del conf[key]
+            cmp1 = {'Simulation': conf['Simulation'],
+                    'Layers': conf['Layers'],
+                    'Solver': conf['Solver']}
             try:
                 del cmp1['Solver']['BasisFieldDumpPrefix']
             except KeyError:
@@ -2054,12 +2307,12 @@ class Processor(object):
             # Loop through each group, checking if this sim belongs in the
             # group
             for group in sim_groups:
-                sim2 = group[0]
-                val2 = sim2.conf[key]
-                del sim2.conf[key]
-                cmp2 = {'Simulation': group[0].conf['Simulation'],
-                        'Layers': group[0].conf['Layers'],
-                        'Solver': group[0].conf['Solver']}
+                conf2 = group[0]
+                val2 = conf2[key]
+                del conf2[key]
+                cmp2 = {'Simulation': group[0]['Simulation'],
+                        'Layers': group[0]['Layers'],
+                        'Solver': group[0]['Solver']}
                 try:
                     del cmp2['Solver']['BasisFieldDumpPrefix']
                 except KeyError:
@@ -2069,22 +2322,22 @@ class Processor(object):
                     match = True
                     # We need to restore the param we removed from the
                     # configuration earlier
-                    sim.conf[key] = val1
-                    group.append(sim)
-                group[0].conf[key] = val2
+                    conf[key] = val1
+                    group.append(conf)
+                group[0][key] = val2
             # If we didnt find a matching group, we need to create a new group
             # for this simulation
             if not match:
-                sim.conf[key] = val1
-                sim_groups.append([sim])
+                conf[key] = val1
+                sim_groups.append([conf])
         # Get the params that will define the path in the results dir for each
         # group that will be stored
         result_pars = [var for var in variable_params if var != key]
         for group in sim_groups:
             # Sort the individual sims within a group in increasing order of
             # the parameter we are grouping against a
-            group.sort(key=lambda sim: sim.conf[key])
-            path = '{}/grouped_against_{}'.format(group[0].conf['General']['base_dir'],
+            group.sort(key=lambda aconf: aconf[key])
+            path = '{}/grouped_against_{}'.format(group[0]['General']['base_dir'],
                                                   key[-1])
             path = os.path.expandvars(path)
             # If the only variable param is the one we grouped against, make
@@ -2100,22 +2353,23 @@ class Processor(object):
                     # All sims in the group will have the same values for
                     # result_pars so we can just use the first sim in the group
                     path = os.path.join(path, '{}_{}/'.format(par[-1],
-                                                                  group[0].conf[par]))
+                                                                  group[0][par]))
                     self.log.info('RESULTS DIR: %s', path)
                     try:
                         os.makedirs(path)
                     except OSError:
                         pass
-            for sim in group:
-                sim.conf['General']['results_dir'] = path
-                outpath = os.path.join(sim.conf['General']['sim_dir'],
-                                       'sim_conf.yml')
-                outpath = os.path.expandvars(outpath)
-                sim.conf.write(outpath)
+            # Need this so the results_dir parameter gets written to conf file
+            for conf in group:
+                conf['General']['results_dir'] = path
+                # outpath = os.path.join(conf['General']['sim_dir'],
+                #                        'sim_conf.yml')
+                # outpath = os.path.expandvars(outpath)
+                # conf.write(outpath)
         # Sort the groups in increasing order of the provided sort key
         if sort_key:
-            sim_groups.sort(key=lambda group: group[0].conf[key])
-        sim_groups = [SimulationGroup(sims) for sims in sim_groups]
+            sim_groups.sort(key=lambda agroup: agroup[0][key])
+        # sim_groups = [SimulationGroup(sims) for sims in sim_groups]
         self.sim_groups = sim_groups
         return sim_groups
 
@@ -2151,15 +2405,15 @@ class Processor(object):
         # This works by storing the different values of the specifed parameter
         # as keys, and a list of sims whose value matches the key as the value
         pdict = {}
-        for sim in self.sims:
-            if sim.conf[key] in pdict:
-                pdict[sim.conf[key]].append(sim)
+        for conf in self.sim_confs:
+            if conf[key] in pdict:
+                pdict[conf[key]].append(conf)
             else:
-                pdict[sim.conf[key]] = [sim]
+                pdict[conf[key]] = [conf]
         # Now all the sims with matching values for the provided key are just
         # the lists located at each key. We sort the groups in increasing order
         # of the provided key
-        groups = sorted(pdict.values(), key=lambda group: group[0].conf[key])
+        groups = sorted(pdict.values(), key=lambda group: group[0][key])
         # If specified, sort the sims within each group in increasing order of
         # the provided sorting key
         if sort_key:
@@ -2168,24 +2422,24 @@ class Processor(object):
                     group.sort(key=sort_key)
             else:
                 for group in groups:
-                    group.sort(key=lambda sim: sim.conf[sort_key])
-        groups = [SimulationGroup(sims) for sims in groups]
+                    group.sort(key=lambda sim: conf[sort_key])
+        # groups = [SimulationGroup(sims) for sims in groups]
         if repopulate:
             self.sim_groups = groups
         return groups
 
-    def replace(self):
-        for i, sim in enumerate(self.sims):
-            path = os.path.join(sim.conf['General']['sim_dir'], 'sim_conf.yml')
-            self.sims[i] = path
+    # def replace(self):
+    #     for i, sim in enumerate(self.sims):
+    #         path = os.path.join(sim.conf['General']['sim_dir'], 'sim_conf.yml')
+    #         self.sims[i] = path
 
-        for i, group in enumerate(self.sim_groups):
-            new_group = []
-            for sim in group.sims:
-                new_group.append(os.path.join(sim.conf['General']['sim_dir'],
-                                              'sim_conf.yml'))
+    #     for i, group in enumerate(self.sim_groups):
+    #         new_group = []
+    #         for sim in group.sims:
+    #             new_group.append(os.path.join(sim.conf['General']['sim_dir'],
+    #                                           'sim_conf.yml'))
 
-            self.sim_groups[i] = new_group
+    #         self.sim_groups[i] = new_group
 
     def call_func(self, quantity, obj, args):
         """
@@ -2200,99 +2454,41 @@ class Processor(object):
             raise
         return result
 
-    def _process(self, obj, process):
-        """
-        Calls a process on an object. The object could be a Simulation object,
-        or a SimulationGroup object. It just loops through the functions
-        defined in the process subsection of the Postprocessing section in the
-        config file, and uses call_func to call the object's method with the
-        names defined in the config.
-        """
-
-        self.log.info('Running %s process for obj %s', process, str(obj))
-        to_compute = {quant: data for quant, data in
-                      self.gconf['Postprocessing'][process].items() if
-                      data['compute']}
-        for quant, data in to_compute.items():
-            argsets = data['args']
-            self.log.info('Calling %s with args %s', str(quant), str(argsets))
-            if argsets and isinstance(argsets[0], list):
-                for argset in argsets:
-                    self.log.info('Calling with individual argset %s', str(argset))
-                    if argset:
-                        self.call_func(quant, obj, argset)
-                    else:
-                        self.call_func(quant, obj, [])
-            else:
-                if argsets:
-                    self.call_func(quant, obj, argsets)
-                else:
-                    self.call_func(quant, obj, [])
-
-    def crunch_local(self, sim):
-        _crunch_local(sim, self.gconf)
-
-    def crunch_local_all(self):
-        self.log.info('Beginning data crunch for all sims ...')
-        if not self.gconf['General']['post_parallel']:
-            for sim in self.sims:
-                _crunch_local(sim, self.gconf)
-        else:
+    def process(self, crunch=True, plot=True, gcrunch=True, gplot=True):
+        # Create pool if processing in parallel
+        if self.gconf['General']['post_parallel']:
             num_procs = self.gconf['General']['num_cores']
-            self.log.info('Crunching sims in parallel using %s cores ...', str(num_procs))
-            args_list = list(zip(self.sims, repeat(self.gconf)))
             pool = mp.Pool(processes=num_procs)
-            pool.starmap(_crunch_local, args_list)
-            pool.close()
-            pool.join()
-
-    def plot_local(self, sim):
-        _plot_local(sim, self.gconf)
-
-    def plot_local_all(self):
-        self.log.info('Beginning local plotting for all sims ...')
+        # First process all the sims
+        self.log.info('Beginning processing for all sims ...')
+        plan = copy.deepcopy(self.gconf['Postprocessing']['Single'])
+        if not crunch:
+            del plan['crunch']
+        if not plot:
+            del plan['plot']
         if not self.gconf['General']['post_parallel']:
-            for sim in self.sims:
-                _plot_local(sim, self.gconf)
+            for conf in self.sim_confs:
+                execute_plan(conf, plan)
         else:
-            num_procs = self.gconf['General']['num_cores']
-            self.log.info('Plotting sims in parallel using %s cores ...', str(num_procs))
-            pool = mp.Pool(processes=num_procs)
-            args_list = list(zip(self.sims, repeat(self.gconf)))
-            pool.starmap(_plot_local, args_list)
-            pool.close()
-            pool.join()
-
-    def crunch_global(self, sim_group):
-        _process(sim_group, "Global_Cruncher", self.gconf)
-
-    def crunch_global_all(self):
-        self.log.info('Beginning global data crunch for all sim groups ...')
+            self.log.info('Plotting sims in parallel using %s cores ...',
+                          str(num_procs))
+            args_list = list(zip(self.sim_confs, repeat(plan)))
+            pool.starmap(execute_plan, args_list)
+        # Process groups
+        print("processing groups")
+        plan = copy.deepcopy(self.gconf['Postprocessing']['Group'])
+        if not gcrunch:
+            del plan['crunch']
+        if not gplot:
+            del plan['plot']
         if not self.gconf['General']['post_parallel']:
             for group in self.sim_groups:
-                _crunch_global(group, self.gconf)
+                execute_plan(group, plan)
         else:
-            num_procs = self.gconf['General']['num_cores']
-            self.log.info('Crunching sim groups in parallel using %s cores ...', str(num_procs))
-            pool = mp.Pool(processes=num_procs)
-            args_list = list(zip(self.sim_groups, repeat(self.gconf)))
-            pool.starmap(_crunch_global, args_list)
-            pool.close()
-            pool.join()
-
-    def plot_global(self, sim_group):
-        _process(sim_group, "Global_Plotter", self.gconf)
-
-    def plot_global_all(self):
-        self.log.info('Beginning global data plot for all sim groups ...')
-        if not self.gconf['General']['post_parallel']:
-            for group in self.sim_groups:
-                _plot_global(group, self.gconf)
-        else:
-            num_procs = self.gconf['General']['num_cores']
-            self.log.info('Plotting sim groups in parallel using %s cores ...', str(num_procs))
-            pool = mp.Pool(processes=num_procs)
-            args_list = list(zip(self.sim_groups, repeat(self.gconf)))
-            pool.starmap(_plot_global, args_list)
+            self.log.info('Plotting sims in parallel using %s cores ...',
+                          str(num_procs))
+            args_list = list(zip(self.sim_groups, repeat(plan)))
+            pool.starmap(execute_plan, args_list)
+        if self.gconf['General']['post_parallel']:
             pool.close()
             pool.join()

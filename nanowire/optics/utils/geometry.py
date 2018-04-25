@@ -27,7 +27,7 @@ def get_mask_by_shape(shape, xcoords, ycoords):
         polygon = Path(shape.vertices)
         mask = polygon.contains_points(list(itertools.product(xcoords,
                                                               ycoords)))
-    return mask
+    return mask.astype(int)
 
 
 def get_mask_by_material(layer, material, x, y):
@@ -38,9 +38,9 @@ def get_mask_by_material(layer, material, x, y):
     inside, False means outside
     """
     if material == layer.base_material:
-        mask = np.ones((len(x), len(y)))
+        mask = np.ones((len(x), len(y)), dtype=int)
     else:
-        mask = np.zeros((len(x), len(y)))
+        mask = np.zeros((len(x), len(y)), dtype=int)
 
     for shape_name, (shape_obj, mat_name) in layer.shapes.items():
         shape_mask = get_mask_by_shape(shape_obj, x, y)
@@ -67,10 +67,10 @@ def get_layers(sim):
     start = 0
     layers = OrderedDict()
     materials = sim.conf['Materials']
+    max_depth = sim.conf[('Simulation', 'max_depth')]
     for layer, ldata in ordered_layers.items():
         # Dont add the layer if we don't have field data for it because its
         # beyond max_depth
-        max_depth = sim.conf[('Simulation', 'max_depth')]
         if max_depth and start >= max_depth:
             break
         layer_t = ldata['params']['thickness']
@@ -91,6 +91,11 @@ def get_layers(sim):
 
 
 class Layer:
+    """
+    Object for representing a layer within an RCWA simulation. It contains
+    sympy.Shape objects representing it's internal geometry, and a dictionary
+    of materials within the layer
+    """
 
     def __init__(self, name, start, end, period, base_material=None,
                  materials={}, geometry={}):

@@ -3,6 +3,7 @@ import posixpath
 import numpy as np
 import tables as tb
 from collections import MutableMapping
+from abc import ABCMeta, abstractmethod
 from .utils.utils import open_atomic
 
 
@@ -38,6 +39,8 @@ class DataManager(MutableMapping):
     slightly less memory efficient but not in a significant way.
     """
 
+    __metaclass__ = ABCMeta
+
     def __init__(self, conf, log):
         self._data = {}
         self._avgs = {}
@@ -45,13 +48,55 @@ class DataManager(MutableMapping):
         self.conf = conf
         self.log = log
         self._dfile = None
+        self._blacklist = set()
 
+    def add_to_blacklist(self, key):
+        """
+        Add a key to the blacklist so it never gets written to disk
+        """
+        assert(isinstance(key, str))
+        self._blacklist.add(key)
+
+    def remove_from_blacklist(self, key):
+        """
+        Remove a key to the blacklist so it will get written to disk on next
+        write_data call
+        """
+        assert(isinstance(key, str))
+        self._blacklist.remove(key)
+
+    @abstractmethod
     def _update_keys(self):
         raise NotImplementedError
 
+    @abstractmethod
+    def write_data(self):
+        raise NotImplementedError
+
+    @abstractmethod
     def _load_data(self, key):
-        self._data[key] = None
-        self._updated[key] = False
+        """
+        Because this class provides a dict-like interface, clients should never
+        have to call this method directly
+        """
+        raise NotImplementedError
+
+    def _check_equal(self, key, value):
+        """
+        Check the equality of a given value and the object located at
+        self._data[key]. Returns True if equal, False if not.
+
+        This is used to determine if the object located at self._data[key]
+        needs to be updated and written to disk when the write_data() is
+        called.  It is intended to be overwridden
+
+        :param key str: The key for the object in self._data you would like to
+        check for equality
+        :param value: The value you wish to compare to. Could have arbitrary
+        type depending on the subclass
+        :rtype: bool
+        """
+        return self._data[key] == value
 
     def __getitem__(self, key):
         """
@@ -72,11 +117,8 @@ class DataManager(MutableMapping):
         on
         """
 
-        # np.array_equal is necessary in case we are dealing with numpy arrays
-        # Elementwise comparison of arrays of different shape throws a
-        # deprecation warning, and array_equal works on dicts and lists
         try:
-            unchanged = np.array_equal(self._data[key], value)
+            unchanged = self._check_equal(key, value)
         except KeyError:
             unchanged = False
         if unchanged:
@@ -151,6 +193,12 @@ class HDF5DataManager(DataManager):
                     self._data[child._v_name] = None
                     self._updated[child._v_name] = False
 
+    def _check_equal(self, key, value):
+        # np.array_equal is necessary in case we are dealing with numpy arrays
+        # Elementwise comparison of arrays of different shape throws a
+        # deprecation warning, and array_equal works on dicts and lists
+        return np.array_equal(self._data[key], value)
+
     def _load_data(self, key):
         """
         Implements logic for loading data when the user asks for it by
@@ -161,12 +209,11 @@ class HDF5DataManager(DataManager):
         try:
             node = self._dfile.get_node(nodepath)
         except tb.NoSuchNodeError:
-            # Maybe we just haven't computed transmission data yet
             self.log.error('The node you requested does not exist in the'
                            ' HDF5 file')
             raise
         if isinstance(node, tb.Table):
-            self._data[key] = node.read().view(np.recarray) 
+            self._data[key] = node.read().view(np.recarray)
         else:
             self._data[key] = node.read()
 
@@ -174,7 +221,7 @@ class HDF5DataManager(DataManager):
         """
         Writes all necessary data out to the HDF5 file
         """
-
+        blacklist = set(blacklist).union(self._blacklist)
         self.log.info('Beginning HDF5 data writing procedure')
         # Filter out the original data so we don't resave it
         keys = [key for key in self._data.keys() if key not in blacklist and

@@ -884,14 +884,11 @@ class Simulator():
             pass
         self.make_logger()
         self.data = self._get_data_manager()
+        self.layers = get_layers(self)
         self.make_coord_arrays()
         self.configure()
         self.build_device()
         self.set_excitation()
-        self.get_layers()
-
-    def get_layers(self):
-        self.layers = get_layers(self)
 
     def make_coord_arrays(self):
         """
@@ -903,7 +900,17 @@ class Simulator():
 
         self.xsamps = self.conf['General']['x_samples']
         self.ysamps = self.conf['General']['y_samples']
-        if type(self.conf['General']['z_samples']) == list:
+        samps_dict = self.conf['General']['sample_dict']
+        if samps_dict:
+            zcoords = np.zeros(sum(s for s in samps_dict.values()))
+            start = 0
+            for lname, layer in self.layers.items():
+                samps = samps_dict[lname]
+                zcoords[start:start+samps] = np.linspace(layer.start, layer.end,
+                                                         samps)
+                start += samps
+            self.Z = zcoords
+        elif type(self.conf['General']['z_samples']) == list:
             self.zsamps = len(self.conf['General']['z_samples'])
             # print(self.conf['General']['z_samples'])
             self.Z = np.asarray(self.conf['General']['z_samples'])
@@ -1882,11 +1889,13 @@ class Simulator():
             self.load_state()
         else:
             log.info("State file %s does not exist", state_file)
-        # self.get_field()
-        sdict = {"Air": 5, "ITO": 100, "NW_AlShell": 200, "Substrate": 300}
+        # sdict = {"Air": 5, "ITO": 100, "NW_AlShell": 200, "Substrate": 300}
         # sdict = {"Air": 5, "ITO": 10, "NW_AlShell": 20, "Substrate": 30}
-        # self.compute_fields_by_layer(self.conf['General']['sample_dict'])
-        self.compute_fields_by_layer(sdict)
+        # self.compute_fields_by_layer(sdict)
+        if self.conf['General']['sample_dict']:
+            self.compute_fields_by_layer(self.conf['General']['sample_dict'])
+        else:
+            self.get_field()
         self.get_fluxes()
         # self.get_fourier_coefficients()
         if self.conf['General']['dielectric_profile']:

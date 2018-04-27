@@ -456,7 +456,7 @@ class Simulation:
         Use natural neighbor interpolation to integrate nk|E|^2 inside the
         nanowire in shell in polar coordinates for optimum accuracy
         """
-        
+
         # if len(self.X) % 2 == 0 or len(self.Y) % 2 == 0:
         #     raise ValueError("Need and odd number of x-y samples to use this "
         #                      " function")
@@ -562,7 +562,7 @@ class Simulation:
         # shell_polar_pts[:, 1][shell_polar_pts[:, 1] < 0] += 2*np.pi
         shell_polar_pts[:, 2] = shell_pts[:, 0]
         ###########
-        # Insert S4 data at r = 0 here and all theta values.  
+        # Insert S4 data at r = 0 here and all theta values.
         # Odd numbers of points guarantee an S4 point at the center of the unit
         # cell. Use an odd number of points, and take the center value and
         # replicate it across all thetas for r = 0
@@ -593,7 +593,7 @@ class Simulation:
         # Extract interpolated points on a polar grid
         # print('core_polar_pts shape: ', core_polar_pts.shape)
         # print(core_polar_pts)
-        rstart = 0 
+        rstart = 0
         core_numr = 120
         shell_numr = 40
         numtheta = 180
@@ -1063,8 +1063,9 @@ class Simulation:
                     half_width = radius
                 self.log.debug('HALF WIDTH: {}'.format(half_width))
                 # Vertical lines should span height of the layer
-                z = [self.height - layer.start + .5, self.height - layer.end +.5]
+                # z = [self.height - layer.start + .5, self.height - layer.end +.5]
                 # z = [layer.start+.5, layer.end+.5]
+                z = [layer.start, layer.end]
                 # The upper edge
                 x = [cy + half_width, cy + half_width]
                 line = mlines.Line2D(x, z, linestyle='solid', linewidth=2.0,
@@ -1092,32 +1093,23 @@ class Simulation:
     def draw_geometry_2d(self, plane, pval, ax_hand, skip_list=[]):
         """This function draws the layer boundaries and in-plane geometry on 2D
         heatmaps"""
-        # Get the layers in order
         period = self.conf['Simulation']['params']['array_period']
-        # Loop through them
-        air_t = self.layers['Air'].thickness
         for lname, layer in self.layers.items():
-            # If x or y, draw bottom edge and text label now. Layer geometry
-            # is handled in its own function
             if plane in ["xz", "zx", "yz", "zy"]:
                 # Get boundaries between layers and their starting and ending
                 # indices
-                layer_t = layer.thickness
-                if layer_t > 0:
+                if layer.thickness > 0:
                     if layer not in skip_list:
                         x = [0, period]
-                        y = [self.height - layer.start + air_t,
-                             self.height - layer.start + air_t]
-                        # y = [layer.start + .5, layer.start + .5]
+                        y = [layer.end, layer.end]
                         # label_y = y[0] + 3*self.dz
                         # label_x = x[-1] - .01
                         # ax_hand.text(label_x, label_y, layer, ha='right',
                         #              family='sans-serif', size=16, color='grey')
-                        line = mlines.Line2D(x, y, linestyle='solid', linewidth=2.0,
-                                             color='grey')
+                        line = mlines.Line2D(x, y, linestyle='solid',
+                                             linewidth=2.0, color='grey')
                         ax_hand.add_line(line)
             # If we have some internal geometry for this layer, draw it
-            # if 'geometry' in ldata:
             if layer.shapes:
                 ax_hand = self._draw_layer_geometry(layer, plane, pval, ax_hand)
         return ax_hand
@@ -1125,7 +1117,7 @@ class Simulation:
     def heatmap2d(self, x, y, cs, labels, ptype, pval, save_path=None,
                   show=False, draw=False, fixed=None, colorsMap='jet'):
         """A general utility method for plotting a 2D heat map"""
-        cs = np.flipud(cs)
+        # cs = np.flipud(cs)
         cm = plt.get_cmap(colorsMap)
         if np.iscomplexobj(cs):
             self.log.warning('Plotting only real part of %s in heatmap',
@@ -1150,6 +1142,7 @@ class Simulation:
         fig = plt.figure(figsize=(10, 8))
         ax = fig.add_subplot(111)
         # ax.imshow(cs,cmap=cm,norm=cNorm,extent=[x.min(),x.max(),y.min(),y.max()],aspect='auto')
+        ax.invert_yaxis()
         ax.pcolormesh(x, y, cs, cmap=cm, norm=cNorm)
                       # extent=[x.min(),x.max(),y.min(),y.max()],aspect='auto')
         ax.grid(False)
@@ -1165,7 +1158,7 @@ class Simulation:
         ax.set_ylabel(labels[1])
         if draw:
             self.log.info('Beginning geometry drawing routines ...')
-            # ax = self.draw_geometry_2d(ptype, pval, ax)
+            ax = self.draw_geometry_2d(ptype, pval, ax)
         if save_path:
             fig.savefig(save_path, bbox_inches='tight')
         if show:
@@ -1905,7 +1898,7 @@ class SimulationGroup:
 
         quants = {'fluxmethod_absorption': 0,
                   'integralmethod_absorption': 1,
-                  'relativediff': 2, 
+                  'relativediff': 2,
                   'integralmethod_absorption_polar': 3,
                   'relativediff_polar': 4}
         if quant is not None:
@@ -2170,30 +2163,21 @@ def execute_plan(conf, plan):
     else:
         log.info("Executing Simulation plan")
         obj = Simulation(conf=conf)
-        log.info("LAYERS: %s", str(obj.layers.keys()))
-        for fname in ('Ex', 'Ey', 'Ez'):
-            keys = ['{}_{}'.format(lname, fname) for lname in obj.layers.keys()]
-            obj.data[fname] = np.concatenate([obj.data['{}_{}'.format(lname, fname)] for lname in obj.layers.keys()])
-            log.info("FKEYS: %s", str(keys))
-        zcoords = np.array([])
-        for lname, layer in obj.layers.items():
-            key = '{}_Ex'.format(lname)
-            lzvals = np.linspace(layer.start, layer.end, obj.data[key].shape[0])
-            log.info("lzvals.shape = {}".format(lzvals.shape))
-            zcoords = np.append(zcoords, lzvals)
-        log.info("zcoords.shape = {}".format(zcoords.shape))
-        obj.data['zcoords'] = zcoords
-        obj.Z = zcoords
-        # log.info("DATA KEYS: %s", str(list(obj.data.keys())))
-        # log.info("DATA KEYS: %s", str(obj.data.keys()))
-        for k, v in obj.data.items():
-            log.info("%s shape: %s", k, str(v.shape))
+        if conf['General']['sample_dict']:
+            log.info("LAYERS: %s", str(obj.layers.keys()))
+            # Concatenate the field components in each layer into a single 3D
+            # array, but add to blacklist so the concatenated arrays don't get
+            # written to disk
+            for f in ('Ex', 'Ey', 'Ez'):
+                ks = ['{}_{}'.format(lname, f) for lname in obj.layers.keys()]
+                obj.data[f] = np.concatenate([obj.data[k] for k in ks])
+                obj.data.add_to_blacklist(f)
         ID = obj.id[0:10]
 
     for task_name in ('crunch', 'plot'):
         if task_name not in plan:
             continue
-        task = plan[task_name] 
+        task = plan[task_name]
         log.info("Beginning %s for obj %s", task_name, ID)
         for func, data in task.items():
             if not data['compute']:
@@ -2215,13 +2199,6 @@ def execute_plan(conf, plan):
     log.info("Plan execution for obj %s complete", ID)
     if isinstance(obj, Simulation):
         log.info("Saving and clearing data for Simulation %s", ID)
-        for fname in ('Ex', 'Ey', 'Ez'):
-            del obj.data[fname]
-        del obj.data['zcoords']
-        if 'normE' in obj.data:
-            del obj.data['normE']
-        if 'normEsquared' in obj.data:
-            del obj.data['normEsquared']
         obj.write_data()
         obj.clear_data()
     else:

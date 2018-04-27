@@ -489,10 +489,11 @@ def cartesian_product(arrays, out=None):
     return arr.reshape(-1, la)
 
 
-def arithmetic_linspace(a, b, dx0, d, endpoint=True):
+def arithmetic_arange(a, b, dx0, d, endpoint=True):
     """
-    A numpy.linspace copy whose step sizes increase arithmetically, i.e the
-    step sizes follow an arithmetic progression.
+    A numpy.arange copy whose step sizes increase arithmetically, i.e the step
+    sizes follow an arithmetic progression and increase additively by some
+    constant `d`.
 
     :param a: The starting value
     :param b: The ending value

@@ -31,7 +31,8 @@ from .utils.utils import (
     get_nk,
     get_incident_power,
     get_incident_amplitude,
-    cartesian_product
+    cartesian_product,
+    arithmetic_arange
 )
 from sympy import Point, Circle, Ellipse, Triangle, Polygon, RegularPolygon
 from .data_manager import HDF5DataManager, NPZDataManager
@@ -757,6 +758,7 @@ class Simulation:
         num_rows = len(list(self.layers.keys()))
         absorb_arr = np.recarray((num_rows,), dtype=dt)
         counter = 0
+        sdict = self.conf['General']['sample_dict']
         for layer_name, layer_obj in self.layers.items():
             # Method 1: Go through power flux
             blayer_name = layer_name.encode('utf-8')
@@ -784,7 +786,13 @@ class Simulation:
             keys = ['{}_{}'.format(layer_name, f) for f in ("Ex", "Ey", "Ez")]
             fields = {k[-2:]:self.data[k] for k in keys}
             Esq = np.abs(fields['Ex'])**2 + np.abs(fields['Ey'])**2 + np.abs(fields['Ez'])**2
-            z = np.linspace(layer_obj.start, layer_obj.end, Esq.shape[0])
+            # z = np.linspace(layer_obj.start, layer_obj.end, Esq.shape[0])
+            if isinstance(sdict[layer_name], int):
+                z = np.linspace(layer_obj.start, layer_obj.end,
+                                sdict[layer_name])
+            else:
+                args = [layer_obj.start, layer_obj.end, *sdict[layer_name]]
+                z = arithmetic_arange(*args)
             if layer_name == "NW_AlShell":
                 y_integral_polar = self.integrate_nanowire(nkEsq=n_mat*k_mat*Esq)
                 y_integral = integrate3d(n_mat*k_mat*Esq, self.X, self.Y, z,
@@ -1847,7 +1855,6 @@ class SimulationGroup:
         Plots absorption per layer and error
         """
 
-
         results_dir = self.sims[0].conf['General']['results_dir']
         results_dict = {}
         freqs = np.zeros(len(self.sims[sim_slice[0]:sim_slice[1]]))
@@ -1914,8 +1921,8 @@ class SimulationGroup:
                 pfile = os.path.join(results_dir,
                                      '{}_{}.png'.format(layer, name))
                 numbasis = self.sims[0].conf['Simulation']['params']['numbasis']
-                # lab = "Numbasis = {}".format(numbasis)
-                lab = name
+                lab = "Numbasis = {}".format(numbasis)
+                # lab = name
                 ax.plot(freqs, results[ind], '--o', label=lab)
                 ax.set_ylabel(name)
                 ax.set_xlabel("Frequency (Hz)")
@@ -1924,6 +1931,84 @@ class SimulationGroup:
                 plt.savefig(pfile)
         return ax
 
+
+    def plot_absorption_convergence(self, input_ax=None, plot_layer=None,
+                                    quant=None, sim_slice=(0, None)):
+        """
+        Plots the convergence of absorption per layer with basis terms
+        """
+
+        results_dir = self.sims[0].conf['General']['results_dir']
+        results_dict = {}
+        basis = np.zeros(len(self.sims[sim_slice[0]:sim_slice[1]]))
+        for i, sim in enumerate(self.sims[sim_slice[0]:sim_slice[1]]):
+            b = sim.conf['Simulation']['params']['numbasis']
+            basis[i] = b
+            abs_arr = sim.data['abs_per_layer']
+            flux_total = 0
+            integ_total = 0
+            integ_polar_total = 0
+            for (layer, flux, integ, integ_polar, diff, diff_polar) in abs_arr:
+                layer = layer.decode('utf-8')
+                if layer in results_dict:
+                    results_dict[layer][0].append(flux.real)
+                    results_dict[layer][1].append(integ.real)
+                    results_dict[layer][2].append(diff.real)
+                    results_dict[layer][3].append(integ_polar.real)
+                    results_dict[layer][4].append(diff_polar.real)
+                else:
+                    results_dict[layer] = [[flux.real], [integ.real],
+                                           [diff.real], [integ_polar.real],
+                                           [diff_polar.real]]
+                flux_total += flux.real
+                integ_total += integ.real
+                if layer == "NW_AlShell":
+                    integ_polar_total += integ_polar.real
+                else:
+                    integ_polar_total += integ.real
+            total_diff = np.abs(flux_total.real - integ_total.real)/flux_total.real
+            total_diff_polar = np.abs(flux_total.real - integ_polar_total.real)/flux_total.real
+            if 'total' in results_dict:
+                results_dict['total'][0].append(flux_total.real)
+                results_dict['total'][1].append(integ_total.real)
+                results_dict['total'][2].append(total_diff.real)
+                results_dict['total'][3].append(integ_polar_total.real)
+                results_dict['total'][4].append(total_diff_polar.real)
+            else:
+                results_dict['total'] = [[flux_total.real], [integ_total.real],
+                                         [total_diff.real], [integ_polar_total.real],
+                                         [total_diff_polar.real]]
+        layers = results_dict.keys()
+        if plot_layer is not None:
+            layers = [l for l in layers if l == plot_layer]
+
+        quants = {'fluxmethod_absorption': 0,
+                  'integralmethod_absorption': 1,
+                  'relativediff': 2,
+                  'integralmethod_absorption_polar': 3,
+                  'relativediff_polar': 4}
+        if quant is not None:
+            quants = {q: ind for q, ind in quants.items() if q in quant}
+        print(quants)
+        for layer in layers:
+            results = results_dict[layer]
+            for name, ind in quants.items():
+                if input_ax is None:
+                    fig, ax = plt.subplots()
+                else:
+                    ax = input_ax
+                pfile = os.path.join(results_dir,
+                                     '{}_{}.png'.format(layer, name))
+                freq = self.sims[0].conf['Simulation']['params']['frequency']
+                lab = "Freq = {:.2E}".format(freq)
+                # lab = name
+                ax.plot(basis, results[ind], '--o', label=lab)
+                ax.set_ylabel(name)
+                ax.set_xlabel("Numbasis")
+                ax.set_title(layer)
+                print("Saving to {}".format(pfile))
+                plt.savefig(pfile)
+        return ax
 
     def convergence(self, quantity, err_type='global', scale='linear'):
         """Plots the convergence of a field across all available simulations"""

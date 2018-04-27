@@ -38,7 +38,8 @@ from .utils.utils import (
     IdFilter,
     get_incident_amplitude,
     find_inds,
-    merge_and_sort
+    merge_and_sort,
+    arithmetic_arange
 )
 from .utils.config import Config
 from .utils.geometry import Layer, get_layers
@@ -792,14 +793,10 @@ class SimulationManager:
                 self.make_confs()
 
             if filter_dict:
-                print(filter_dict)
-                print(len(self.sim_confs))
                 for k, vals in filter_dict.items():
                     par = [ks for ks in k.split('.')]
                     vals = list(map(type(self.sim_confs[0][par]), vals))
                     self.sim_confs = [c for c in self.sim_confs if c[par] in vals]
-                    print(len(self.sim_confs))
-                print(len(self.sim_confs))
             self.log.info("Executing job campaign")
             self.execute_jobs(func=func, *args, **kwargs)
         elif self.gconf.optimized:
@@ -902,14 +899,16 @@ class Simulator():
         self.ysamps = self.conf['General']['y_samples']
         samps_dict = self.conf['General']['sample_dict']
         if samps_dict:
-            zcoords = np.zeros(sum(s for s in samps_dict.values()))
-            start = 0
+            zcoords = []
             for lname, layer in self.layers.items():
-                samps = samps_dict[lname]
-                zcoords[start:start+samps] = np.linspace(layer.start, layer.end,
-                                                         samps)
-                start += samps
-            self.Z = zcoords
+                if isinstance(samps_dict[lname], int):
+                    z_vals = np.linspace(layer.start, layer.end,
+                                         samps_dict[lname])
+                else:
+                    args = [layer.start, layer.end, *samps_dict[lname]]
+                    z_vals = arithmetic_arange(*args)
+                zcoords.append(z_vals)
+            self.Z = np.concatenate(zcoords)
         elif type(self.conf['General']['z_samples']) == list:
             self.zsamps = len(self.conf['General']['z_samples'])
             # print(self.conf['General']['z_samples'])
@@ -929,7 +928,8 @@ class Simulator():
         self.Y = np.linspace(0, self.period, self.ysamps)
         self.dx = self.X[1] - self.X[0]
         self.dy = self.Y[1] - self.Y[0]
-        self.data.update({"xcoords": self.X, "ycoords": self.Y, "zcoords": self.Z})
+        self.data.update({"xcoords": self.X, "ycoords": self.Y,
+                          "zcoords": self.Z})
 
     def add_interpolator(self, key, method='linear'):
         """
@@ -1327,10 +1327,14 @@ class Simulator():
             if lname not in sample_dict:
                 self.log.info("Layer %s not in sample dict, skipping", lname)
                 continue
-            self.log.info("Computing fields in layer %s using %i samples", lname,
-                          sample_dict[lname])
-            z_vals = np.linspace(layer.start, layer.end, sample_dict[lname])
-            Ex, Ey, Ez, Hx, Hy, Hz = self.compute_fields(zvals=z_vals)
+            if isinstance(sample_dict[lname], int):
+                z = np.linspace(layer.start, layer.end, sample_dict[lname])
+            else:
+                args = [layer.start, layer.end, *sample_dict[lname]]
+                z = arithmetic_arange(*args)
+            self.log.info("Computing fields in layer %s using %i samples",
+                          lname, len(z))
+            Ex, Ey, Ez, Hx, Hy, Hz = self.compute_fields(zvals=z)
             results[lname] = {'Ex':Ex, 'Ey':Ey, 'Ez':Ez, 'Hx':Hx, 'Hy':Hy,
                               'Hz':Hz}
             self.data.update({'{}_{}'.format(lname, fname): arr for fname, arr in

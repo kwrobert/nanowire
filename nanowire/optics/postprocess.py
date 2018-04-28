@@ -457,7 +457,6 @@ class Simulation:
         Use natural neighbor interpolation to integrate nk|E|^2 inside the
         nanowire in shell in polar coordinates for optimum accuracy
         """
-        __import__('pdb').set_trace()
 
         # if len(self.X) % 2 == 0 or len(self.Y) % 2 == 0:
         #     raise ValueError("Need and odd number of x-y samples to use this "
@@ -569,19 +568,19 @@ class Simulation:
         ###########
         # Get function value at r = 0
         # center_inds = np.where((pts[:, 1] == .125) & (pts[:, 2] == .125))
-        # center_inds = np.where(core_polar_pts[:, 0] == 0)
+        center_inds = np.where(core_polar_pts[:, 0] == 0)
         # print("center_inds[0].shape = {}".format(center_inds[0].shape))
         # print("center_inds[0] = {}".format(center_inds[0]))
-        # rzero_core_vals = core_vals[center_inds[0]]
+        rzero_core_vals = core_vals[center_inds[0]]
         # # print("rzero_core_vals = {}".format(rzero_core_vals))
-        # extra_theta = 90
-        # extra_pts = cartesian_product((np.array([0]),
-        #                                np.linspace(-np.pi, np.pi, extra_theta),
-        #                                core_polar_pts[center_inds[0], 2]))
+        extra_theta = 180
+        extra_pts = cartesian_product((np.array([0]),
+                                       np.linspace(-np.pi, np.pi, extra_theta),
+                                       core_polar_pts[center_inds[0], 2]))
         # # print("extra_pts = {}".format(extra_pts))
-        # repeated_zero_vals = np.concatenate([rzero_core_vals for i in range(extra_theta)])
-        # core_polar_pts = np.concatenate((core_polar_pts, extra_pts))
-        # core_vals = np.concatenate((core_vals, repeated_zero_vals))
+        repeated_zero_vals = np.concatenate([rzero_core_vals for i in range(extra_theta)])
+        core_polar_pts = np.concatenate((core_polar_pts, extra_pts))
+        core_vals = np.concatenate((core_vals, repeated_zero_vals))
 
         # if True:
         #     return None,None,None,None,None,None,None,None,None
@@ -626,6 +625,7 @@ class Simulation:
         # print("zvals = {}".format(zvals))
         # print("intzvals = {}".format(intzvals))
         rr, tt = np.meshgrid(core_rvals, thetavals, indexing='ij')
+        __import__('pdb').set_trace()
         # print('rr shape: ', rr.shape)
         # print('tt shape: ', tt.shape)
         # print('core_interp: ', core_interp.shape)

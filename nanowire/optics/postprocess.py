@@ -452,11 +452,12 @@ class Simulation:
         self.data[key] = avgs
         return avgs
 
-    def integrate_nanowire(self, nkEsq=None):
+    def integrate_nanowire(self, zvals, nkEsq=None):
         """
         Use natural neighbor interpolation to integrate nk|E|^2 inside the
         nanowire in shell in polar coordinates for optimum accuracy
         """
+        __import__('pdb').set_trace()
 
         # if len(self.X) % 2 == 0 or len(self.Y) % 2 == 0:
         #     raise ValueError("Need and odd number of x-y samples to use this "
@@ -471,9 +472,6 @@ class Simulation:
         # Extract nkEsq data in layer
         if nkEsq is None:
             nkEsq = self.data['nknormEsq'][nw_layer.get_slice(self.Z)]
-            zvals = self.Z[nw_layer.get_slice(self.Z)]
-        else:
-            zvals = np.linspace(nw_layer.start, nw_layer.end, nkEsq.shape[0])
         # print("nkEsq shape: ", nkEsq.shape)
         # Get masks for each region
         core_mask = get_mask_by_material(nw_layer, 'GaAs', self.X, self.Y)
@@ -503,8 +501,7 @@ class Simulation:
         # plt.matshow(cyc_vals[0, :, :])
         # plt.colorbar()
         # plt.show()
-        cyc_z = np.linspace(nw_layer.start, nw_layer.end, nkEsq.shape[0])
-        cyc_result = integrate3d(cyc_vals, self.X, self.Y, cyc_z,
+        cyc_result = integrate3d(cyc_vals, self.X, self.Y, zvals,
                                  meth=intg.simps)
         # Extract vals in each region from nkEsq array
         core_inds = np.where(core_mask3d)
@@ -521,7 +518,7 @@ class Simulation:
         # print(pts)
         # Shift x and y values so origin is at center of nanowire
         # core_pts_inds = np.where((core_pts[:, 1] - period/2)**2 + (core_pts[:, 2] - period/2)**2 <= core_rad**2)
-        p2 = period/2
+        p2 = period/2.0
         pts[:, 2] -= p2
         pts[:, 1] -= p2
         core_pts_inds = np.where(pts[:, 1]**2 + pts[:, 2]**2 <= core_rad**2)
@@ -794,7 +791,7 @@ class Simulation:
                 args = [layer_obj.start, layer_obj.end, *sdict[layer_name]]
                 z = arithmetic_arange(*args)
             if layer_name == "NW_AlShell":
-                y_integral_polar = self.integrate_nanowire(nkEsq=n_mat*k_mat*Esq)
+                y_integral_polar = self.integrate_nanowire(z, nkEsq=n_mat*k_mat*Esq)
                 y_integral = integrate3d(n_mat*k_mat*Esq, self.X, self.Y, z,
                                          meth=intg.simps)
             else:

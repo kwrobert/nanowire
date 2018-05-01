@@ -217,7 +217,7 @@ class HDF5DataManager(DataManager):
         else:
             self._data[key] = node.read()
 
-    def write_data(self, blacklist=()):
+    def write_data(self, blacklist=('normE', 'normEsquared')):
         """
         Writes all necessary data out to the HDF5 file
         """

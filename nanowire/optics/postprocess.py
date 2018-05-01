@@ -500,7 +500,7 @@ class Simulation:
         # plt.matshow(cyc_vals[0, :, :])
         # plt.colorbar()
         # plt.show()
-        cyc_result = integrate3d(cyc_vals, self.X, self.Y, zvals,
+        cyc_result = integrate3d(cyc_vals, zvals, self.X, self.Y,
                                  meth=intg.simps)
         # Extract vals in each region from nkEsq array
         core_inds = np.where(core_mask3d)
@@ -591,9 +591,9 @@ class Simulation:
         # print('core_polar_pts shape: ', core_polar_pts.shape)
         # print(core_polar_pts)
         rstart = 0
-        core_numr = 120
-        shell_numr = 40
-        numtheta = 180
+        core_numr = 180
+        shell_numr = 60
+        numtheta = 360
         numz = 200
         # If the last element of each range is complex, the ranges behave like
         # np.linspace
@@ -620,12 +620,14 @@ class Simulation:
         # input("Continue?")
         # # Multiply by area factor in polar coords to get integrand
         core_rvals = np.linspace(rstart, core_rad, core_numr)
-        thetavals = np.linspace(0, 2*np.pi, numtheta)
+        thetavals = np.linspace(-np.pi, np.pi, numtheta)
         intzvals = np.linspace(nw_layer.start, nw_layer.end, numz)
         # print("zvals = {}".format(zvals))
         # print("intzvals = {}".format(intzvals))
         rr, tt = np.meshgrid(core_rvals, thetavals, indexing='ij')
-        __import__('pdb').set_trace()
+        # xx = rr*np.cos(tt)
+        # yy = rr*np.sin(tt)
+        # __import__('pdb').set_trace()
         # print('rr shape: ', rr.shape)
         # print('tt shape: ', tt.shape)
         # print('core_interp: ', core_interp.shape)
@@ -709,7 +711,7 @@ class Simulation:
         result = sum(results.values())
         return result
 
-    def absorption_per_layer(self, per_area=True):
+    def absorption_per_layer(self, per_area=True, order=(0, 1, 2)):
         """
         Computes the absorption in each layer of the device using two methods.
         The first method takes the difference between the areal power fluxes
@@ -791,12 +793,13 @@ class Simulation:
                 args = [layer_obj.start, layer_obj.end, *sdict[layer_name]]
                 z = arithmetic_arange(*args)
             if layer_name == "NW_AlShell":
-                y_integral_polar = self.integrate_nanowire(z, nkEsq=n_mat*k_mat*Esq)
-                y_integral = integrate3d(n_mat*k_mat*Esq, self.X, self.Y, z,
-                                         meth=intg.simps)
+                # y_integral_polar = self.integrate_nanowire(z, nkEsq=n_mat*k_mat*Esq)
+                y_integral_polar = 0
+                y_integral = integrate3d(n_mat*k_mat*Esq, z, self.X, self.Y,
+                                         meth=intg.simps, order=order)
             else:
                 y_integral_polar = 0
-                y_integral = integrate3d(n_mat*k_mat*Esq, self.X, self.Y, z,
+                y_integral = integrate3d(n_mat*k_mat*Esq, z, self.X, self.Y,
                                          meth=intg.simps)
             # abs_dict[lname] = result
             # nkEsq = n_mat*k_mat*Esq
@@ -844,7 +847,8 @@ class Simulation:
             absorb_arr[counter] = (layer_name, Pabs_flux, Pabs_integ,
                                    Pabs_integ_polar, diff, diff_polar)
             counter += 1
-        self.log.info("Layer absorption arr: %s", str(absorb_arr))
+        self.log.info("Integration Order: %s, Layer absorption arr: %s",
+                      str(order), str(absorb_arr))
         fout = os.path.join(self.dir, 'abs_per_layer.dat')
         with open(fout, 'w') as f:
             absorb_arr.tofile(f, sep=', ')
@@ -2172,17 +2176,33 @@ def integrate2d(arr, xvals, yvals, meth=intg.trapz):
     return y_integral
 
 
-def integrate3d(arr, xvals, yvals, zvals, meth=intg.trapz):
-    ##print("Layer: {}".format(layer_obj.name))
-    ##print("Layer Start Ind: {}".format(layer_obj.istart))
-    ##print("Layer End Ind: {}".format(layer_obj.iend))
-    ##print(z_vals)
-    z_integral = meth(arr, x=zvals, axis=0)
-    x_integral = meth(z_integral, x=xvals, axis=0)
-    y_integral = meth(x_integral, x=yvals, axis=0)
-    return y_integral
+def integrate3d(arr, ax0, ax1, ax2, order=(0, 1, 2), meth=intg.trapz):
+    """
+    Perform numerical integration on a 3D array `arr` whose spatial coordinates
+    along each axis correspond to the arrays `ax0`, `ax1`, and `ax2`.
 
+    The `order` kwarg specifies the integration order of the axes. For example,
+    if order=(1, 0, 2) the array is integrated along axis 1, followed by axis
+    0, then axis 2. This is useful for determining if the integration order
+    matters, which it sometimes can numerically.
 
+    :param arr: The 3D numpy array to be integrated. Must have shape (len(ax0),
+    len(ax1), len(ax2))
+    :param ax0, ax1, ax2: 1D numpy arrays specifying the spatial coordinates of
+    each axis
+    :param meth: The integration method to use.
+    :param order: A length 3 tuple specifying the order in which to integrate.
+    :type meth: function
+    """
+
+    coords = (ax0, ax1, ax2)
+    result = arr
+    remaining_axes = [0, 1, 2]
+    for ax in order:
+        int_ax = remaining_axes.index(ax)
+        result = meth(result, x=coords[ax], axis=int_ax)
+        remaining_axes.pop(int_ax)
+    return result
 
 def counted(fn):
     def wrapper(self):
@@ -2199,6 +2219,8 @@ def _call_func(quantity, obj, args):
     """
 
     log = logging.getLogger(__name__)
+    print(quantity)
+    print(args)
     try:
         result = getattr(obj, quantity)(*args)
     except AttributeError:

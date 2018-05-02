@@ -4,6 +4,7 @@ import six
 import hashlib
 import logging
 import itertools
+import netifaces
 import tempfile as tmp
 import numpy as np
 from itertools import accumulate, repeat, chain, product
@@ -527,3 +528,51 @@ def arithmetic_arange(a, b, dx0, d, endpoint=True):
     if not endpoint and pts[-1] >= b:
         pts = pts[0:-1]
     return pts
+
+def ipv4():
+    """ 
+    Get all IPv4 addresses for all interfaces. 
+    """
+
+    try:
+        # to not take into account loopback addresses (no interest here)
+        addresses = []
+        for interface in interfaces():
+            config = ifaddresses(interface)
+             #AF_INET is not always present
+            if AF_INET in config.keys():
+                for link in config[AF_INET]:
+                # loopback holds a 'peer' instead of a 'broadcast' address
+                    if 'addr' in link.keys() and 'peer' not in link.keys():
+                        addresses.append(link['addr']) 
+        return addresses
+    except ImportError: 
+        return []
+
+def get_public_iface():
+    """
+    Get the public facing network interface this machine uses to connect to the
+    internet. The approach is to look at your default route/default interface
+    for routing traffic, then get the interface name from that
+    """
+
+    interface = netifaces.gateways()['default'][netifaces.AF_INET][1] 
+    return interface
+
+def get_public_ip(iface, version=4):
+    """
+    Get the public facing IP address of the given interface
+    """
+
+    if not isinstance(iface, str):
+        raise ValueError("Interface must be a string")
+    if not isinstance(version, int):
+        raise ValueError("Version must be an integer")
+    addrs = netifaces.ifaddresses(iface)
+    if version == 4:
+        ipadd =  addrs[netifaces.AF_INET][0]['addr']
+    elif version == 6:
+        ipadd = addrs[netifaces.AF_INET6][0]['addr']
+    else:
+        raise ValueError("version must be either 4 or 6")
+    return ipadd

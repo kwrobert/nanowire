@@ -21,6 +21,7 @@ import logging
 import traceback
 # import logging_tree
 import S4
+import dispy
 import scipy.interpolate as spi
 import scipy.integrate as intg
 import scipy.constants as constants
@@ -39,12 +40,22 @@ from .utils.utils import (
     get_incident_amplitude,
     find_inds,
     merge_and_sort,
-    arithmetic_arange
+    arithmetic_arange,
+    get_public_ip,
+    get_public_iface
 )
 from .utils.config import Config
 from .utils.geometry import Layer, get_layers
 
 from line_profiler import LineProfiler
+
+DISPY_LOOKUP = {dispy.DispyJob.Abandoned: 'Abandoned',
+                dispy.DispyJob.Cancelled: 'Cancelled',
+                dispy.DispyJob.Created: 'Created',
+                dispy.DispyJob.Finished: 'Finished',
+                dispy.DispyJob.ProvisionalResult: 'ProvisionalResult',
+                dispy.DispyJob.Running: 'Running',
+                dispy.DispyJob.Terminated: 'Terminated'}
 
 def do_profile(follow=[], out=''):
     def inner(func):
@@ -211,6 +222,7 @@ def run_sim(conf, q=None):
             # data, then make the subdir from the sim id and get the data
             sim.evaluate_config()
             sim.update_id()
+            print(sim.dir)
             try:
                 os.makedirs(sim.dir)
             except OSError:
@@ -252,6 +264,103 @@ def run_sim(conf, q=None):
         raise
     return None
 
+def run_sim_dispy(conf):
+    try:
+        import sys
+        import os
+        import logging
+        import time
+        import copy
+        import dispy
+        import socket
+        from nanowire.optics.data_manager import HDF5DataManager, NPZDataManager
+        from nanowire.optics.utils.utils import (
+            make_hash,
+            get_combos,
+            IdFilter,
+            get_incident_amplitude,
+            find_inds,
+            merge_and_sort,
+            arithmetic_arange
+        )
+        from nanowire.optics.utils.config import Config
+        from nanowire.optics.utils.geometry import Layer, get_layers
+        from nanowire.optics.simulate import Simulator
+        log = logging.getLogger(__name__)
+        start = time.time()
+        # act_path = os.path.expandvars('$HOME/.virtualenvs/nanowire/bin/activate_this.py')
+        # global_vars = globals()
+        # global_vars['__file__'] = act_path
+        # exec(compile(open(act_path, "rb").read(), act_path, 'exec'),
+        #      global_vars, locals())
+        sim = Simulator(copy.deepcopy(conf), q=None)
+        # return 'returned a thing'
+        if not sim.conf.variable_thickness:
+            sim.setup()
+            # rel_dir = os.path.join('./', os.path.basename(sim.dir))
+            rel_dir = os.path.basename(sim.dir)
+            sim.dir = rel_dir
+            sim.conf['General']['sim_dir'] = rel_dir
+            log.info('Executing sim %s', sim.id[0:10])
+            sim.save_all()
+            for f in os.listdir(rel_dir):
+                fpath = os.path.join(rel_dir, f)
+                dispy_send_file(fpath)
+            # path = os.path.join(os.path.basename(sim.dir), 'sim.hdf5')
+            # sim.q.put(path, block=True)
+            # sim.mode_solve()
+        else:
+            log.info('Computing a thickness sweep at %s' % sim.id[0:10])
+            orig_id = sim.id[0:10]
+            # Get all combinations of layer thicknesses
+            keys, combos = get_combos(sim.conf, sim.conf.variable_thickness)
+            # Update base directory to new sub directory
+            sim.conf['General']['base_dir'] = sim.dir
+            # Set things up for the first combo
+            first_combo = combos.pop()
+            # First update all the thicknesses in the config. We make a copy of the
+            # list because it gets continually updated in the config object
+            var_thickness = sim.conf.variable_thickness
+            for i, param_val in enumerate(first_combo):
+                keyseq = var_thickness[i]
+                sim.conf[keyseq] = param_val
+            # With all the params updated we can now run substutions and
+            # evaluations in the config that make have referred to some thickness
+            # data, then make the subdir from the sim id and get the data
+            sim.evaluate_config()
+            sim.update_id()
+            try:
+                os.makedirs(sim.dir)
+            except OSError:
+                pass
+            sim.make_logger()
+            subpath = os.path.join(orig_id, sim.id[0:10])
+            log.info('Computing initial thickness at %s', subpath)
+            sim.save_all()
+            # path = os.path.join(sim.dir, 'data.hdf5')
+            # sim.q.put(path, block=True)
+            # Now we can repeat the same exact process, but instead of rebuilding
+            # the device we just update the thicknesses
+            for combo in combos:
+                for i, param_val in enumerate(combo):
+                    keyseq = var_thickness[i]
+                    sim.conf[keyseq] = param_val
+                sim.update_id()
+                subpath = os.path.join(orig_id, sim.id[0:10])
+                log.info('Computing additional thickness at %s', subpath)
+                os.makedirs(sim.dir)
+                sim.save_all(update=True)
+                # path = os.path.join(sim.dir, 'data.hdf5')
+                # sim.q.put(path, block=True)
+        end = time.time()
+        runtime = end - start
+        log.info('Simulation %s completed in %.2f seconds!', sim.id[0:10], runtime)
+        sim.clean_sim()
+    except Exception as e:
+        print(traceback.format_exc())
+        raise
+
+    return socket.gethostname()
 
 class LayerFlux(tb.IsDescription):
     layer = tb.StringCol(60, pos=0)
@@ -468,7 +577,7 @@ class SimulationManager:
 
     def make_confs(self):
         """Make all the configuration dicts for each parameter combination"""
-        self.log.info('Constructing simulator objects ...')
+        self.log.info('Constructing Config objects ...')
         locs, combos = get_combos(self.gconf, self.gconf.variable)
         for combo in combos:
             # Make a copy of the global config for this parameter combos. This copy
@@ -599,10 +708,65 @@ class SimulationManager:
             # for res in results:
             #     print(res)
             #     print(res.get())
-        elif self.gconf['General']['execution'] == 'gc3':
-            self.log.info('Executing jobs using gc3 submission tools')
-            self.gc3_submit(self.gconf, self.sim_confs)
+        elif self.gconf['General']['execution'] == 'dispy':
+            self.log.info('Executing jobs using dispy cluster')
+            self.dispy_submit()
         self.log.info('Finished executing jobs!')
+
+    def dispy_submit(self):
+        log = logging.getLogger(__name__)
+        log.info("Beginning dispy submit procedure")
+        # planck = dispy.NodeAllocate('10.132.193.72', port=51348)
+        # nodes = ['10.132.193.72', '127.0.1.1']
+        try:
+            nodes = self.gconf['General']['nodes']
+            ip = self.gconf['General']['ip_addr']
+        except KeyError:
+            log.error("Need to specify 'nodes' and 'ip_addr' entries in "
+                      "General section")
+        if ip == 'auto':
+            pub_iface = get_public_iface()
+            ip = get_public_ip(pub_iface)
+        node_allocs = []
+        for node in nodes:
+            # If its not a string, hopefully it's a length 2 list or tuple
+            # with (str, int) = (ip_addr, port_number)
+            if not isinstance(node, str):
+                node_allocs.append(dispy.NodeAllocate(node[0], port=node[1]))
+            # Use default port locally
+            elif node == 'local':
+                node_allocs.append(dispy.NodeAllocate(ip))
+            else:
+                node_allocs.append(dispy.NodeAllocate(node))
+        cluster = dispy.JobCluster(run_sim_dispy,
+                                   dest_path=time.strftime('%Y-%m-%d'),
+                                   cleanup=True, 
+                                   # cleanup=False, loglevel=dispy.logger.DEBUG,
+                                   nodes=node_allocs, ip_addr=ip)
+        # Wait until we connect to at least one node 
+        while len(cluster.status().nodes) == 0:
+            time.sleep(1)
+        cluster.print_status()
+        jobs = {}
+        for i, conf in enumerate(self.sim_confs):
+            job = cluster.submit(conf)
+            job.id = i
+            jobs[i] = job
+            log.info('Job {} Status: {}'.format(i, job.status))
+        while jobs:
+            toremove = []
+            for job_id, job in jobs.items():
+                status = DISPY_LOOKUP[job.status]
+                if (job.status == dispy.DispyJob.Finished 
+                        or job.status in (dispy.DispyJob.Terminated, dispy.DispyJob.Cancelled,
+                                          dispy.DispyJob.Abandoned)):
+                    toremove.append(job_id)
+            for job_id in toremove:
+                stat = DISPY_LOOKUP[jobs[job_id].status]
+                log.info('Job {} has status {}, removing now'.format(job_id, stat)) 
+                del jobs[job_id]
+            time.sleep(5)
+        return None
 
     def spectral_wrapper(self, opt_pars):
         """A wrapper function to handle spectral sweeps and postprocessing for the scipy minimizer. It
@@ -875,9 +1039,14 @@ class Simulator():
         """
         self.evaluate_config()
         self.update_id()
+        print("AFTER UPDATE")
+        print('sim.id: ', self.id)
+        print('sim.dir: ', self.dir)
         try:
             os.makedirs(self.dir)
-        except OSError:
+        except OSError as e:
+            print("INSIDE SIM SETUP")
+            print(traceback.format_exc())
             pass
         self.make_logger()
         self.data = self._get_data_manager()
@@ -985,7 +1154,8 @@ class Simulator():
     def update_id(self):
         """Update sim id. Used after changes are made to the config"""
         self.id = make_hash(self.conf.data)
-        sim_dir = os.path.join(self.conf['General']['base_dir'], self.id[0:10])
+        # sim_dir = os.path.join(self.conf['General']['base_dir'], self.id[0:10])
+        sim_dir = self.id[0:10]
         self.conf['General']['sim_dir'] = sim_dir
         sim_dir = os.path.expandvars(sim_dir)
         self.dir = sim_dir

@@ -359,8 +359,7 @@ def run_sim_dispy(conf):
     except Exception as e:
         print(traceback.format_exc())
         raise
-
-    return socket.gethostname()
+    return runtime
 
 class LayerFlux(tb.IsDescription):
     layer = tb.StringCol(60, pos=0)
@@ -714,10 +713,9 @@ class SimulationManager:
         self.log.info('Finished executing jobs!')
 
     def dispy_submit(self):
+        import time
         log = logging.getLogger(__name__)
         log.info("Beginning dispy submit procedure")
-        # planck = dispy.NodeAllocate('10.132.193.72', port=51348)
-        # nodes = ['10.132.193.72', '127.0.1.1']
         try:
             nodes = self.gconf['General']['nodes']
             ip = self.gconf['General']['ip_addr']
@@ -752,7 +750,8 @@ class SimulationManager:
             job = cluster.submit(conf)
             job.id = i
             jobs[i] = job
-            log.info('Job {} Status: {}'.format(i, job.status))
+            stat = DISPY_LOOKUP[job.status]
+            log.info('Job: {}, Status: {}'.format(i, stat))
         while jobs:
             toremove = []
             for job_id, job in jobs.items():
@@ -762,10 +761,12 @@ class SimulationManager:
                                           dispy.DispyJob.Abandoned)):
                     toremove.append(job_id)
             for job_id in toremove:
-                stat = DISPY_LOOKUP[jobs[job_id].status]
-                log.info('Job {} has status {}, removing now'.format(job_id, stat)) 
+                job = jobs[job_id]
+                stat = DISPY_LOOKUP[job.status]
+                time = job.result
+                log.info('Job: %i, Status: %s, Runtime: %f seconds'
+                         ', removing now', job_id, stat, time) 
                 del jobs[job_id]
-            time.sleep(5)
         return None
 
     def spectral_wrapper(self, opt_pars):

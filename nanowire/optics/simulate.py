@@ -751,7 +751,7 @@ class SimulationManager:
             job.id = i
             jobs[i] = job
             stat = DISPY_LOOKUP[job.status]
-            log.info('Job: {}, Status: {}'.format(i, stat))
+            log.info('Job ID: {}, Status: {}'.format(i, stat))
         while jobs:
             toremove = []
             for job_id, job in jobs.items():
@@ -764,8 +764,12 @@ class SimulationManager:
                 job = jobs[job_id]
                 stat = DISPY_LOOKUP[job.status]
                 time = job.result
-                log.info('Job: %i, Status: %s, Runtime: %f seconds'
-                         ', removing now', job_id, stat, time) 
+                if job.status == dispy.DispyJob.Terminated:
+                    log.info('Job ID: %i, Status: %s, Exception:\n%s',
+                             job_id, stat, job.exception) 
+                else:
+                    log.info('Job ID: %i, Status: %s, Runtime: %f s'
+                             ', Host: %s', job_id, stat, time, job.ip_addr) 
                 del jobs[job_id]
         return None
 

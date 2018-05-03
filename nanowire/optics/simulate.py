@@ -1044,14 +1044,9 @@ class Simulator():
         """
         self.evaluate_config()
         self.update_id()
-        print("AFTER UPDATE")
-        print('sim.id: ', self.id)
-        print('sim.dir: ', self.dir)
         try:
             os.makedirs(self.dir)
         except OSError as e:
-            print("INSIDE SIM SETUP")
-            print(traceback.format_exc())
             pass
         self.make_logger()
         self.data = self._get_data_manager()
@@ -1085,7 +1080,6 @@ class Simulator():
             self.Z = np.concatenate(zcoords)
         elif type(self.conf['General']['z_samples']) == list:
             self.zsamps = len(self.conf['General']['z_samples'])
-            # print(self.conf['General']['z_samples'])
             self.Z = np.asarray(self.conf['General']['z_samples'])
         else:
             self.zsamps = self.conf['General']['z_samples']

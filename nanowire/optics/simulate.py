@@ -48,7 +48,6 @@ from .utils.utils import (
 from .utils.config import Config
 from .utils.geometry import Layer, get_layers
 
-from line_profiler import LineProfiler
 
 DISPY_LOOKUP = {dispy.DispyJob.Abandoned: 'Abandoned',
                 dispy.DispyJob.Cancelled: 'Cancelled',
@@ -58,25 +57,6 @@ DISPY_LOOKUP = {dispy.DispyJob.Abandoned: 'Abandoned',
                 dispy.DispyJob.Running: 'Running',
                 dispy.DispyJob.Terminated: 'Terminated'}
 
-def do_profile(follow=[], out=''):
-    def inner(func):
-        def profiled_func(*args, **kwargs):
-            try:
-                profiler = LineProfiler()
-                profiler.add_function(func)
-                for f in follow:
-                    profiler.add_function(f)
-                profiler.enable_by_count()
-                return func(*args, **kwargs)
-            finally:
-                if out:
-                    path = osp.abspath(osp.expandvars(out))
-                    with open(path, 'a') as f:
-                        profiler.print_stats(stream=f)
-                else:
-                    profiler.print_stats()
-        return profiled_func
-    return inner
 # from rcwa_app import RCWA_App
 
 

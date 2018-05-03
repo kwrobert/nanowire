@@ -7,13 +7,33 @@ import itertools
 import netifaces
 import tempfile as tmp
 import numpy as np
+import scipy.integrate as intg
+from scipy import interpolate
+from scipy import constants
 from itertools import accumulate, repeat, chain, product
 from collections import Iterable, OrderedDict
 from contextlib import contextmanager
-from scipy import interpolate
-from scipy import constants
-import scipy.integrate as intg
+from line_profiler import LineProfiler
 
+def do_profile(follow=[], out=''):
+    def inner(func):
+        def profiled_func(*args, **kwargs):
+            try:
+                profiler = LineProfiler()
+                profiler.add_function(func)
+                for f in follow:
+                    profiler.add_function(f)
+                profiler.enable_by_count()
+                return func(*args, **kwargs)
+            finally:
+                if out:
+                    path = os.path.abspath(os.path.expandvars(out))
+                    with open(path, 'a') as f:
+                        profiler.print_stats(stream=f)
+                else:
+                    profiler.print_stats()
+        return profiled_func
+    return inner
 
 def is_iterable(arg):
     """

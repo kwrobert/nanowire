@@ -6,6 +6,11 @@ import re
 from collections import MutableMapping, OrderedDict
 from copy import deepcopy
 import pprint
+from mako.template import Template
+from .utils import get_combos, do_profile
+from line_profiler import LineProfiler
+
+
 
 def numpy_float64_representer(dumper, data):
     node = dumper.represent_scalar(u'tag:yaml.org,2002:float',
@@ -42,9 +47,9 @@ class Config(MutableMapping):
         else:
             self.data = {}
             self.update(dict(data))
-        self._update_params()
-        self.dep_graph = {}
-        self.resolved = False
+        # self._update_params()
+        # self.dep_graph = {}
+        # self.resolved = False
 
     def _parse_file(self, path):
         """Parse the YAML file provided at the command line"""
@@ -273,42 +278,12 @@ class Config(MutableMapping):
                     key_seq.append(key)
                     self.setfromseq(key_seq, result)
 
-    def _find_params(self, indict={}, keypath=[]):
-        if not indict:
-            keyset = set(self.data.keys())
-            exclude = set(['Postprocessing'])
-            keys = keyset.difference(exclude)
-            indict = self.data
-        else:
-            keys = indict.keys()
-        for key in keys:
-            val = indict[key]
-            # All variable parameters must specify their type
-            if isinstance(val, dict):
-                loc = keypath + [key]
-                if 'paramtype' in val:
-                    if val['paramtype'] == 'variable':
-                        # Thickness parameters require special treatment
-                        if key == 'thickness':
-                            self.variable_thickness.append(loc)
-                        else:
-                            self.variable.append(loc)
-                    elif val['paramtype'] == 'optimized':
-                        self.optimized.append(loc)
-                    else:
-                        raise ValueError("Invalid parameter type at"
-                                         " {}".format(loc))
-                else:
-                    self._find_params(indict=val, keypath=loc)
-            else:
-                continue
 
     def _update_params(self):
         # self.log.info('Updating params')
         self.variable = []
         self.variable_thickness = []
         self.optimized = []
-        self._find_params()
 
     def __getitem__(self, key):
         """This setup allows us to get a value using a sequence with the usual
@@ -337,7 +312,6 @@ class Config(MutableMapping):
             self.setfromseq(key, value)
         else:
             self.data[key] = value
-        self._update_params()
 
     def __delitem__(self, key):
         if isinstance(key, tuple):
@@ -346,7 +320,6 @@ class Config(MutableMapping):
             self.delfromseq(key)
         else:
             del self.data[key]
-        self._update_params()
 
     def __iter__(self):
         return iter(self.data)
@@ -373,17 +346,15 @@ class Config(MutableMapping):
         """A convenience method to set the a value in the config given a sequence of keys"""
         sect = self.getfromseq(keyset[:-1])
         sect[keyset[-1]] = value
-        self._update_params()
 
     def delfromseq(self, keyset):
         """Deletes the section of the config located at the end of a sequence
         of keys"""
         del self.getfromseq(keyset[:-1])[keyset[-1]]
-        self._update_params()
 
     def copy(self):
-        """Returns a copy of the current config object"""
-        return deepcopy(self)
+        """Returns a deep copy of the self.data dict"""
+        return deepcopy(self.data)
 
     def write(self, path):
         """Dumps this config object to its YAML representation given a path to a file"""

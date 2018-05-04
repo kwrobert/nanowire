@@ -1739,7 +1739,7 @@ class Simulator():
         if os.path.isfile(fname):
             self.log.info("Loading from: %s", fname)
             log.info("Simulator %s loading solution from: %s", self.id[0:10], fname)
-            # self.s4.LoadSolution(Filename=fname)
+            self.s4.LoadSolution(Filename=fname)
             self.log.info("Solution loaded!")
             log.info("Solution loaded!")
         else:

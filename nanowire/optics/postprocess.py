@@ -35,7 +35,8 @@ from .utils.utils import (
     arithmetic_arange
 )
 from sympy import Point, Circle, Ellipse, Triangle, Polygon, RegularPolygon
-from .data_manager import HDF5DataManager, NPZDataManager
+from .simulate import Simulator
+from .data_manager import DataManager, HDF5DataManager, NPZDataManager
 from .utils.geometry import (
     Layer,
     get_mask_by_shape,
@@ -128,8 +129,22 @@ class Simulation:
         if conf is not None:
             self.data = self._get_data_manager()
         else:
-            # self.data = copy.deepcopy(simulator.data)
-            self.data = simulator.data
+            self.data = {}
+            simulator.setup()
+            print(list(simulator.data.keys()))
+            self.data.update(simulator.data)
+            print(list(self.data.keys()))
+            sdict = self.conf['General']['sample_dict']
+            if sdict:
+                results = simulator.compute_fields_by_layer(sdict)
+                self.data.update(results)
+                print(list(self.data.keys()))
+            else:
+                Ex, Ey, Ez, Hx, Hy, Hz = simulator.compute_fields()
+                self.data.update({'Ex': Ex, 'Ey': Ey, 'Ez': Ez,
+                                  'Hx': Hx, 'Hy': Hy, 'Hz': Hz})
+            flux_arr = simulator.compute_fluxes()
+            self.data.update({'fluxes': flux_arr})
         self.failed = False
         self.avgs = {}
         # Compute and store dx, dy, dz at attributes
@@ -213,7 +228,10 @@ class Simulation:
 
     def clear_data(self):
         """Clears all the data attributes to free up memory"""
-        self.data._update_keys(clear=True)
+        if isinstance(self.data, DataManager):
+            self.data._update_keys(clear=True)
+        else:
+            self.data = {}
 
     def extend_data(self, quantity, new_data):
         """
@@ -2262,20 +2280,22 @@ def execute_plan(conf, plan):
     log = logging.getLogger(__name__)
     if isinstance(conf, list) or isinstance(conf, tuple):
         log.info("Executing SimulationGroup plan")
-        obj = SimulationGroup([Simulation(c) for c in conf])
+        obj = SimulationGroup([Simulation(simulator=Simulator(c)) for c in conf])
         ID = str(obj)
     else:
         log.info("Executing Simulation plan")
-        obj = Simulation(conf=conf)
+        obj = Simulation(simulator=Simulator(conf))
         if conf['General']['sample_dict']:
             log.info("LAYERS: %s", str(obj.layers.keys()))
             # Concatenate the field components in each layer into a single 3D
             # array, but add to blacklist so the concatenated arrays don't get
             # written to disk
+            # FIXME: This is grossly memory-inefficient
             for f in ('Ex', 'Ey', 'Ez'):
                 ks = ['{}_{}'.format(lname, f) for lname in obj.layers.keys()]
                 obj.data[f] = np.concatenate([obj.data[k] for k in ks])
-                obj.data.add_to_blacklist(f)
+                if isinstance(obj.data, DataManager):
+                    obj.data.add_to_blacklist(f)
         ID = obj.id[0:10]
 
     for task_name in ('crunch', 'plot'):
@@ -2303,7 +2323,7 @@ def execute_plan(conf, plan):
     log.info("Plan execution for obj %s complete", ID)
     if isinstance(obj, Simulation):
         log.info("Saving and clearing data for Simulation %s", ID)
-        obj.write_data()
+        # obj.write_data()
         obj.clear_data()
     else:
         log.info("Clearing data for SimulationGroup %s", ID)
@@ -2344,20 +2364,13 @@ class Processor(object):
 
         sim_confs = []
         failed_sims = []
-        ftype = self.gconf['General']['save_as']
-        # Get correct data file name
-        if ftype == 'npz':
-            datfile = self.gconf['General']['base_name'] + '.npz'
-        elif ftype == 'hdf5':
-            datfile = 'sim.hdf5'
-        else:
-            raise ValueError('Invalid file type specified in config')
+        solfile = self.gconf['General']['solution_file']
         # Find the data files and instantiate Simulation objects
         base = os.path.expandvars(self.gconf['General']['base_dir'])
         self.log.info(base)
         for root, dirs, files in os.walk(base):
             conf_path = os.path.join(root, 'sim_conf.yml')
-            if 'sim_conf.yml' in files and datfile in files:
+            if 'sim_conf.yml' in files and solfile in files:
                 self.log.info('Gather sim at %s', root)
                 # sim_obj = Simulation(Config(conf_path))
                 conf = Config(conf_path)

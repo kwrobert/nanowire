@@ -31,7 +31,7 @@ import scipy.constants as constants
 from lxml import etree
 from lxml.builder import E
 # get our custom config object and the logger function
-from . import postprocess as pp
+# from . import postprocess as pp
 from .data_manager import HDF5DataManager, NPZDataManager
 from .utils.utils import (
     make_hash,
@@ -612,8 +612,8 @@ class SimulationManager:
                 sims.append(conf_obj)
             elif 'sim_conf.yml' in files:
                 conf_obj = Config(conf_path)
-                self.log.error('The following sim is missing its data file: %s',
-                               sim_obj.conf['General']['sim_dir'])
+                self.log.error('Sim missing its data file: %s',
+                               conf_obj.conf['General']['sim_dir'])
                 failed_sims.append(conf_obj)
         self.sim_confs = sims
         self.failed_sims = failed_sims
@@ -977,7 +977,7 @@ class SimulationManager:
                            'make sure you do not have any sorting parameters specified')
 
 
-class Simulator():
+class Simulator:
 
     def __init__(self, conf, q=None):
         self.conf = conf
@@ -993,7 +993,7 @@ class Simulator():
                          NumBasis=int(round(numbasis)))
         # self.data = {}
         # self.data = self._get_data_manager()
-        self.data = None
+        self.data = {}
         self.hdf5 = None
         self.runtime = 0
         self.period = period
@@ -1049,12 +1049,16 @@ class Simulator():
         except OSError as e:
             pass
         self.make_logger()
-        self.data = self._get_data_manager()
-        self.layers = get_layers(self)
+        # self.data = self._get_data_manager()
+        self.data = {}
+        self.get_layers()
         self.make_coord_arrays()
         self.configure()
         self.build_device()
         self.set_excitation()
+
+    def get_layers(self):
+        self.layers = get_layers(self)
 
     def make_coord_arrays(self):
         """
@@ -1504,11 +1508,11 @@ class Simulator():
             self.log.info("Computing fields in layer %s using %i samples",
                           lname, len(z))
             Ex, Ey, Ez, Hx, Hy, Hz = self.compute_fields(zvals=z)
-            results[lname] = {'Ex':Ex, 'Ey':Ey, 'Ez':Ez, 'Hx':Hx, 'Hy':Hy,
-                              'Hz':Hz}
-            self.data.update({'{}_{}'.format(lname, fname): arr for fname, arr in
-                             (('Ex',Ex), ('Ey',Ey), ('Ez',Ez), ('Hx',Hx), ('Hy',Hy),
-                              ('Hz',Hz))})
+            # results[lname] = {'Ex':Ex, 'Ey':Ey, 'Ez':Ez, 'Hx':Hx, 'Hy':Hy,
+            #                   'Hz':Hz}
+            results.update({'{}_{}'.format(lname, fname): arr for fname, arr in
+                           (('Ex', Ex), ('Ey', Ey), ('Ez', Ez), ('Hx', Hx),
+                            ('Hy', Hy), ('Hz', Hz))})
         return results
 
     # @do_profile(follow=[])
@@ -1601,8 +1605,8 @@ class Simulator():
         gridded data because the x-y sampling remains unchanged, however the
         gridding may become nonuniform in the z direction
         """
-        if self.hdf5 is None:
-            self.open_hdf5()
+        # if self.hdf5 is None:
+        #     self.open_hdf5()
         pbase = '/sim_{}'.format(self.id[0:10])
         # Make sure we have the field arrays
         if self.conf["General"]["compute_h"]:
@@ -1612,7 +1616,7 @@ class Simulator():
         self.get_field()
         # Merge the old and the new coordinates, removing duplicates and
         # sorting
-        old_z = self.hdf5.get_node(posixpath.join(pbase, 'zcoords')).read()
+        # old_z = self.hdf5.get_node(posixpath.join(pbase, 'zcoords')).read()
         new_z = merge_and_sort(self.Z, old_z)
         old_z_inds = find_inds(old_z, new_z)[0]
         curr_z_inds = find_inds(self.Z, new_z)[0]
@@ -1630,7 +1634,7 @@ class Simulator():
             #     new_arr[zi, :, :] = curr_arr[i, :, :]
             new_arr[curr_z_inds, :, :] = curr_arr[:, :, :]
             self.data[field] = new_arr
-            self.hdf5.remove_node(fpath)
+            # self.hdf5.remove_node(fpath)
         self.Z = new_z
         # Keep xy samples from old array
         self.conf['General']['x_samples'] = new_arr.shape[1]
@@ -1642,12 +1646,12 @@ class Simulator():
         # Finally, save the new data
         # for c in ('xcoords', 'ycoords', 'zcoords'):
         #     self.hdf5.remove_node(posixpath.join(pbase, c))
-        self.hdf5.remove_node(posixpath.join(pbase, 'zcoords'))
-        self.save_data()
+        # self.hdf5.remove_node(posixpath.join(pbase, 'zcoords'))
+        # self.save_data()
         self.save_conf()
-        self.hdf5.close()
+        # self.hdf5.close()
 
-    def get_fluxes(self):
+    def compute_fluxes(self):
         """
         Get the fluxes at the top and bottom of each layer. This is a surface
         integral of the component of the Poynting flux perpendicular to this
@@ -1672,8 +1676,16 @@ class Simulator():
             key = layer + '_bottom'
             flux_arr[counter+1] = (key, forw, back)
             counter += 2
-        self.data['fluxes'] = flux_arr
         self.log.debug('Finished computing fluxes!')
+        return flux_arr
+
+    def get_fluxes(self):
+        """
+        Convenience method to compute fluxes and store in self.data attribute
+        """
+
+        flux_arr = self.compute_fluxes()
+        self.data['fluxes'] = flux_arr
         return flux_arr
 
     def compute_dielectric_profile(self):
@@ -2056,6 +2068,7 @@ class Simulator():
             self.update_thicknesses()
         state_file = os.path.join(self.dir,
                                   self.conf['General']['solution_file'])
+        self.save_conf()
         if os.path.isfile(state_file):
             self.log.debug("State file exists: %s"%state_file)
             log.info("State file exists: %s"%state_file)
@@ -2066,21 +2079,21 @@ class Simulator():
         # sdict = {"Air": 5, "ITO": 10, "NW_AlShell": 20, "Substrate": 30}
         # self.compute_fields_by_layer(sdict)
         if self.conf['General']['sample_dict']:
-            self.compute_fields_by_layer(self.conf['General']['sample_dict'])
+            results = self.compute_fields_by_layer(self.conf['General']['sample_dict'])
+            self.data.update(results)
         else:
             self.get_field()
         self.get_fluxes()
         # self.get_fourier_coefficients()
         if self.conf['General']['dielectric_profile']:
             self.compute_dielectric_profile()
-        self.open_hdf5()
-        self.save_data()
-        self.save_conf()
+        # self.open_hdf5()
+        # self.save_data()
         self.save_state()
         end = time.time()
         self.runtime = end - start
-        self.save_time()
-        self.hdf5.close()
+        # self.save_time()
+        # self.hdf5.close()
         self.log.info('Simulation {} completed in {:.2}'
                       ' seconds!'.format(self.id[0:10], self.runtime))
         return None

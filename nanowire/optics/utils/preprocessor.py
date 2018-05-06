@@ -3,7 +3,11 @@ from mako.template import Template
 from .utils import get_combos, do_profile
 from .config import Config
 from line_profiler import LineProfiler
-import ruamel.yaml as yaml
+from yaml import load as yload, dump as ydump
+try:
+    from yaml import CLoader as Loader, CDumper as Dumper
+except ImportError:
+    from yaml import Loader, Dumper
 
 
 class Preprocessor:

@@ -156,7 +156,7 @@ def parse_file(path):
     """Super simple utility to parse a yaml file given a path"""
     with open(path, 'r') as cfile:
         text = cfile.read()
-    conf = yaml.load(text, Loader=yaml.Loader)
+    conf = yaml.load(text, Loader=yaml.CLoader)
     return conf
 
 def update_sim(conf, samples, q=None):

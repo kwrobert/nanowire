@@ -985,8 +985,8 @@ class Simulator:
         numbasis = self.conf['Simulation']['params']['numbasis']
         period = self.conf['Simulation']['params']['array_period']
         self.id = make_hash(conf.data)
+        self.conf['General']['sim_dir'] = self.id[0:10]
         sim_dir = os.path.join(self.conf['General']['base_dir'], self.id[0:10])
-        self.conf['General']['sim_dir'] = sim_dir
         self.dir = os.path.expandvars(sim_dir)
         # self.dir = sim_dir
         self.s4 = S4.New(Lattice=((period, 0), (0, period)),
@@ -1044,10 +1044,6 @@ class Simulator:
         """
         self.evaluate_config()
         self.update_id()
-        try:
-            os.makedirs(self.dir)
-        except OSError as e:
-            pass
         self.make_logger()
         # self.data = self._get_data_manager()
         self.data = {}
@@ -1157,9 +1153,9 @@ class Simulator:
     def update_id(self):
         """Update sim id. Used after changes are made to the config"""
         self.id = make_hash(self.conf.data)
-        # sim_dir = os.path.join(self.conf['General']['base_dir'], self.id[0:10])
-        sim_dir = self.id[0:10]
-        self.conf['General']['sim_dir'] = sim_dir
+        sim_dir = os.path.join(self.conf['General']['base_dir'], self.id[0:10])
+        # sim_dir = self.id[0:10]
+        self.conf['General']['sim_dir'] = self.id[0:10]
         sim_dir = os.path.expandvars(sim_dir)
         self.dir = sim_dir
         try:

@@ -988,13 +988,10 @@ class Simulator:
         self.conf['General']['sim_dir'] = self.id[0:10]
         sim_dir = os.path.join(self.conf['General']['base_dir'], self.id[0:10])
         self.dir = os.path.expandvars(sim_dir)
-        # self.dir = sim_dir
+        print('Init dir: ', self.dir)
         self.s4 = S4.New(Lattice=((period, 0), (0, period)),
                          NumBasis=int(round(numbasis)))
-        # self.data = {}
-        # self.data = self._get_data_manager()
-        self.data = {}
-        self.hdf5 = None
+        self.data = None
         self.runtime = 0
         self.period = period
 
@@ -1005,6 +1002,8 @@ class Simulator:
         eventually use up all the available file descriptors on the system
         """
         self._clean_logger()
+        if self.conf['General']['save_as'] == 'hdf5':
+            self.hdf5.close()
 
     def _get_data_manager(self):
         """
@@ -1014,14 +1013,15 @@ class Simulator:
 
         ftype = self.conf['General']['save_as']
 
-        if ftype == 'npz':
-            # return NPZDataManager(self.conf, logging.getLogger(__name__))
-            return NPZDataManager(self.conf, self.log)
+        if not ftype:
+            return {}
         elif ftype == 'hdf5':
-            # return HDF5DataManager(self.conf, logging.getLogger(__name__))
+            self.open_hdf5()
             return HDF5DataManager(self.conf, self.log)
         else:
-            raise ValueError('Invalid file type in config')
+            m = 'Invalid value {} in config at' \
+                ' General.save_as'.format(self.conf['General']['save_as'])
+            raise ValueError(m)
 
     def _clean_logger(self):
         """
@@ -1044,9 +1044,13 @@ class Simulator:
         """
         self.evaluate_config()
         self.update_id()
+        print('Setup dir: ', self.dir)
+        try:
+            os.makedirs(self.dir)
+        except OSError:
+            pass
         self.make_logger()
-        # self.data = self._get_data_manager()
-        self.data = {}
+        self.data = self._get_data_manager()
         self.get_layers()
         self.make_coord_arrays()
         self.configure()
@@ -1601,8 +1605,6 @@ class Simulator:
         gridded data because the x-y sampling remains unchanged, however the
         gridding may become nonuniform in the z direction
         """
-        # if self.hdf5 is None:
-        #     self.open_hdf5()
         pbase = '/sim_{}'.format(self.id[0:10])
         # Make sure we have the field arrays
         if self.conf["General"]["compute_h"]:
@@ -1741,8 +1743,7 @@ class Simulator:
         log = logging.getLogger(__name__)
         self.log.info("Loading simulation state")
         sfile = self.conf['General']['solution_file']
-        sdir = self.conf['General']['sim_dir']
-        fname = os.path.expandvars(os.path.join(sdir, sfile))
+        fname = os.path.expandvars(os.path.join(self.dir, sfile))
         # print(fname)
         if os.path.isfile(fname):
             self.log.info("Loading from: %s", fname)
@@ -1761,8 +1762,7 @@ class Simulator:
         """
         self.log.info("Saving simulation state")
         sfile = self.conf['General']['solution_file']
-        sdir = self.conf['General']['sim_dir']
-        fname = os.path.expandvars(os.path.join(sdir, sfile))
+        fname = os.path.expandvars(os.path.join(self.dir, sfile))
         self.log.info("Saving to: %s" % fname)
         if os.path.isfile(fname):
             self.log.info("State file exists, skipping save")
@@ -1843,10 +1843,17 @@ class Simulator:
         took to perform the write operation
         """
 
-        start = time.time()
-        self.data.write_data()
-        end = time.time()
-        self.log.info('Write time: %.2f seconds', end - start)
+        if not self.conf['General']['save_as']:
+            pass
+        elif self.conf['General']['save_as'] == 'hdf5':
+            start = time.time()
+            self.data.write_data()
+            self.save_time()
+            end = time.time()
+            self.log.info('Write time: %.2f seconds', end - start)
+        else:
+            raise ValueError('Invalid value {} in config at'
+                             ' General.save_as'.format(self.conf['General']['save_as']))
 
     # def save_data(self):
     #     """Saves the self.data dictionary to an npz file. This dictionary
@@ -1938,35 +1945,31 @@ class Simulator:
         """
         Saves the simulation config object to a file
         """
-        if self.conf['General']['save_as'] == 'npz':
-            self.log.debug('Saving conf to YAML file')
-            self.conf.write(os.path.join(self.dir, 'sim_conf.yml'))
+        path = os.path.join(self.dir, 'sim_conf.yml')
+        self.log.debug('Saving conf to YAML file: %s', path)
+        self.conf.write(path)
+        if not self.conf['General']['save_as']:
+            pass
         elif self.conf['General']['save_as'] == 'hdf5':
             self.log.debug('Saving conf to HDF5 file')
-            self.conf.write(os.path.join(self.dir, 'sim_conf.yml'))
-            # path = '/sim_{}'.format(self.id[0:10])
-            # try:
-            #     node = self.hdf5.get_node(path)
-            # except tb.NoSuchNodeError:
-            #     self.log.warning('You need to create the group for this '
-            #     'simulation before you can set attributes on it. Creating now')
-            #     node = self.hdf5.create_group(path)
-            # node._v_attrs['conf'] = self.conf.dump()
-            # attr_name = 'conf'
-            # tup = ('save_attr', (self.conf.dump(), path, attr_name), {})
-            # self.q.put(tup, block=True)
+            path = '/sim_{}'.format(self.id[0:10])
+            try:
+                node = self.hdf5.get_node(path)
+            except tb.NoSuchNodeError:
+                self.log.warning('You need to create the group for this '
+                'simulation before you can set attributes on it. Creating now')
+                node = self.hdf5.create_group(path)
+            node._v_attrs['conf'] = self.conf.dump()
         else:
-            raise ValueError('Invalid file type specified in config')
+            raise ValueError('Invalid value {} in config at'
+                             ' General.save_as'.format(self.conf['General']['save_as']))
 
     def save_time(self):
         """
         Saves the run time for the simulation
         """
-        if self.conf['General']['save_as'] == 'npz':
-            self.log.debug('Saving runtime to text file')
-            time_file = os.path.join(self.dir, 'time.dat')
-            with open(time_file, 'w') as out:
-                out.write('{}\n'.format(self.runtime))
+        if not self.conf['General']['save_as']:
+            pass
         elif self.conf['General']['save_as'] == 'hdf5':
             self.log.debug('Saving runtime to HDF5 file')
             path = '/sim_{}'.format(self.id[0:10])
@@ -1981,7 +1984,8 @@ class Simulator:
             # tup = ('save_attr', (self.runtime, path, attr_name), {})
             # self.q.put(tup, block=True)
         else:
-            raise ValueError('Invalid file type specified in config')
+            raise ValueError('Invalid value {} in config at'
+                             ' General.save_as'.format(self.conf['General']['save_as']))
 
     def calc_diff(self, fields1, fields2, exclude=False):
         """Calculate the percent difference between two vector fields"""
@@ -2083,13 +2087,10 @@ class Simulator:
         # self.get_fourier_coefficients()
         if self.conf['General']['dielectric_profile']:
             self.compute_dielectric_profile()
-        # self.open_hdf5()
-        # self.save_data()
         self.save_state()
         end = time.time()
         self.runtime = end - start
-        # self.save_time()
-        # self.hdf5.close()
         self.log.info('Simulation {} completed in {:.2}'
                       ' seconds!'.format(self.id[0:10], self.runtime))
+        self.save_data()
         return None

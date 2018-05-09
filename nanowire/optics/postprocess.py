@@ -126,9 +126,7 @@ class Simulation:
         # will get stored in the log record
         self.log = logging.LoggerAdapter(log, {'ID': self.id})
         self.log.debug('Logger initialized')
-        if conf is not None:
-            self.data = self._get_data_manager()
-        else:
+        if not self.conf['General']['save_as']:
             self.data = {}
             simulator.setup()
             print(list(simulator.data.keys()))
@@ -137,7 +135,12 @@ class Simulation:
             sdict = self.conf['General']['sample_dict']
             if sdict:
                 results = simulator.compute_fields_by_layer(sdict)
+                print(list(simulator.data.keys()))
                 self.data.update(results)
+                print(list(self.data.keys()))
+                for f in ('Ex', 'Ey', 'Ez'):
+                    ks = ['{}_{}'.format(lname, f) for lname in simulator.layers.keys()]
+                    self.data[f] = np.concatenate([self.data[k] for k in ks])
                 print(list(self.data.keys()))
             else:
                 Ex, Ey, Ez, Hx, Hy, Hz = simulator.compute_fields()
@@ -145,6 +148,8 @@ class Simulation:
                                   'Hx': Hx, 'Hy': Hy, 'Hz': Hz})
             flux_arr = simulator.compute_fluxes()
             self.data.update({'fluxes': flux_arr})
+        else:
+            self.data = self._get_data_manager()
         self.failed = False
         self.avgs = {}
         # Compute and store dx, dy, dz at attributes
@@ -2276,17 +2281,23 @@ def execute_plan(conf, plan):
     called for each set of provided arguments. No attempts are made to validate
     the given plan before raising exceptions
     """
-
+    
     log = logging.getLogger(__name__)
     if isinstance(conf, list) or isinstance(conf, tuple):
+        sample_conf = conf[0]
         log.info("Executing SimulationGroup plan")
-        obj = SimulationGroup([Simulation(simulator=Simulator(c)) for c in conf])
+        if not sample_conf['General']['save_as']:
+            obj = SimulationGroup([Simulation(simulator=Simulator(c)) for c in conf])
+        else:
+            obj = SimulationGroup([Simulation(conf=c) for c in conf])
         ID = str(obj)
     else:
         log.info("Executing Simulation plan")
-        obj = Simulation(simulator=Simulator(conf))
-        if conf['General']['sample_dict']:
-            log.info("LAYERS: %s", str(obj.layers.keys()))
+        if not conf['General']['save_as']:
+            obj = Simulation(simulator=Simulator(conf))
+        else:
+            print('LOADING HDF5') 
+            obj = Simulation(conf=conf)
             # Concatenate the field components in each layer into a single 3D
             # array, but add to blacklist so the concatenated arrays don't get
             # written to disk
@@ -2294,8 +2305,7 @@ def execute_plan(conf, plan):
             for f in ('Ex', 'Ey', 'Ez'):
                 ks = ['{}_{}'.format(lname, f) for lname in obj.layers.keys()]
                 obj.data[f] = np.concatenate([obj.data[k] for k in ks])
-                if isinstance(obj.data, DataManager):
-                    obj.data.add_to_blacklist(f)
+                obj.data.add_to_blacklist(f)
         ID = obj.id[0:10]
 
     for task_name in ('crunch', 'plot'):

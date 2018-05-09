@@ -41,12 +41,15 @@ class DataManager(MutableMapping):
 
     __metaclass__ = ABCMeta
 
-    def __init__(self, conf, log):
+    def __init__(self, conf, log=None):
         self._data = {}
         self._avgs = {}
         self._updated = {}
         self.conf = conf
-        self.log = log
+        if log is None:
+            self.log = print
+        else:
+            self.log = log
         self._dfile = None
         self._blacklist = set()
 

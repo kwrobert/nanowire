@@ -668,38 +668,49 @@ class SimulationManager:
             results = {}
             # results = []
             self.log.debug('Entering try, except pool clause')
-            inds = []
             try:
                 for ind, conf in enumerate(self.sim_confs):
                     res = pool.apply_async(func, (conf, *args),
                                            {'q':self.write_queue, **kwargs},
                                            callback=callback)
                     results[ind] = res
-                    inds.append(ind)
                 self.log.debug("Waiting on results")
                 self.log.debug('Results before wait loop: %s',
                                str(list(results.keys())))
-                for ind in inds:
-                    # We need to add this really long timeout so that
-                    # subprocesses receive keyboard interrupts. If our
-                    # simulations take longer than this timeout, an exception
-                    # would be raised but that should never happen
-                    res = results[ind]
-                    self.log.debug('Sim #: %s', str(ind))
-                    res.wait(99999999)
-                    # res.get(99999999)
-                    self.log.debug('Done waiting on Sim ID %s', str(ind))
-                    del results[ind]
+                while results:
+                    inds = list(results.keys())
+                    for ind in inds:
+                        # We need to add this really long timeout so that
+                        # subprocesses receive keyboard interrupts. If our
+                        # simulations take longer than this timeout, an exception
+                        # would be raised but that should never happen
+                        res = results[ind]
+                        self.log.debug('Sim #%i', ind)
+                        try:
+                            success = res.successful()
+                            if success:
+                                self.log.debug('Sim #%i completed successfully!', ind)
+                                res.get()
+                                self.log.debug('Done waiting on Sim #%i', ind)
+                            else:
+                                self.log.warning('Sim #%i raised exception', ind)
+                            del results[ind]
+                        except AssertionError:
+                            self.log.debug('Sim #%i not ready', ind)
                     self.log.debug('Cleaned results: %s',
                                    str(list(results.keys())))
+                    time.sleep(5)
+
+                    # res.wait(99999999)
+                    # res.get(99999999)
                     # self.log.debug('Number of items in queue: %i',
                     #                self.write_queue.qsize())
                 self.log.debug('Finished waiting')
                 pool.close()
+                self.log.debug('Joining pool')
+                pool.join()
             except KeyboardInterrupt:
                 pool.terminate()
-            self.log.debug('Joining pool')
-            pool.join()
             # self.write_queue.put(None, block=True)
             # if self.reader is not None:
             #     self.log.info('Joining FileWriter thread')
@@ -2072,7 +2083,8 @@ class Simulator:
         if os.path.isfile(state_file):
             self.log.debug("State file exists: %s"%state_file)
             log.info("State file exists: %s"%state_file)
-            self.load_state()
+            return
+            # self.load_state()
         else:
             log.info("State file %s does not exist", state_file)
         # sdict = {"Air": 5, "ITO": 100, "NW_AlShell": 200, "Substrate": 300}

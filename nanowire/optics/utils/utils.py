@@ -394,6 +394,26 @@ def configure_logger(level='info', name=None, console=False, logfile=None,
     # sys.excepthook = handle_exception
     return logger
 
+def filter_by_param(confs, pars):
+    """
+    Filters out Config objects from a list of objects given a dict of
+    parameters that you wish to keep. Returns a list of the desired Config
+    objects
+
+    :param confs: A list of Config objects
+    :type confs: list
+    :params pars: A dict whose keys are dot separated paths to a config item
+    and values are a list of possible values for that parameter. Any simulation
+    whose parameter does not match any of the provided values is removed from
+    the sims and sim_groups attribute :type pars: dict 
+    """
+
+    assert(type(pars) == dict)
+    for par, vals in pars.items():
+        vals = [type(confs[0][par])(v) for v in vals]
+        confs = [conf for conf in confs if conf[par] in vals]
+    return confs
+
 
 def make_hash(o, hash_dict=None, hasher=None):
     """

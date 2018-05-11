@@ -8,7 +8,7 @@ from copy import deepcopy
 import pprint
 
 def numpy_float64_representer(dumper, data):
-    node = dumper.represent_scalar(u'!float',
+    node = dumper.represent_scalar(u'tag:yaml.org,2002:float',
                                    data.__repr__())
     return node
 

@@ -114,7 +114,9 @@ class Simulation:
         else:
             self.conf = copy.deepcopy(simulator.conf)
         self.id = self.conf['General']['sim_dir'][-10:]
-        self.dir = os.path.expandvars(self.conf['General']['sim_dir'])
+        base_dir = os.path.expandvars(self.conf['General']['base_dir'])
+        sim_dir = os.path.expandvars(self.conf['General']['sim_dir'])
+        self.dir = os.path.join(base_dir, sim_dir) 
         self.fhandler = logging.FileHandler(os.path.join(self.dir, 'postprocess.log'))
         self.fhandler.addFilter(IdFilter(ID=self.id))
         formatter = logging.Formatter('%(asctime)s [%(name)s:%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
@@ -129,19 +131,14 @@ class Simulation:
         if not self.conf['General']['save_as']:
             self.data = {}
             simulator.setup()
-            print(list(simulator.data.keys()))
             self.data.update(simulator.data)
-            print(list(self.data.keys()))
             sdict = self.conf['General']['sample_dict']
             if sdict:
                 results = simulator.compute_fields_by_layer(sdict)
-                print(list(simulator.data.keys()))
                 self.data.update(results)
-                print(list(self.data.keys()))
                 for f in ('Ex', 'Ey', 'Ez'):
                     ks = ['{}_{}'.format(lname, f) for lname in simulator.layers.keys()]
                     self.data[f] = np.concatenate([self.data[k] for k in ks])
-                print(list(self.data.keys()))
             else:
                 Ex, Ey, Ez, Hx, Hy, Hz = simulator.compute_fields()
                 self.data.update({'Ex': Ex, 'Ey': Ey, 'Ez': Ez,
@@ -183,7 +180,7 @@ class Simulation:
         else:
             raise ValueError('Invalid file type in config')
 
-    def write_data(self):
+    def write_data(self, blacklist=('normE', 'normEsquared', 'genRate')):
         """
         Writes the data. This is a simple wrapper around the write_data()
         method of the DataManager object, with some code to compute the time it
@@ -191,7 +188,7 @@ class Simulation:
         """
 
         start = time.time()
-        self.data.write_data()
+        self.data.write_data(blacklist=blacklist)
         end = time.time()
         self.log.info('Write time: %.2f seconds', end - start)
 
@@ -487,57 +484,38 @@ class Simulation:
         self.log.info("CALLING INTEGRATE_NANOWIRE")
         nw_layer = self.layers['NW_AlShell']
         core_rad = self.conf['Layers']['NW_AlShell']['params']['core_radius']
-        # print("CALLING INTEGRATE_NANOWIRE")
         shell_rad = self.conf['Layers']['NW_AlShell']['params']['shell_radius']
         period = self.conf['Simulation']['params']['array_period']
         # shell_rad = self.conf['Layers']['NW_AlShell']['params']['shell_radius']
         # Extract nkEsq data in layer
         if nkEsq is None:
             nkEsq = self.data['nknormEsq'][nw_layer.get_slice(self.Z)]
-        # print("nkEsq shape: ", nkEsq.shape)
         # Get masks for each region
         core_mask = get_mask_by_material(nw_layer, 'GaAs', self.X, self.Y)
-        # print("core mask shape = {}".format(core_mask.shape))
         shell_mask = get_mask_by_material(nw_layer, 'AlInP', self.X, self.Y)
         cyc_mask = np.logical_not(np.logical_or(core_mask, shell_mask))
-        # print("shell mask shape = {}".format(shell_mask.shape))
-        # print("cyc mask shape = {}".format(cyc_mask.shape))
         core_mask3d = np.broadcast_to(core_mask,
                                       (nkEsq.shape[0],
                                        core_mask.shape[0],
                                        core_mask.shape[1]))
-        # print("core mask 3d shape = {}".format(core_mask3d.shape))
         shell_mask3d = np.broadcast_to(shell_mask,
                                        (nkEsq.shape[0],
                                         shell_mask.shape[0],
                                         shell_mask.shape[1]))
-        # print("shell mask 3d shape = {}".format(shell_mask3d.shape))
         cyc_mask3d = np.broadcast_to(cyc_mask,
                                      (nkEsq.shape[0],
                                       cyc_mask.shape[0],
                                       cyc_mask.shape[1]))
-        # print("cyc mask 3d shape = {}".format(cyc_mask3d.shape))
         # Finally the cyclotene
         cyc_vals = nkEsq*cyc_mask3d
-        # print("cyc_vals shape = {}".format(cyc_vals.shape))
-        # plt.matshow(cyc_vals[0, :, :])
-        # plt.colorbar()
-        # plt.show()
         cyc_result = integrate3d(cyc_vals, zvals, self.X, self.Y,
                                  meth=intg.simps)
         # Extract vals in each region from nkEsq array
         core_inds = np.where(core_mask3d)
         shell_inds = np.where(shell_mask3d)
-        # print("core_inds: ", core_inds)
-        # print("shell_inds: ", shell_inds)
         core_vals = nkEsq[core_inds]
-        # print("len(shell_inds) = {}".format(len(shell_inds[0])))
         shell_vals = nkEsq[shell_inds]
-        # print("core_vals shape: ", core_vals.shape)
-        # print("max core val = {}".format(np.amax(core_vals)))
-        # print(core_vals)
         pts = cartesian_product((zvals, self.X, self.Y))
-        # print(pts)
         # Shift x and y values so origin is at center of nanowire
         # core_pts_inds = np.where((core_pts[:, 1] - period/2)**2 + (core_pts[:, 2] - period/2)**2 <= core_rad**2)
         p2 = period/2.0
@@ -547,22 +525,12 @@ class Simulation:
         shell_pts_inds = np.where((core_rad**2 < pts[:, 1]**2 + pts[:, 2]**2)
                                   &
                                   (pts[:, 1]**2 + pts[:, 2]**2 <= shell_rad**2))
-        # print("len(shell_pts_inds) = {}".format(len(shell_pts_inds[0])))
         # core_pts_inds = np.where((pts[:, 1]-p2)**2 + (pts[:, 2]-p2)**2 <= core_rad**2)
         # shell_pts_inds = np.where((core_rad**2 <= (pts[:, 1]-p2)**2 + (pts[:, 2]-p2)**2)
         #                           &
         #                           ((pts[:, 1]-p2)**2 + (pts[:, 2]-p2)**2 <= shell_rad**2))
-        # print("cartesian pts shape: ", pts.shape)
-        # print(len(core_pts_inds[0]))
-        # print("pts shape: ", pts[0].shape)
         core_pts = pts[core_pts_inds[0], :]
-        # print("cartesian core_pts shape: ", core_pts.shape)
-        # print("core_pts inds shape: ", core_pts_inds[0].shape)
         shell_pts = pts[shell_pts_inds[0], :]
-        # print("cartesian shell_pts shape: ", shell_pts.shape)
-        # core_pts = core_pts[core_pts_inds[0], core_pts
-        # print("yy shape: ", yy.shape)
-        # print("zz shape: ", zz.shape)
         # core_pts = np.column_stack((xx[core_inds[1], core_inds[2], core_inds[0]],
         #                        yy[core_inds[1], core_inds[2], core_inds[0]],
         #                        zz[core_inds[1], core_inds[2], core_inds[0]]))
@@ -592,27 +560,16 @@ class Simulation:
         # Get function value at r = 0
         # center_inds = np.where((pts[:, 1] == .125) & (pts[:, 2] == .125))
         center_inds = np.where(core_polar_pts[:, 0] == 0)
-        # print("center_inds[0].shape = {}".format(center_inds[0].shape))
-        # print("center_inds[0] = {}".format(center_inds[0]))
         rzero_core_vals = core_vals[center_inds[0]]
-        # # print("rzero_core_vals = {}".format(rzero_core_vals))
         extra_theta = 180
         extra_pts = cartesian_product((np.array([0]),
                                        np.linspace(-np.pi, np.pi, extra_theta),
                                        core_polar_pts[center_inds[0], 2]))
-        # # print("extra_pts = {}".format(extra_pts))
         repeated_zero_vals = np.concatenate([rzero_core_vals for i in range(extra_theta)])
         core_polar_pts = np.concatenate((core_polar_pts, extra_pts))
         core_vals = np.concatenate((core_vals, repeated_zero_vals))
 
-        # if True:
-        #     return None,None,None,None,None,None,None,None,None
-
-        # fig, ax = scatter3d(pts[:, 0], pts[:, 1], pts[:, 2])
-        # plt.show()
         # Extract interpolated points on a polar grid
-        # print('core_polar_pts shape: ', core_polar_pts.shape)
-        # print(core_polar_pts)
         rstart = 0
         core_numr = 180
         shell_numr = 60
@@ -629,49 +586,25 @@ class Simulation:
         #           [nw_layer.start, nw_layer.end, 1j*numz]]
         ranges = [[core_rad, shell_rad, 1j*shell_numr], [-np.pi, np.pi, 1j*numtheta],
                   [nw_layer.start, nw_layer.end, 1j*numz]]
-        # print("shell_polar_pts.shape = {}".format(shell_polar_pts.shape))
-        # print("shell_vals.shape = {}".format(shell_vals.shape))
         shell_interp = nn.griddata(shell_polar_pts, shell_vals, ranges)
-        # print("Core interp vals shape: ", core_interp.shape)
-        # print("Core interp minimum: ", np.amin(core_interp))
-        # print("Shell interp vals shape: ", shell_interp.shape)
-        # print("Shell interp minimum: ", np.amin(shell_interp))
-        # plt.figure()
-        # plt.imshow(core_interp[:, 0, :])
-        # plt.colorbar()
-        # plt.show()
-        # input("Continue?")
-        # # Multiply by area factor in polar coords to get integrand
+        # Multiply by area factor in polar coords to get integrand
         core_rvals = np.linspace(rstart, core_rad, core_numr)
         thetavals = np.linspace(-np.pi, np.pi, numtheta)
         intzvals = np.linspace(nw_layer.start, nw_layer.end, numz)
-        # print("zvals = {}".format(zvals))
-        # print("intzvals = {}".format(intzvals))
         rr, tt = np.meshgrid(core_rvals, thetavals, indexing='ij')
         # xx = rr*np.cos(tt)
         # yy = rr*np.sin(tt)
         # __import__('pdb').set_trace()
-        # print('rr shape: ', rr.shape)
-        # print('tt shape: ', tt.shape)
-        # print('core_interp: ', core_interp.shape)
-        # integrand = core_interp*rr[:, :, None]*np.sin(tt[:, :, None])
         integrand = core_interp*rr[:, :, None]
-        # print("Integrand min: ", np.amin(integrand))
         core_result = integrate3d(integrand, thetavals, intzvals, core_rvals,
                                   meth=intg.simps)
         # Shell integral
         shell_rvals = np.linspace(core_rad, shell_rad, shell_numr)
         rr, tt = np.meshgrid(shell_rvals, thetavals, indexing='ij')
-        # print('rr shape: ', rr.shape)
-        # print('tt shape: ', tt.shape)
-        # print('shell_interp: ', shell_interp.shape)
-        # print(np.amin(rr[:, :, None]*np.sin(tt[:, :, None])))
         integrand = shell_interp*rr[:, :, None]
         # integrand = core_interp*rr[:, :, None]
-        # print("Integrand min: ", np.amin(integrand))
         shell_result = integrate3d(integrand, thetavals, intzvals, shell_rvals,
                                    meth=intg.simps)
-        # print("result = {}".format(result))
         #plt.matshow(shell_mask3d[1, :, :])
         #plt.show()
         #plt.matshow(shell_mask)
@@ -694,16 +627,7 @@ class Simulation:
         results = {}
         for mat in layer.materials.keys():
             mask = get_mask_by_material(layer, mat, self.X, self.Y)
-            # mask = np.where(mask, 1, np.nan)
-            # plt.matshow(mask)
-            # plt.colorbar()
-            # plt.title("Mask Layer: {}, Material: {}".format(lname, material))
-            # plt.show()
             values = nkEsq*mask
-            # plt.matshow(values[0, :, :])
-            # plt.title("nkEsq Layer: {}, Material: {}".format(lname, mat))
-            # plt.colorbar()
-            # plt.show()
             points = (self.Z[layer.get_slice(self.Z)], self.X, self.Y)
             rgi = interpolate.RegularGridInterpolator(points, values,
                                                       method='linear',
@@ -711,26 +635,16 @@ class Simulation:
             z = self.Z[layer.get_slice(self.Z)]
             # x = self.X
             # y = self.Y
-            print('z[0]', self.Z[layer.get_slice(self.Z)][0])
-            print('z[-1]', self.Z[layer.get_slice(self.Z)][-1])
-            print("Layer Start:", layer.start)
-            print("Layer End:", layer.end)
             z = np.linspace(self.Z[layer.get_slice(self.Z)][0],
                             self.Z[layer.get_slice(self.Z)][-1], len(z)*2)
             x = np.linspace(self.X[0], self.X[-1], len(self.X)*2)
             y = np.linspace(self.Y[0], self.Y[-1], len(self.Y)*2)
             pts = cartesian_product((z, x, y))
             vals = rgi(pts).reshape((len(z), len(x), len(y)))
-            print(vals.shape)
-            # plt.matshow(vals[0, :, :])
-            # plt.title("nkEsq interp Layer: {}, Material: {}".format(lname, mat))
-            # plt.colorbar()
-            # plt.show()
             z_integral = intg.trapz(vals, x=z, axis=0)
             x_integral = intg.trapz(z_integral, x=x, axis=0)
             y_integral = intg.trapz(x_integral, x=y, axis=0)
             results[mat] = y_integral
-        print(results)
         result = sum(results.values())
         return result
 
@@ -1400,7 +1314,11 @@ class SimulationGroup:
     that is grouped against number of basis terms also doesn't make sense.
     """
 
-    def __init__(self, sims):
+    def __init__(self, sims, grouped_by=None, grouped_against=None):
+        if grouped_by is None and grouped_against is None:
+            raise ValueError("Must know how this SimulationGroup is grouped")
+        self.grouped_by = grouped_by
+        self.grouped_against = grouped_against
         self.sims = sims
         # for sim in self.sims:
         #     sim.get_layers()
@@ -1874,100 +1792,20 @@ class SimulationGroup:
         return wght_ref, wght_trans, wght_abs
 
     def plot_absorption_per_layer(self, input_ax=None, plot_layer=None, quant=None,
-                                  sim_slice=(0, None)):
+                                  sim_slice=(0, None), marker='--o', xlabel='',
+                                  ylabel='', title='', leg_label=''):
         """
         Plots absorption per layer and error
         """
 
+        if self.grouped_against is None:
+            raise ValueError("Can only call plot_absorption_per_layer when "
+                             "sims are grouped against a parameter")
         results_dir = self.sims[0].conf['General']['results_dir']
         results_dict = {}
-        freqs = np.zeros(len(self.sims[sim_slice[0]:sim_slice[1]]))
+        xvals = np.zeros(len(self.sims[sim_slice[0]:sim_slice[1]]))
         for i, sim in enumerate(self.sims[sim_slice[0]:sim_slice[1]]):
-            freq = sim.conf['Simulation']['params']['frequency']
-            freqs[i] = freq
-            abs_arr = sim.data['abs_per_layer']
-            flux_total = 0
-            integ_total = 0
-            integ_polar_total = 0
-            for (layer, flux, integ, integ_polar, diff, diff_polar) in abs_arr:
-                layer = layer.decode('utf-8')
-                # print('Layer: {}'.format(layer))
-                # print('Flux: {}'.format(flux.real))
-                # print('Integ: {}'.format(integ.real))
-                # print('Diff: {}'.format(diff.real))
-                if layer in results_dict:
-                    results_dict[layer][0].append(flux.real)
-                    results_dict[layer][1].append(integ.real)
-                    results_dict[layer][2].append(diff.real)
-                    results_dict[layer][3].append(integ_polar.real)
-                    results_dict[layer][4].append(diff_polar.real)
-                else:
-                    results_dict[layer] = [[flux.real], [integ.real],
-                                           [diff.real], [integ_polar.real],
-                                           [diff_polar.real]]
-                flux_total += flux.real
-                integ_total += integ.real
-                if layer == "NW_AlShell":
-                    integ_polar_total += integ_polar.real
-                else:
-                    integ_polar_total += integ.real
-            total_diff = np.abs(flux_total.real - integ_total.real)/flux_total.real
-            total_diff_polar = np.abs(flux_total.real - integ_polar_total.real)/flux_total.real
-            if 'total' in results_dict:
-                results_dict['total'][0].append(flux_total.real)
-                results_dict['total'][1].append(integ_total.real)
-                results_dict['total'][2].append(total_diff.real)
-                results_dict['total'][3].append(integ_polar_total.real)
-                results_dict['total'][4].append(total_diff_polar.real)
-            else:
-                results_dict['total'] = [[flux_total.real], [integ_total.real],
-                                         [total_diff.real], [integ_polar_total.real],
-                                         [total_diff_polar.real]]
-        layers = results_dict.keys()
-        if plot_layer is not None:
-            layers = [l for l in layers if l == plot_layer]
-
-        quants = {'fluxmethod_absorption': 0,
-                  'integralmethod_absorption': 1,
-                  'relativediff': 2,
-                  'integralmethod_absorption_polar': 3,
-                  'relativediff_polar': 4}
-        if quant is not None:
-            quants = {q: ind for q, ind in quants.items() if q in quant}
-        print(quants)
-        for layer in layers:
-            results = results_dict[layer]
-            for name, ind in quants.items():
-                if input_ax is None:
-                    fig, ax = plt.subplots()
-                else:
-                    ax = input_ax
-                pfile = os.path.join(results_dir,
-                                     '{}_{}.png'.format(layer, name))
-                numbasis = self.sims[0].conf['Simulation']['params']['numbasis']
-                lab = "Numbasis = {}".format(numbasis)
-                # lab = name
-                ax.plot(freqs, results[ind], '--o', label=lab)
-                ax.set_ylabel(name)
-                ax.set_xlabel("Frequency (Hz)")
-                ax.set_title(layer)
-                print("Saving to {}".format(pfile))
-                plt.savefig(pfile)
-        return ax
-
-
-    def plot_absorption_convergence(self, input_ax=None, plot_layer=None,
-                                    quant=None, sim_slice=(0, None)):
-        """
-        Plots the convergence of absorption per layer with basis terms
-        """
-
-        results_dir = self.sims[0].conf['General']['results_dir']
-        results_dict = {}
-        basis = np.zeros(len(self.sims[sim_slice[0]:sim_slice[1]]))
-        for i, sim in enumerate(self.sims[sim_slice[0]:sim_slice[1]]):
-            b = sim.conf['Simulation']['params']['numbasis']
-            basis[i] = b
+            xvals[i] = sim.conf[self.grouped_against]
             abs_arr = sim.data['abs_per_layer']
             flux_total = 0
             integ_total = 0
@@ -1990,8 +1828,10 @@ class SimulationGroup:
                     integ_polar_total += integ_polar.real
                 else:
                     integ_polar_total += integ.real
-            total_diff = np.abs(flux_total.real - integ_total.real)/flux_total.real
-            total_diff_polar = np.abs(flux_total.real - integ_polar_total.real)/flux_total.real
+            # total_diff = np.abs(flux_total.real - integ_total.real)/flux_total.real
+            # total_diff_polar = np.abs(flux_total.real - integ_polar_total.real)/flux_total.real
+            total_diff = np.real(flux_total.real - integ_total.real)/flux_total.real
+            total_diff_polar = np.real(flux_total.real - integ_polar_total.real)/flux_total.real
             if 'total' in results_dict:
                 results_dict['total'][0].append(flux_total.real)
                 results_dict['total'][1].append(integ_total.real)
@@ -2013,26 +1853,26 @@ class SimulationGroup:
                   'relativediff_polar': 4}
         if quant is not None:
             quants = {q: ind for q, ind in quants.items() if q in quant}
-        print(quants)
         for layer in layers:
             results = results_dict[layer]
             for name, ind in quants.items():
+                # diff = abs(results[ind][-1] - results[ind][0])/abs(results[ind][-1])
+                diff = abs(results[ind][-1] - results[ind][0])/abs(results[ind][-1])
                 if input_ax is None:
                     fig, ax = plt.subplots()
                 else:
                     ax = input_ax
                 pfile = os.path.join(results_dir,
                                      '{}_{}.png'.format(layer, name))
-                freq = self.sims[0].conf['Simulation']['params']['frequency']
-                lab = "Freq = {:.2E}".format(freq)
-                # lab = name
-                ax.plot(basis, results[ind], '--o', label=lab)
-                ax.set_ylabel(name)
-                ax.set_xlabel("Numbasis")
-                ax.set_title(layer)
-                print("Saving to {}".format(pfile))
-                plt.savefig(pfile)
-        return ax
+                ax.plot(xvals, results[ind], marker, label=leg_label)
+                ax.set_xlabel(self.grouped_against[-1])
+                if ylabel:
+                    ax.set_ylabel(ylabel)
+                if title:
+                    ax.set_title(title)
+                if input_ax is None:
+                    plt.savefig(pfile)
+        return ax, diff
 
     def convergence(self, quantity, err_type='global', scale='linear'):
         """Plots the convergence of a field across all available simulations"""
@@ -2242,8 +2082,6 @@ def _call_func(quantity, obj, args):
     """
 
     log = logging.getLogger(__name__)
-    print(quantity)
-    print(args)
     try:
         result = getattr(obj, quantity)(*args)
     except AttributeError:
@@ -2283,62 +2121,73 @@ def execute_plan(conf, plan):
     """
     
     log = logging.getLogger(__name__)
-    if isinstance(conf, list) or isinstance(conf, tuple):
-        sample_conf = conf[0]
-        log.info("Executing SimulationGroup plan")
-        if not sample_conf['General']['save_as']:
-            obj = SimulationGroup([Simulation(simulator=Simulator(c)) for c in conf])
-        else:
-            obj = SimulationGroup([Simulation(conf=c) for c in conf])
-        ID = str(obj)
-    else:
-        log.info("Executing Simulation plan")
-        if not conf['General']['save_as']:
-            obj = Simulation(simulator=Simulator(conf))
-        else:
-            print('LOADING HDF5') 
-            obj = Simulation(conf=conf)
-            # Concatenate the field components in each layer into a single 3D
-            # array, but add to blacklist so the concatenated arrays don't get
-            # written to disk
-            # FIXME: This is grossly memory-inefficient
-            for f in ('Ex', 'Ey', 'Ez'):
-                ks = ['{}_{}'.format(lname, f) for lname in obj.layers.keys()]
-                obj.data[f] = np.concatenate([obj.data[k] for k in ks])
-                obj.data.add_to_blacklist(f)
-        ID = obj.id[0:10]
-
-    for task_name in ('crunch', 'plot'):
-        if task_name not in plan:
-            continue
-        task = plan[task_name]
-        log.info("Beginning %s for obj %s", task_name, ID)
-        for func, data in task.items():
-            if not data['compute']:
-                continue
+    try:
+        if isinstance(conf, list) or isinstance(conf, tuple):
+            sample_conf = conf[0]
+            log.info("Executing SimulationGroup plan")
+            if not sample_conf['General']['save_as']:
+                obj = SimulationGroup([Simulation(simulator=Simulator(c)) for c in conf])
             else:
-                argsets = data['args']
-            if argsets and isinstance(argsets[0], list):
-                for argset in argsets:
-                    if argset:
-                        _call_func(func, obj, argset)
+                obj = SimulationGroup([Simulation(conf=c) for c in conf])
+            ID = str(obj)
+        else:
+            log.info("Executing Simulation plan")
+            if not conf['General']['save_as']:
+                obj = Simulation(simulator=Simulator(conf))
+            else:
+                obj = Simulation(conf=conf)
+                # Concatenate the field components in each layer into a single 3D
+                # array, but add to blacklist so the concatenated arrays don't get
+                # written to disk
+                # FIXME: This is grossly memory-inefficient
+                for f in ('Ex', 'Ey', 'Ez'):
+                    ks = ['{}_{}'.format(lname, f) for lname in obj.layers.keys()]
+                    obj.data[f] = np.concatenate([obj.data[k] for k in ks])
+                    obj.data.add_to_blacklist(f)
+            ID = obj.id[0:10]
+
+        for task_name in ('crunch', 'plot'):
+            if task_name not in plan:
+                continue
+            task = plan[task_name]
+            log.info("Beginning %s for obj %s", task_name, ID)
+            for func, data in task.items():
+                if not data['compute']:
+                    continue
+                else:
+                    argsets = data['args']
+                if argsets and isinstance(argsets[0], list):
+                    for argset in argsets:
+                        if argset:
+                            _call_func(func, obj, argset)
+                        else:
+                            _call_func(func, obj, [])
+                else:
+                    if argsets:
+                        _call_func(func, obj, argsets)
                     else:
                         _call_func(func, obj, [])
+            log.info("Completed %s for obj %s", task_name, ID)
+        log.info("Plan execution for obj %s complete", ID)
+        if isinstance(obj, Simulation):
+            log.info("Saving and clearing data for Simulation %s", ID)
+            if obj.conf['General']['sample_dict']:
+                obj.write_data(blacklist=('normE', 'normEsquared', 'Ex', 'Ey',
+                                          'Ez'))
             else:
-                if argsets:
-                    _call_func(func, obj, argsets)
-                else:
-                    _call_func(func, obj, [])
-        log.info("Completed %s for obj %s", task_name, ID)
-    log.info("Plan execution for obj %s complete", ID)
-    if isinstance(obj, Simulation):
-        log.info("Saving and clearing data for Simulation %s", ID)
-        # obj.write_data()
-        obj.clear_data()
-    else:
-        log.info("Clearing data for SimulationGroup %s", ID)
-        for sim in obj.sims:
-            sim.clear_data()
+                obj.write_data()
+            obj.clear_data()
+        else:
+            log.info("Clearing data for SimulationGroup %s", ID)
+            for sim in obj.sims:
+                sim.clear_data()
+    except Exception as e:
+        if isinstance(conf, list) or isinstance(conf, tuple):
+            log.error('Group raised exception')
+        else:
+            log.error('Conf %s raised exception', conf['General']['sim_dir'])
+        raise
+        
 
 
 class Processor(object):
@@ -2366,6 +2215,8 @@ class Processor(object):
         # A place to store any failed sims (i.e sims that are missing their
         # data file)
         self.failed_sims = failed_sims
+        self.grouped_against = None
+        self.grouped_by = None
 
     def collect_confs(self):
         """
@@ -2399,6 +2250,13 @@ class Processor(object):
             raise RuntimeError('Unable to find any successful simulations')
         return sim_confs, failed_sims
 
+    def make_sims(self):
+        """
+        Build out the self.sims list by constructing Simulations objects from
+        the collected confs
+        """
+        self.sims = [Simulation(conf=c) for c in self.sim_confs]
+
     def get_param_vals(self, parseq):
         """
         Return all possible values of the provided parameter for this sweep
@@ -2430,13 +2288,21 @@ class Processor(object):
         return self.sim_confs, self.sim_groups
 
     def group_against(self, key, variable_params, sort_key=None):
-        """Groups simulations by against particular parameter. Within each
-        group, the parameter specified will vary, and all other
+        """
+        Group simulations by against particular parameter. Within each
+        group, the parameter specified by `key` will vary, and all other
         parameters will remain fixed. Populates the sim_groups attribute and
-        also returns a list of lists. The simulations with each group will be
-        sorted in increasing order of the specified parameter. An optional key
-        may be passed in, the groups will be sorted in increasing order of the
-        specified key"""
+        also returns a list of lists. 
+        
+        :param key: A key specifying which parameter simulations will be
+        grouped against. Individual simulations within each group will be
+        sorted in increasing order of this parameter, and all other parameters
+        will remain constant within the group 
+        :type key: str or tuple 
+        :param sort_key: An optional key used to sort the returned list of
+        groups. The list of groups will be sorted in increasing order of the
+        specified sort_key
+        """
 
         self.log.info('Grouping sims against: %s', str(key))
         # We need only need a shallow copy of the list containing all the sim
@@ -2525,9 +2391,10 @@ class Processor(object):
                 # conf.write(outpath)
         # Sort the groups in increasing order of the provided sort key
         if sort_key:
-            sim_groups.sort(key=lambda agroup: agroup[0][key])
+            sim_groups.sort(key=lambda agroup: agroup[0][sort_key])
         # sim_groups = [SimulationGroup(sims) for sims in sim_groups]
         self.sim_groups = sim_groups
+        self.grouped_against = key
         return sim_groups
 
     def group_by(self, key, sort_key=None, repopulate=True):
@@ -2583,6 +2450,7 @@ class Processor(object):
         # groups = [SimulationGroup(sims) for sims in groups]
         if repopulate:
             self.sim_groups = groups
+        self.grouped_by = key
         return groups
 
     # def replace(self):
@@ -2623,29 +2491,30 @@ class Processor(object):
             del plan['crunch']
         if not plot:
             del plan['plot']
-        if not self.gconf['General']['post_parallel']:
-            for conf in self.sim_confs:
-                execute_plan(conf, plan)
-        else:
-            self.log.info('Plotting sims in parallel using %s cores ...',
-                          str(num_procs))
-            args_list = list(zip(self.sim_confs, repeat(plan)))
-            pool.starmap(execute_plan, args_list)
+        if 'crunch' in plan or 'plot' in plan:
+            if not self.gconf['General']['post_parallel']:
+                for conf in self.sim_confs:
+                    execute_plan(conf, plan)
+            else:
+                self.log.info('Plotting sims in parallel using %s cores ...',
+                              str(num_procs))
+                args_list = list(zip(self.sim_confs, repeat(plan)))
+                pool.starmap(execute_plan, args_list)
         # Process groups
-        print("processing groups")
         plan = copy.deepcopy(self.gconf['Postprocessing']['Group'])
         if not gcrunch:
             del plan['crunch']
         if not gplot:
             del plan['plot']
-        if not self.gconf['General']['post_parallel']:
-            for group in self.sim_groups:
-                execute_plan(group, plan)
-        else:
-            self.log.info('Plotting sims in parallel using %s cores ...',
-                          str(num_procs))
-            args_list = list(zip(self.sim_groups, repeat(plan)))
-            pool.starmap(execute_plan, args_list)
+        if 'crunch' in plan or 'plot' in plan:
+            if not self.gconf['General']['post_parallel']:
+                for group in self.sim_groups:
+                    execute_plan(group, plan)
+            else:
+                self.log.info('Plotting sims in parallel using %s cores ...',
+                              str(num_procs))
+                args_list = list(zip(self.sim_groups, repeat(plan)))
+                pool.starmap(execute_plan, args_list)
         if self.gconf['General']['post_parallel']:
             pool.close()
             pool.join()

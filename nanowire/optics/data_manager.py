@@ -14,7 +14,7 @@ class TransmissionData(tb.IsDescription):
     absorption = tb.Float32Col(pos=3)
 
 
-class DataManager(MutableMapping):
+class DataManager(MutableMapping, metaclass=ABCMeta):
     """
     The base class for all *DataManager objects. This purpose of this object is
     to manage retrieving data from some on-disk format and storing it in a
@@ -39,8 +39,6 @@ class DataManager(MutableMapping):
     slightly less memory efficient but not in a significant way.
     """
 
-    __metaclass__ = ABCMeta
-
     def __init__(self, conf, log=None):
         self._data = {}
         self._avgs = {}
@@ -50,7 +48,7 @@ class DataManager(MutableMapping):
             self.log = print
         else:
             self.log = log
-        self._dfile = None
+        self._dstore = None
         self._blacklist = set()
 
     def add_to_blacklist(self, key):
@@ -68,13 +66,18 @@ class DataManager(MutableMapping):
         assert(isinstance(key, str))
         self._blacklist.remove(key)
 
-    @abstractmethod
-    def _update_keys(self):
-        raise NotImplementedError
 
     @abstractmethod
     def write_data(self):
-        raise NotImplementedError
+        """
+        Write in-memory data out to the underlying data store
+        """
+
+    @abstractmethod
+    def close(self):
+        """
+        Close the underlying data store object and prevent further access to it
+        """
 
     @abstractmethod
     def _load_data(self, key):
@@ -82,7 +85,13 @@ class DataManager(MutableMapping):
         Because this class provides a dict-like interface, clients should never
         have to call this method directly
         """
-        raise NotImplementedError
+
+    @abstractmethod
+    def _update_keys(self):
+        """
+        Pull in all the keys for the data items existing in the underlying data
+        store, without actually pulling the data items into memory
+        """
 
     def _check_equal(self, key, value):
         """
@@ -149,13 +158,6 @@ class DataManager(MutableMapping):
         return '{}, D({})'.format(super(DataManager, self).__repr__(),
                                   self._data)
 
-    def __del__(self):
-        """
-        Closes data file before being destroyed
-        """
-        # self.log.debug('Closing data file')
-        self._dfile.close()
-
 
 class HDF5DataManager(DataManager):
     """
@@ -170,15 +172,16 @@ class HDF5DataManager(DataManager):
         """
 
         super(HDF5DataManager, self).__init__(conf, log)
-        base = os.path.expandvars(self.conf['General']['sim_dir'])
-        path = os.path.join(base, 'sim.hdf5')
-        self._dfile = tb.open_file(path, 'a')
+        base_dir = os.path.expandvars(self.conf['General']['base_dir'])
+        sim_dir = os.path.expandvars(self.conf['General']['sim_dir'])
+        path = os.path.join(base_dir, sim_dir, 'sim.hdf5')
+        self._dstore = tb.open_file(path, 'a')
         ID = os.path.basename(self.conf['General']['sim_dir'])
         self.gpath = '/sim_{}'.format(ID)
         try:
-            self.gobj = self._dfile.get_node(self.gpath, classname='Group')
+            self.gobj = self._dstore.get_node(self.gpath, classname='Group')
         except tb.NoSuchNodeError:
-            self.gobj = self._dfile.create_group('/', self.gpath[1:])
+            self.gobj = self._dstore.create_group('/', self.gpath[1:])
         self._update_keys()
         self._updated = {key:False for key in self._data.keys()}
 
@@ -210,7 +213,7 @@ class HDF5DataManager(DataManager):
 
         nodepath = os.path.join(self.gpath, key)
         try:
-            node = self._dfile.get_node(nodepath)
+            node = self._dstore.get_node(nodepath)
         except tb.NoSuchNodeError:
             self.log.error('The node you requested does not exist in the'
                            ' HDF5 file')
@@ -220,10 +223,17 @@ class HDF5DataManager(DataManager):
         else:
             self._data[key] = node.read()
 
-    def write_data(self, blacklist=('normE', 'normEsquared')):
+    def write_data(self, blacklist=('normE', 'normEsquared'), clear=False):
         """
         Writes all necessary data out to the HDF5 file
+
+        :param blacklist: A tuple of strings indicating keys that should not be
+        saved to disk
+        :type blacklist: tuple
+        :param clear: Clear data after writing to free memory. Default: False
+        :type clear: bool
         """
+
         blacklist = set(blacklist).union(self._blacklist)
         self.log.info('Beginning HDF5 data writing procedure')
         # Filter out the original data so we don't resave it
@@ -238,12 +248,12 @@ class HDF5DataManager(DataManager):
                 num_rows = obj.shape[0]
                 try:
                     # If the table exists, clear it out
-                    self._dfile.remove_node(self.gpath, name=key)
-                    table = self._dfile.create_table(self.gpath, key,
+                    self._dstore.remove_node(self.gpath, name=key)
+                    table = self._dstore.create_table(self.gpath, key,
                                                      description=obj.dtype,
                                                      expectedrows=num_rows)
                 except tb.NoSuchNodeError:
-                    table = self._dfile.create_table(self.gpath, key,
+                    table = self._dstore.create_table(self.gpath, key,
                                                      description=obj.dtype,
                                                      expectedrows=num_rows)
                 row = table.row
@@ -256,27 +266,34 @@ class HDF5DataManager(DataManager):
             elif isinstance(obj, np.ndarray):
                 self.log.info('Writing data for array %s', key)
                 try:
-                    existing_arr = self._dfile.get_node(self.gpath, name=key)
+                    existing_arr = self._dstore.get_node(self.gpath, name=key)
                     if existing_arr.shape == obj.shape:
                         existing_arr[...] = obj
                     else:
-                        self._dfile.remove_node(self.gpath, name=key)
+                        self._dstore.remove_node(self.gpath, name=key)
                         if self.conf['General']['compression']:
                             filt = tb.Filters(complevel=8, complib='zlib')
-                            self._dfile.create_carray(self.gpath, key, obj=obj,
+                            self._dstore.create_carray(self.gpath, key, obj=obj,
                                                       filters=filt,
                                                       atom=tb.Atom.from_dtype(obj.dtype))
                         else:
-                            self._dfile.create_array(self.gpath, key, obj)
+                            self._dstore.create_array(self.gpath, key, obj)
                 except tb.NoSuchNodeError:
                     if self.conf['General']['compression']:
                         filt = tb.Filters(complevel=8, complib='zlib')
-                        self._dfile.create_carray(self.gpath, key, obj=obj,
+                        self._dstore.create_carray(self.gpath, key, obj=obj,
                                                   filters=filt,
                                                   atom=tb.Atom.from_dtype(obj.dtype))
                     else:
-                        self._dfile.create_array(self.gpath, key, obj)
-        self._dfile.flush()
+                        self._dstore.create_array(self.gpath, key, obj)
+            if clear:
+                del obj
+                del self._data[key]
+        self._dstore.flush()
+
+    def close(self):
+        self._update_keys(clear=True)
+        self._dstore.close()
 
 class NPZDataManager(DataManager):
 
@@ -291,14 +308,14 @@ class NPZDataManager(DataManager):
         self._update_keys()
         path = os.path.join(self.conf['General']['sim_dir'],
                             'field_data.npz')
-        self._dfile = np.load(path)
+        self._dstore = np.load(path)
 
     def _update_keys(self, clear=False):
         """
         Used to pull in keys for all the data items this simulation has stored
         on disk, without loading the actual items
         """
-        for key in self._dfile.files:
+        for key in self._dstore.files:
             if clear:
                 self._data[key] = None
             else:
@@ -307,24 +324,24 @@ class NPZDataManager(DataManager):
 
     def _load_data(self, key):
         """
-        Actually pulls data from disk out of the _dfile NPZ archive for the
+        Actually pulls data from disk out of the _dstore NPZ archive for the
         requested key and puts it in the self._data dict for later retrieval
         """
 
         if key == 'fluxes' or key == 'transmission_data':
-            if key in self._dfile:
+            if key in self._dstore:
                 # We have do so some weird stuff here to unpack the
                 # dictionaries because np.savez sticks them in a 0D array for
                 # some reason
-                self._data[key] == self._dfile[key][()]
+                self._data[key] == self._dstore[key][()]
         else:
-            self._data[key] = self._dfile[key]
+            self._data[key] = self._dstore[key]
 
     def write_data(self):
         """
         Writes all the data in the _data dict to disk. Unfortunately numpy npz
         archives don't support setting individual items in the NPZArchive
-        object (i.e _dfile) and only writing the changes, so if any data key
+        object (i.e _dstore) and only writing the changes, so if any data key
         has been updated we need to write the entire dict for now
         """
 

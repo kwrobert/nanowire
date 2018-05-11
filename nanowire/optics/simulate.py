@@ -261,7 +261,6 @@ def run_sim(conf, q=None):
             sim.log.error(trace)
         except AttributeError:
             pass
-        raise
     return None
 
 def run_sim_dispy(conf):
@@ -652,21 +651,25 @@ class SimulationManager:
             #     self.make_queue()
             # All this crap is necessary for killing the parent and all child
             # processes with CTRL-C
+            self.log.info('Total sims to execute: %i', len(self.sim_confs))
             num_procs = self.gconf['General']['num_cores']
+            if num_procs > len(self.sim_confs):
+                num_procs = len(self.sim_confs)
             self.log.info('Executing sims in parallel using %s cores ...', str(num_procs))
             # pool = LoggingPool(processes=num_procs)
-            pool = mp.Pool(processes=num_procs)
+            pool = mp.Pool(processes=num_procs, maxtasksperchild=2)
+            # pool = mp.Pool(processes=num_procs)
             total_sims = len(self.sim_confs)
             remaining_sims = len(self.sim_confs)
             def callback(ind):
                 callback.remaining_sims -= 1
                 callback.log.info('%i out of %i simulations remaining'%(callback.remaining_sims,
                                                                 callback.total_sims))
+                return None
             callback.remaining_sims = remaining_sims
             callback.total_sims = total_sims
             callback.log = self.log
             results = {}
-            # results = []
             self.log.debug('Entering try, except pool clause')
             try:
                 for ind, conf in enumerate(self.sim_confs):
@@ -674,9 +677,12 @@ class SimulationManager:
                                            {'q':self.write_queue, **kwargs},
                                            callback=callback)
                     results[ind] = res
+                # self.log.debug('Closing pool')
+                # pool.close()
                 self.log.debug("Waiting on results")
                 self.log.debug('Results before wait loop: %s',
                                str(list(results.keys())))
+                # while len(results) > num_procs:
                 while results:
                     inds = list(results.keys())
                     for ind in inds:
@@ -686,31 +692,41 @@ class SimulationManager:
                         # would be raised but that should never happen
                         res = results[ind]
                         self.log.debug('Sim #%i', ind)
-                        try:
+                        if res.ready():
                             success = res.successful()
                             if success:
                                 self.log.debug('Sim #%i completed successfully!', ind)
-                                res.get()
-                                self.log.debug('Done waiting on Sim #%i', ind)
+                                res.get(10)
+                                self.log.debug('Done getting Sim #%i', ind)
                             else:
-                                self.log.warning('Sim #%i raised exception', ind)
+                                self.log.warning('Sim #%i raised exception!',
+                                                 ind)
+                                res.wait(10)
+                                # try:
+                                #     res.get(100)
+                                # except Exception as e:
+                                #     self.log.warning('Sim #%i raised following'
+                                #                      ' exception: %s', ind,
+                                #                      traceback.format_exc())
                             del results[ind]
-                        except AssertionError:
+                        else:
                             self.log.debug('Sim #%i not ready', ind)
                     self.log.debug('Cleaned results: %s',
                                    str(list(results.keys())))
-                    time.sleep(5)
+                    time.sleep(1)
 
                     # res.wait(99999999)
                     # res.get(99999999)
                     # self.log.debug('Number of items in queue: %i',
                     #                self.write_queue.qsize())
-                self.log.debug('Finished waiting')
+                self.log.debug('Closing pool')
                 pool.close()
+                self.log.debug('Finished waiting')
                 self.log.debug('Joining pool')
                 pool.join()
             except KeyboardInterrupt:
                 pool.terminate()
+                pool.join()
             # self.write_queue.put(None, block=True)
             # if self.reader is not None:
             #     self.log.info('Joining FileWriter thread')
@@ -1858,7 +1874,7 @@ class Simulator:
             pass
         elif self.conf['General']['save_as'] == 'hdf5':
             start = time.time()
-            self.data.write_data()
+            self.data.write_data(clear=True)
             self.save_time()
             end = time.time()
             self.log.info('Write time: %.2f seconds', end - start)
@@ -2083,8 +2099,7 @@ class Simulator:
         if os.path.isfile(state_file):
             self.log.debug("State file exists: %s"%state_file)
             log.info("State file exists: %s"%state_file)
-            return
-            # self.load_state()
+            self.load_state()
         else:
             log.info("State file %s does not exist", state_file)
         # sdict = {"Air": 5, "ITO": 100, "NW_AlShell": 200, "Substrate": 300}

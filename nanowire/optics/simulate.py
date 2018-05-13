@@ -1006,12 +1006,15 @@ class SimulationManager:
 
 class Simulator:
 
-    def __init__(self, conf, q=None):
+    def __init__(self, conf, q=None, skip_hash=False):
         self.conf = conf
         self.q = q
         numbasis = self.conf['Simulation']['params']['numbasis']
         period = self.conf['Simulation']['params']['array_period']
-        self.id = make_hash(conf.data)
+        if skip_hash:
+            self.id = conf['General']['sim_dir']
+        else:
+            self.id = make_hash(conf.data)
         self.conf['General']['sim_dir'] = self.id[0:10]
         sim_dir = os.path.join(self.conf['General']['base_dir'], self.id[0:10])
         self.dir = os.path.expandvars(sim_dir)
@@ -1064,13 +1067,14 @@ class Simulator:
         except AttributeError:
             pass
 
-    def setup(self):
+    def setup(self, skip_hash=False):
         """
         Runs all the necessary setup functions so one can begin running the
         simulation and collecting data
         """
         self.evaluate_config()
-        self.update_id()
+        if not skip_hash:
+            self.update_id()
         print('Setup dir: ', self.dir)
         try:
             os.makedirs(self.dir)
@@ -1771,7 +1775,7 @@ class Simulator:
         self.log.info("Loading simulation state")
         sfile = self.conf['General']['solution_file']
         fname = os.path.expandvars(os.path.join(self.dir, sfile))
-        # print(fname)
+        print(fname)
         if os.path.isfile(fname):
             self.log.info("Loading from: %s", fname)
             log.info("Simulator %s loading solution from: %s", self.id[0:10], fname)

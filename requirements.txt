@@ -1,4 +1,9 @@
 -e ./
+numpy==1.13.3
+scipy==1.0.0
+matplotlib==2.1.0
+sympy==1.1.1
+tables==3.4.2
 cycler==0.10.0
 decorator==4.1.2
 dispy==4.8.6
@@ -11,12 +16,9 @@ jupyter-core==4.4.0
 line-profiler==2.1.2
 logging-tree==1.7
 lxml==4.1.1
-matplotlib==2.1.0
 mpmath==1.0.0
-naturalneighbor==0.1.8
 netifaces==0.10.7
 numexpr==2.6.4
-numpy==1.13.3
 parso==0.1.0
 pexpect==4.3.0
 pickleshare==0.7.4
@@ -30,12 +32,8 @@ python-dateutil==2.6.1
 pytz==2017.2
 pyzmq==16.0.3
 ruamel.yaml==0.15.34
-S4==1.1
-scipy==1.0.0
 simplegeneric==0.8.1
 six==1.11.0
-sympy==1.1.1
-tables==3.4.2
 tornado==4.5.2
 traitlets==4.3.2
 wcwidth==0.1.7

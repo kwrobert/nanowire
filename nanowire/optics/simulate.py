@@ -296,10 +296,11 @@ def run_sim_dispy(conf):
         # return 'returned a thing'
         if not sim.conf.variable_thickness:
             sim.setup()
+            print(sim.dir)
             # rel_dir = os.path.join('./', os.path.basename(sim.dir))
-            rel_dir = os.path.basename(sim.dir)
-            sim.dir = rel_dir
-            sim.conf['General']['sim_dir'] = rel_dir
+            # rel_dir = os.path.basename(sim.dir)
+            # sim.dir = rel_dir
+            # sim.conf['General']['sim_dir'] = rel_dir
             log.info('Executing sim %s', sim.id[0:10])
             sim.save_all()
             for f in os.listdir(rel_dir):

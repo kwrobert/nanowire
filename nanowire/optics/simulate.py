@@ -222,7 +222,6 @@ def run_sim(conf, q=None):
             # data, then make the subdir from the sim id and get the data
             sim.evaluate_config()
             sim.update_id()
-            print(sim.dir)
             try:
                 os.makedirs(sim.dir)
             except OSError:
@@ -296,7 +295,6 @@ def run_sim_dispy(conf):
         # return 'returned a thing'
         if not sim.conf.variable_thickness:
             sim.setup()
-            print(sim.dir)
             # rel_dir = os.path.join('./', os.path.basename(sim.dir))
             # rel_dir = os.path.basename(sim.dir)
             # sim.dir = rel_dir
@@ -798,8 +796,6 @@ class SimulationManager:
                 else:
                     log.info('Job ID: %i, Status: %s, Runtime: %f s'
                              ', Host: %s', job_id, stat, time, job.ip_addr) 
-                print(job.stdout)
-                print(job.stderr)
                 del jobs[job_id]
         return None
 
@@ -1022,7 +1018,6 @@ class Simulator:
         # sim_dir = os.path.join(self.conf['General']['base_dir'], self.id[0:10])
         sim_dir = self.id[0:10]
         self.dir = os.path.expandvars(sim_dir)
-        print('Init dir: ', self.dir)
         self.s4 = S4.New(Lattice=((period, 0), (0, period)),
                          NumBasis=int(round(numbasis)))
         self.data = None
@@ -1079,7 +1074,6 @@ class Simulator:
         self.evaluate_config()
         if not skip_hash:
             self.update_id()
-        print('Setup dir: ', self.dir)
         try:
             os.makedirs(self.dir)
         except OSError:
@@ -1779,7 +1773,6 @@ class Simulator:
         self.log.info("Loading simulation state")
         sfile = self.conf['General']['solution_file']
         fname = os.path.expandvars(os.path.join(self.dir, sfile))
-        print(fname)
         if os.path.isfile(fname):
             self.log.info("Loading from: %s", fname)
             log.info("Simulator %s loading solution from: %s", self.id[0:10], fname)

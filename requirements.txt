@@ -13,7 +13,6 @@ logging-tree==1.7
 lxml==4.1.1
 matplotlib==2.1.0
 mpmath==1.0.0
-naturalneighbor==0.1.8
 netifaces==0.10.7
 numexpr==2.6.4
 numpy==1.13.3
@@ -30,7 +29,6 @@ python-dateutil==2.6.1
 pytz==2017.2
 pyzmq==16.0.3
 ruamel.yaml==0.15.34
-S4==1.1
 scipy==1.0.0
 simplegeneric==0.8.1
 six==1.11.0

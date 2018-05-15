@@ -172,10 +172,11 @@ class HDF5DataManager(DataManager):
         """
 
         super(HDF5DataManager, self).__init__(conf, log)
-        base_dir = os.path.expandvars(self.conf['General']['base_dir'])
+        # base_dir = os.path.expandvars(self.conf['General']['base_dir'])
         sim_dir = os.path.expandvars(self.conf['General']['sim_dir'])
-        path = os.path.join(base_dir, sim_dir, 'sim.hdf5')
-        self._dstore = tb.open_file(path, 'a')
+        # path = os.path.join(base_dir, sim_dir, 'sim.hdf5')
+        # self._dstore = tb.open_file(path, 'a')
+        self._dstore = tb.open_file(sim_dir, 'a')
         ID = os.path.basename(self.conf['General']['sim_dir'])
         self.gpath = '/sim_{}'.format(ID)
         try:

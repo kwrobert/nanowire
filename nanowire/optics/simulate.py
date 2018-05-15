@@ -303,8 +303,8 @@ def run_sim_dispy(conf):
             # sim.conf['General']['sim_dir'] = rel_dir
             log.info('Executing sim %s', sim.id[0:10])
             sim.save_all()
-            for f in os.listdir(rel_dir):
-                fpath = os.path.join(rel_dir, f)
+            for f in os.listdir(sim.dir):
+                fpath = os.path.join(sim.dir, f)
                 dispy_send_file(fpath)
             # path = os.path.join(os.path.basename(sim.dir), 'sim.hdf5')
             # sim.q.put(path, block=True)

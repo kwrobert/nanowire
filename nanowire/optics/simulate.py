@@ -1016,7 +1016,8 @@ class Simulator:
         else:
             self.id = make_hash(conf.data)
         self.conf['General']['sim_dir'] = self.id[0:10]
-        sim_dir = os.path.join(self.conf['General']['base_dir'], self.id[0:10])
+        # sim_dir = os.path.join(self.conf['General']['base_dir'], self.id[0:10])
+        sim_dir = self.id[0:10]
         self.dir = os.path.expandvars(sim_dir)
         print('Init dir: ', self.dir)
         self.s4 = S4.New(Lattice=((period, 0), (0, period)),
@@ -1188,8 +1189,8 @@ class Simulator:
     def update_id(self):
         """Update sim id. Used after changes are made to the config"""
         self.id = make_hash(self.conf.data)
-        sim_dir = os.path.join(self.conf['General']['base_dir'], self.id[0:10])
-        # sim_dir = self.id[0:10]
+        # sim_dir = os.path.join(self.conf['General']['base_dir'], self.id[0:10])
+        sim_dir = self.id[0:10]
         self.conf['General']['sim_dir'] = self.id[0:10]
         sim_dir = os.path.expandvars(sim_dir)
         self.dir = sim_dir

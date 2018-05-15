@@ -797,6 +797,8 @@ class SimulationManager:
                 else:
                     log.info('Job ID: %i, Status: %s, Runtime: %f s'
                              ', Host: %s', job_id, stat, time, job.ip_addr) 
+                print(job.stdout)
+                print(job.stderr)
                 del jobs[job_id]
         return None
 

@@ -1744,6 +1744,24 @@ class Simulator:
     def compute_dielectric_profile_at_point(self, x, y, z):
         return self.s4.GetEpsilon(x, y, z)
 
+    def get_q_values(self):
+        """
+        Returns a dictionary where the keys are names of all the layers in the
+        device. The values are numpy arrays containing the 2*N_G q values (i.e
+        propagation constants
+        """
+
+        self.log.info('Computing q values')
+        return_data = {}
+        for layer, ldata in self.conf['Layers'].items():
+            self.log.debug("Layer: {}".format(layer))
+            q_vals = np.array(self.s4.GetPropagationConstants(Layer=layer))
+            key = '{}_qvals'.format(layer)
+            self.data[key] = q_vals
+            return_data[layer] = q_vals
+        self.log.info('Finished computing coefficients!')
+        return return_data
+
     def get_fourier_coefficients(self, offset=0.):
         """
         Return a list of the Fourier coefficients used to approximate the
@@ -2116,6 +2134,7 @@ class Simulator:
             self.get_field()
         self.get_fluxes()
         # self.get_fourier_coefficients()
+        self.get_q_values()
         if self.conf['General']['dielectric_profile']:
             self.compute_dielectric_profile()
         self.save_state()

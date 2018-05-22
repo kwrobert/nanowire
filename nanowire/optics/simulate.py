@@ -186,17 +186,17 @@ def update_sim(conf, samples, q=None):
             pass
         raise
 
-def run_sim(conf, q=None):
+def run_sim(conf, q=None, skip_hash=False):
     """
     Actually runs simulation in a given directory. Expects the Config
     for the simulation as an argument.
     """
     log = logging.getLogger(__name__)
     start = time.time()
-    sim = Simulator(copy.deepcopy(conf), q=q)
+    sim = Simulator(copy.deepcopy(conf), q=q, skip_hash=skip_hash)
     try:
         if not sim.conf.variable_thickness:
-            sim.setup()
+            sim.setup(skip_hash=skip_hash)
             log.info('Executing sim %s', sim.id[0:10])
             sim.save_all()
             # path = os.path.join(os.path.basename(sim.dir), 'sim.hdf5')
@@ -1766,6 +1766,7 @@ class Simulator:
         fields
         """
         self.log.info('Retrieving Fourier coefficients')
+        return_data = {}
         for layer, ldata in self.conf['Layers'].items():
             self.log.debug("Layer: {}".format(layer))
             if offset == 0.:
@@ -1779,9 +1780,9 @@ class Simulator:
             coeff_arr = np.row_stack((forw, backw))
             key = '{}_amplitudes'.format(layer)
             self.data[key] = coeff_arr
+            return_data[layer] = coeff_arr
         self.log.info('Finished computing coefficients!')
-        return {key:val for key,val in self.data.items() if '_amplitudes' in
-                key}
+        return return_data
 
     def load_state(self):
         """
@@ -1790,7 +1791,9 @@ class Simulator:
         log = logging.getLogger(__name__)
         self.log.info("Loading simulation state")
         sfile = self.conf['General']['solution_file']
+        # sfile = 'solution.xml'
         fname = os.path.expandvars(os.path.join(self.dir, sfile))
+        print(fname)
         if os.path.isfile(fname):
             self.log.info("Loading from: %s", fname)
             log.info("Simulator %s loading solution from: %s", self.id[0:10], fname)
@@ -1888,9 +1891,10 @@ class Simulator:
         method of the DataManager object, with some code to compute the time it
         took to perform the write operation
         """
-
+        
+        print(list(self.data.keys()))
         if not self.conf['General']['save_as']:
-            pass
+            return
         elif self.conf['General']['save_as'] == 'hdf5':
             start = time.time()
             self.data.write_data(clear=True)
@@ -2102,9 +2106,12 @@ class Simulator:
         self.log.debug('Result: %s'%str(res))
 
     def save_all(self, update=False):
-        """Gets all the data for this similation by calling the relevant class
+        """
+        Gets all the data for this similation by calling the relevant instance
         methods. Basically just a convenient wrapper to execute all the
-        functions defined above"""
+        functions defined above
+        """
+
         log = logging.getLogger(__name__)
         # TODO: Split this into a get_all and save_all function. Will give more
         # granular sense of timing and also all getting data without having to
@@ -2114,23 +2121,26 @@ class Simulator:
             self.update_thicknesses()
         state_file = os.path.join(self.dir,
                                   self.conf['General']['solution_file'])
+        state_file = os.path.join(self.dir, 'solution.xml')
         self.save_conf()
         if os.path.isfile(state_file):
-            self.log.debug("State file exists: %s"%state_file)
-            log.info("State file exists: %s"%state_file)
+            self.log.debug("State file exists: %s", state_file)
+            log.info("State file exists: %s", state_file)
             self.load_state()
         else:
             log.info("State file %s does not exist", state_file)
+            return
         # sdict = {"Air": 5, "ITO": 100, "NW_AlShell": 200, "Substrate": 300}
         # sdict = {"Air": 5, "ITO": 10, "NW_AlShell": 20, "Substrate": 30}
         # self.compute_fields_by_layer(sdict)
-        if self.conf['General']['sample_dict']:
-            results = self.compute_fields_by_layer(self.conf['General']['sample_dict'])
+        sdict = self.conf['General']['sample_dict']
+        if sdict:
+            results = self.compute_fields_by_layer(sdict)
             self.data.update(results)
         else:
             self.get_field()
         self.get_fluxes()
-        # self.get_fourier_coefficients()
+        self.get_fourier_coefficients()
         self.get_q_values()
         if self.conf['General']['dielectric_profile']:
             self.compute_dielectric_profile()

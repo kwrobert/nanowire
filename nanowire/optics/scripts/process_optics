@@ -44,8 +44,10 @@ def process_optics():
     else:
         if args.group_by:
             group_by = args.group_by.split('.')
+            group_ag = None
         else:
             group_ag = args.group_against.split('.')
+            group_by = None
 
     # Collect the sims once up here and reuse them later
     proc = Processor(args.config_file)
@@ -72,7 +74,8 @@ def process_optics():
     # logging_tree.printout()
     # Now do all the work
     kwargs = {'crunch': not args.no_crunch, 'plot': not args.no_plot,
-              'gcrunch': not args.no_gcrunch, 'gplot': not args.no_gplot}
+              'gcrunch': not args.no_gcrunch, 'gplot': not args.no_gplot,
+              'grouped_against': group_ag, 'grouped_by': group_by}
     proc.process(**kwargs)
 
 if __name__ == '__main__':

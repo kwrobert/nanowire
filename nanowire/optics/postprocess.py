@@ -983,6 +983,57 @@ class Simulation:
                 absorb = fact * float(vals[1])
                 outf.write('%s,%s\n' % (layer, absorb))
 
+    def plot_q_values(self):
+        """
+        Create a 2D scatter plot containing the propagation constants q. RCWA
+        assumes all z dependence is contained in a factor :math:`e^{i q_n z}`
+        for a set of eigenvalues :math:`q_n` whose length is equal to the
+        number of basis terms used in the simulations. The y axis plots the
+        imaginary part of q, which quantifies the exponential decay rate of the
+        waves as they propagate along z. The x axis plots the real part of q,
+        which determines the oscillation frequency of the waves.
+        """
+
+        sim_freq = self.conf['Simulation']['params']['frequency']
+        sim_wvlgth = 1e9*consts.c / sim_freq
+        leg_str = ''
+        for mat, matpath in self.conf['Materials'].items():
+            n, k = get_nk(matpath, sim_freq)
+            mat_wv = sim_wvlgth / n
+            # mat_freq = 2*np.pi/mat_wv
+            leg_str += '{}: {:.2f} nm\n'.format(mat, mat_wv)
+        leg_str = leg_str[0:-1]
+        for lname, l_obj in self.layers.items():
+            qarr = self.data['{}_qvals'.format(lname)]
+            max_pos_freq = np.amax(qarr.real)
+            max_neg_freq = np.amin(qarr.real)
+            min_pos_wv = 1e3*2*np.pi/max_pos_freq
+            if max_neg_freq == 0:
+                min_neg_wv = 0 
+            else:
+                min_neg_wv = 1e3*2*np.pi/max_neg_freq
+            plt.figure()
+            title = 'Layer: {}, Vacuum $\\lambda$: {:.2f} nm\n'
+            title += 'Min Positive $\\lambda$: {:.2f} nm, '
+            title += 'Min Negative $\\lambda$: {:.2f} nm'
+            title = title.format(lname, sim_wvlgth, min_pos_wv, min_neg_wv)
+            plt.title(title)
+            plt.scatter(qarr.real, qarr.imag, c='b', s=.5,
+                        marker='o', label=leg_str)
+            # pt = (qarr[0].real, qarr[0].imag)
+            # theta = np.linspace(0, 1.48, 200)
+            # plt.plot(pt[0]*np.cos(theta), pt[1]/np.cos(theta), 'r--')
+            plt.legend(loc='best')
+            # plt.annotate(leg_str, xy=(.95,.95), xycoords='axes fraction',
+            #              size=14, ha='right', va='top',
+            #              bbox=dict(boxstyle='round', fc='w'))
+            plt.xlabel('Real Part')
+            plt.ylabel('Imaginary Part')
+            plot_path = os.path.join(self.dir, '{}_qvals.png'.format(lname))
+            plt.grid(True)
+            plt.savefig(plot_path)
+            plt.close()
+
     def _draw_layer_circle(self, layer, shape, material, plane, pval, ax_hand):
         """Draws the circle within a layer"""
         center = shape.center
@@ -1314,7 +1365,7 @@ class SimulationGroup:
     that is grouped against number of basis terms also doesn't make sense.
     """
 
-    def __init__(self, sims, grouped_by=None, grouped_against=None):
+    def __init__(self, sims, grouped_against=None, grouped_by=None):
         if grouped_by is None and grouped_against is None:
             raise ValueError("Must know how this SimulationGroup is grouped")
         self.grouped_by = grouped_by
@@ -2012,6 +2063,39 @@ class SimulationGroup:
         plt.savefig(figp)
         plt.close()
 
+    def plot_q_values(self):
+        """
+        Plot the q values for different numbers of basis terms on the same axis
+        """
+        if 'numbasis' not in self.grouped_against:
+            raise ValueError("""Simulations must be grouped against number of
+            basis terms to plot q values on the same axis""")
+
+        layers = self.sims[0].layers
+        base = self.sims[0].conf['General']['results_dir']
+        freq = self.sims[0].conf[('Simulation', 'params', 'frequency')]
+        wvlgth = 1e9*consts.c/freq
+        for lname, l_obj in layers.items():
+            plt.figure()
+            plt.title('Freq = {:.3E}, Wavelength = {:.2f} nm'.format(freq, wvlgth))
+            for sim in self.sims:
+                qarr = sim.data['{}_qvals'.format(lname)]
+                label = 'Numbasis: {}'
+                label = label.format(sim.conf[('Simulation','params','numbasis')])
+                plt.scatter(qarr.real, qarr.imag, s=.5, label=label)
+                # pt = (qarr[0].real, qarr[0].imag)
+                # theta = np.linspace(0, 1.48, 200)
+                # plt.plot(pt[0]*np.cos(theta), pt[1]/np.cos(theta), 'r--')
+                # plt.annotate(leg_str, xy=(.95,.95), xycoords='axes fraction',
+                #              size=14, ha='right', va='top',
+                #              bbox=dict(boxstyle='round', fc='w'))
+            plt.xlabel('Real Part')
+            plt.ylabel('Imaginary Part')
+            plot_path = os.path.join(base, '{}_qvals.png'.format(lname))
+            plt.grid(True)
+            plt.legend(loc='best')
+            plt.savefig(plot_path)
+            plt.close()
 
 def scatter3d(x, y, z, cs=None, colorsMap='jet'):
     fig = plt.figure()
@@ -2094,7 +2178,7 @@ def _call_func(quantity, obj, args):
     return result
 
 
-def execute_plan(conf, plan):
+def execute_plan(conf, plan, grouped_against=None, grouped_by=None):
     """
     Executes the given plan for the given Config object or list/tuple of Config
     objects. If conf is a single Config object, a Simulation object will
@@ -2126,9 +2210,14 @@ def execute_plan(conf, plan):
             sample_conf = conf[0]
             log.info("Executing SimulationGroup plan")
             if not sample_conf['General']['save_as']:
-                obj = SimulationGroup([Simulation(simulator=Simulator(c)) for c in conf])
+                obj = SimulationGroup([Simulation(simulator=Simulator(c)) for c
+                                       in conf],
+                                      grouped_against=grouped_against,
+                                      grouped_by=grouped_by)
             else:
-                obj = SimulationGroup([Simulation(conf=c) for c in conf])
+                obj = SimulationGroup([Simulation(conf=c) for c in conf],
+                                      grouped_against=grouped_against,
+                                      grouped_by=grouped_by)
             ID = str(obj)
         else:
             log.info("Executing Simulation plan")
@@ -2479,7 +2568,8 @@ class Processor(object):
             raise
         return result
 
-    def process(self, crunch=True, plot=True, gcrunch=True, gplot=True):
+    def process(self, crunch=True, plot=True, gcrunch=True, gplot=True,
+                grouped_against=None, grouped_by=None):
         # Create pool if processing in parallel
         if self.gconf['General']['post_parallel']:
             num_procs = self.gconf['General']['num_cores']
@@ -2494,11 +2584,14 @@ class Processor(object):
         if 'crunch' in plan or 'plot' in plan:
             if not self.gconf['General']['post_parallel']:
                 for conf in self.sim_confs:
-                    execute_plan(conf, plan)
+                    execute_plan(conf, plan, grouped_against=grouped_against,
+                                 grouped_by=grouped_by)
             else:
                 self.log.info('Plotting sims in parallel using %s cores ...',
                               str(num_procs))
-                args_list = list(zip(self.sim_confs, repeat(plan)))
+                args_list = list(zip(self.sim_confs, repeat(plan),
+                                     repeat(grouped_against),
+                                     repeat(grouped_by)))
                 pool.starmap(execute_plan, args_list)
         # Process groups
         plan = copy.deepcopy(self.gconf['Postprocessing']['Group'])
@@ -2509,11 +2602,14 @@ class Processor(object):
         if 'crunch' in plan or 'plot' in plan:
             if not self.gconf['General']['post_parallel']:
                 for group in self.sim_groups:
-                    execute_plan(group, plan)
+                    execute_plan(group, plan, grouped_against=grouped_against,
+                                 grouped_by=grouped_by)
             else:
                 self.log.info('Plotting sims in parallel using %s cores ...',
                               str(num_procs))
-                args_list = list(zip(self.sim_groups, repeat(plan)))
+                args_list = list(zip(self.sim_groups, repeat(plan),
+                                     repeat(grouped_against),
+                                     repeat(grouped_by)))
                 pool.starmap(execute_plan, args_list)
         if self.gconf['General']['post_parallel']:
             pool.close()

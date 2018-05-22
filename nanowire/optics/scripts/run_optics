@@ -15,15 +15,16 @@ def run_optics():
                         choices=['debug', 'info', 'warning', 'error', 'critical'],
                         help="""Logging level for the run""")
     parser.add_argument('-s', '--single', action='store_true', default=False,
-                        help="The input config file should be treated as the "
-                             "config file for a single simulation, and run "
-                             "accordingly ")
+                        help="""Rerun a single simulation whose individual
+                        config file already exists. The input config file
+                        should be treated as the config file for a single
+                        simulation, and run accordingly """)
     parser.add_argument('-u', '--update', action='store_true',
-                        help="Update the electric field arrays with new "
-                             "z samples without overwriting the old data. Can "
-                             "only upate the sampling in z because there is "
-                             "no way to update in x-y without destroying the "
-                             "regularity of the grid")
+                        help="""Update the electric field arrays with new z
+                        samples without overwriting the old data. Can only
+                        upate the sampling in z because there is no way to
+                        update in x-y without destroying the regularity of the
+                        grid""")
     parser.add_argument('--filter_by', nargs='*',
                         help="""Only run simulations whose parameter match the 
                                 list of parameters you wish to filter by,
@@ -43,7 +44,7 @@ def run_optics():
 
     if args.single:
         conf = Config(path=args.config_file)
-        run_sim(conf)
+        run_sim(conf, skip_hash=True)
     elif args.update:
         manager = SimulationManager(args.config_file, log_level=args.log_level)
         manager.run(filter_dict=filt_dict, func=update_sim, load=True)

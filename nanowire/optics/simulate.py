@@ -1012,7 +1012,7 @@ class Simulator:
         numbasis = self.conf['Simulation']['params']['numbasis']
         period = self.conf['Simulation']['params']['array_period']
         if skip_hash:
-            # TODO: Remove this when all the existing simulations are cleaned up 
+            # TODO: Remove this when all the existing simulations are cleaned up
             try:
                 self.id = conf['General']['ID']
             except KeyError:
@@ -1195,6 +1195,7 @@ class Simulator:
         self.id = make_hash(self.conf.data)
         sim_dir = self.id[0:10]
         self.conf['General']['sim_dir'] = sim_dir
+        self.conf['General']['ID'] = self.id
         self.base = osp.realpath(osp.expandvars(self.conf['General']['base_dir']))
         self.dir = osp.expandvars(sim_dir)
         self.path = osp.join(self.base, self.dir)

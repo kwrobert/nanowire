@@ -116,7 +116,7 @@ class Simulation:
         self.id = self.conf['General']['sim_dir'][-10:]
         base_dir = os.path.expandvars(self.conf['General']['base_dir'])
         sim_dir = os.path.expandvars(self.conf['General']['sim_dir'])
-        self.dir = os.path.join(base_dir, sim_dir) 
+        self.dir = os.path.join(base_dir, sim_dir)
         self.fhandler = logging.FileHandler(os.path.join(self.dir, 'postprocess.log'))
         self.fhandler.addFilter(IdFilter(ID=self.id))
         formatter = logging.Formatter('%(asctime)s [%(name)s:%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
@@ -1009,7 +1009,7 @@ class Simulation:
             max_neg_freq = np.amin(qarr.real)
             min_pos_wv = 1e3*2*np.pi/max_pos_freq
             if max_neg_freq == 0:
-                min_neg_wv = 0 
+                min_neg_wv = 0
             else:
                 min_neg_wv = 1e3*2*np.pi/max_neg_freq
             plt.figure()
@@ -2077,12 +2077,13 @@ class SimulationGroup:
         wvlgth = 1e9*consts.c/freq
         for lname, l_obj in layers.items():
             plt.figure()
-            plt.title('Freq = {:.3E}, Wavelength = {:.2f} nm'.format(freq, wvlgth))
+            title = 'Layer: {}, Freq = {:.3E}, Wavelength = {:.2f} nm'
+            plt.title(title.format(lname, freq, wvlgth))
             for sim in self.sims:
                 qarr = sim.data['{}_qvals'.format(lname)]
                 label = 'Numbasis: {}'
                 label = label.format(sim.conf[('Simulation','params','numbasis')])
-                plt.scatter(qarr.real, qarr.imag, s=.5, label=label)
+                plt.scatter(qarr.real, qarr.imag, s=.75, label=label)
                 # pt = (qarr[0].real, qarr[0].imag)
                 # theta = np.linspace(0, 1.48, 200)
                 # plt.plot(pt[0]*np.cos(theta), pt[1]/np.cos(theta), 'r--')
@@ -2203,7 +2204,7 @@ def execute_plan(conf, plan, grouped_against=None, grouped_by=None):
     called for each set of provided arguments. No attempts are made to validate
     the given plan before raising exceptions
     """
-    
+
     log = logging.getLogger(__name__)
     try:
         if isinstance(conf, list) or isinstance(conf, tuple):
@@ -2276,7 +2277,7 @@ def execute_plan(conf, plan, grouped_against=None, grouped_by=None):
         else:
             log.error('Conf %s raised exception', conf['General']['sim_dir'])
         raise
-        
+
 
 
 class Processor(object):
@@ -2381,13 +2382,13 @@ class Processor(object):
         Group simulations by against particular parameter. Within each
         group, the parameter specified by `key` will vary, and all other
         parameters will remain fixed. Populates the sim_groups attribute and
-        also returns a list of lists. 
-        
+        also returns a list of lists.
+
         :param key: A key specifying which parameter simulations will be
         grouped against. Individual simulations within each group will be
         sorted in increasing order of this parameter, and all other parameters
-        will remain constant within the group 
-        :type key: str or tuple 
+        will remain constant within the group
+        :type key: str or tuple
         :param sort_key: An optional key used to sort the returned list of
         groups. The list of groups will be sorted in increasing order of the
         specified sort_key

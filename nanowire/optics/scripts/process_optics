@@ -26,6 +26,9 @@ def process_optics():
                         help="""Logging level for the run""")
     parser.add_argument('--filter_by', nargs='*', help="""List of parameters you wish to filter by,
             specified like: p1:v1,v2,v3 p2:v1,v2,v3""")
+    parser.add_argument('--print', action='store_true', default=False,
+                        help="""Print IDs of simulations to be processed,
+                        without running anything""")
     parser.add_argument('-gb', '--group_by', help="""The parameter you
             would like to group simulations by, specified as a dot separated path
             to the key in the config as: path.to.key.value""")
@@ -71,6 +74,19 @@ def process_optics():
     # set of leaf groups
     if args.group_by:
         proc.group_by(group_by)
+    if args.print:
+        print('#'*20)
+        print('Simulations:')
+        for conf in proc.sim_confs:
+            print(conf['General']['sim_dir'])
+        print('#'*20)
+        print('Simulation Groups:')
+        print('-'*20)
+        for group in proc.sim_groups:
+            for conf in group:
+                print(conf['General']['sim_dir'])
+            print('-'*20)
+        return
     # logging_tree.printout()
     # Now do all the work
     kwargs = {'crunch': not args.no_crunch, 'plot': not args.no_plot,

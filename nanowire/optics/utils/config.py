@@ -43,7 +43,7 @@ class Config(MutableMapping):
         if path:
             self.data = self._parse_file(path)
         elif raw_text:
-            self.data = yaml.load(raw_text, Loader=yaml.Loader)
+            self.data = yaml.load(raw_text, Loader=yaml.CLoader)
         else:
             self.data = {}
             self.update(dict(data))
@@ -57,7 +57,7 @@ class Config(MutableMapping):
         path = os.path.expandvars(path)
         with open(path, 'r') as cfile:
             text = cfile.read()
-        conf = yaml.load(text, Loader=yaml.Loader)
+        conf = yaml.load(text, Loader=yaml.CLoader)
         return conf
 
     def expand_vars(self, in_table=None, old_key=None, update=True):

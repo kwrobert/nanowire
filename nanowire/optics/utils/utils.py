@@ -64,7 +64,7 @@ def get_nk(path, freq):
 
 def get_incident_power(sim):
     """
-    Returns the incident power per square meter for a simulation depending on
+    Returns the incident power per area (W/m^2) for a simulation depending on
     frequency and the incident polar angle. Uses the spectrum provided in the
     config file for all computations. Power is multiplied by a factor of
     cos(polar_angle)
@@ -84,7 +84,9 @@ def get_incident_power(sim):
 
        .. math:: \\int_{f - \\Delta f/2}^{f + \\Delta f/2} I(f) df
 
-       where :math:`I` is the incident solar irradiance.
+       where :math:`I` is the incident solar irradiance. If a bin edge falls
+       between two available data points, interpolation is used to estimate the
+       irradiance value at the bin edge.
 
     Method 2 is used in this function, because it is debatably more
     accurate.

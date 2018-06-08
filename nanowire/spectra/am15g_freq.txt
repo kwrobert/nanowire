@@ -1,4 +1,7 @@
 # Frequency (Hz), Power (W m^-2 Hz^-1)
+# Note the frequency here is a temporal frequency, representing the number of
+# oscillations/second that ocurr in vacuum. Divide the speed of light in vacuum
+# by this frequency to get a vacuum wavelength
 7.494811449999998438e+13,3.791583042425971945e-13
 7.504191689612015625e+13,3.838381426193183157e-13
 7.513595438596490625e+13,3.914966841160494557e-13

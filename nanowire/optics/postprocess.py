@@ -1,4 +1,5 @@
 import os
+import glob
 import sys
 import time
 import copy
@@ -737,7 +738,7 @@ class Simulation:
             else:
                 y_integral_polar = 0
                 y_integral = integrate3d(n_mat*k_mat*Esq, z, self.X, self.Y,
-                                         meth=intg.simps)
+                                         meth=intg.simps, order=order)
             # abs_dict[lname] = result
             # nkEsq = n_mat*k_mat*Esq
             # y_integral = 0
@@ -999,9 +1000,9 @@ class Simulation:
         leg_str = ''
         for mat, matpath in self.conf['Materials'].items():
             n, k = get_nk(matpath, sim_freq)
-            mat_wv = sim_wvlgth / n
-            # mat_freq = 2*np.pi/mat_wv
-            leg_str += '{}: {:.2f} nm\n'.format(mat, mat_wv)
+            mat_wv = 1e-3*sim_wvlgth / n
+            mat_q = 2*np.pi/mat_wv
+            leg_str += '{}: {:.2f} [rads/$\mu$m]\n'.format(mat, mat_q)
         leg_str = leg_str[0:-1]
         for lname, l_obj in self.layers.items():
             qarr = self.data['{}_qvals'.format(lname)]
@@ -1013,12 +1014,16 @@ class Simulation:
             else:
                 min_neg_wv = 1e3*2*np.pi/max_neg_freq
             plt.figure()
-            title = 'Layer: {}, Vacuum $\\lambda$: {:.2f} nm\n'
-            title += 'Min Positive $\\lambda$: {:.2f} nm, '
-            title += 'Min Negative $\\lambda$: {:.2f} nm'
-            title = title.format(lname, sim_wvlgth, min_pos_wv, min_neg_wv)
+            inc_q = 2*np.pi/(1e-3*sim_wvlgth)
+            title = 'Layer: {}, Incident q: {:.2f} [rads/$\mu$m]'.format(lname, inc_q)
+            # title += 'Min Positive $\\lambda$: {:.2f} nm, '
+            # title += 'Min Negative $\\lambda$: {:.2f} nm'
+            # title = title.format(lname, sim_wvlgth, min_pos_wv, min_neg_wv)
+            # title = title.format(lname, sim_wvlgth)
             plt.title(title)
-            plt.scatter(qarr.real, qarr.imag, c='b', s=.5,
+            # plt.scatter(1e3*2*np.pi/qarr.real, 1e4*qarr.imag/2*np.pi, c='b', s=.5,
+            #             marker='o', label=leg_str)
+            plt.scatter(qarr.real, qarr.imag/(2*np.pi), c='b', s=.75,
                         marker='o', label=leg_str)
             # pt = (qarr[0].real, qarr[0].imag)
             # theta = np.linspace(0, 1.48, 200)
@@ -1027,8 +1032,8 @@ class Simulation:
             # plt.annotate(leg_str, xy=(.95,.95), xycoords='axes fraction',
             #              size=14, ha='right', va='top',
             #              bbox=dict(boxstyle='round', fc='w'))
-            plt.xlabel('Real Part')
-            plt.ylabel('Imaginary Part')
+            plt.xlabel('Re(q) [radians/micron]')
+            plt.ylabel('Im(q) [1/microns]')
             plot_path = os.path.join(self.dir, '{}_qvals.png'.format(lname))
             plt.grid(True)
             plt.savefig(plot_path)
@@ -1707,25 +1712,40 @@ class SimulationGroup:
         """
 
         if method not in ('flux', 'integral'):
-            msg = 'Invalid method {} for computing absorbance'.format(method)
+            msg = 'Invalid method {} for computing photocurrent density'.format(method)
             raise ValueError(msg)
+
+        print(self.grouped_against)
+        if not tuple(self.grouped_against) == ('Simulation', 'params', 'frequency'):
+            raise ValueError('Can only compute photocurrent density when '
+                             'grouped against frequency')
+         
 
         base = os.path.expandvars(self.sims[0].conf['General']['results_dir'])
         period = self.sims[0].conf['Simulation']['params']['array_period']
         self.log.info('Computing photocurrent density for group at %s', base)
         jph_vals = np.zeros(self.num_sims)
         freqs = np.zeros(self.num_sims)
-        # Assuming the sims have been grouped by frequency, sum over all of
-        # them
         for i, sim in enumerate(self.sims):
             freq = sim.conf['Simulation']['params']['frequency']
             freqs[i] = freq
+        # Assuming the sims have been grouped by frequency, sum over all of
+        # them
+        for i, sim in enumerate(self.sims):
+            # freq = sim.conf['Simulation']['params']['frequency']
+            # freqs[i] = freq
             E_photon = consts.h * freq
             if method == 'flux':
-                arr = sim.data['transmission_data']
-                _, ref, trans, absorb = arr[arr.port == port.encode('utf-8')][0]
-                incident_power = get_incident_power(sim)
-                jph_vals[i] = incident_power * absorb / E_photon
+                # arr = sim.data['transmission_data']
+                # _, ref, trans, absorb = arr[arr.port == port.encode('utf-8')][0]
+                # incident_power = get_incident_power(sim)
+                # jph_vals[i] = incident_power * absorb / E_photon
+                try:
+                    abs_arr = sim.data['abs_per_layer']
+                except KeyError:
+                    abs_arr = sim.absorption_per_layer()
+                absorbed_power = np.sum(abs_arr['flux_method'])
+                jph_vals[i] = absorbed_power / (E_photon*period**2)
             else:
                 try:
                     abs_arr = sim.data['abs_per_layer']
@@ -1879,10 +1899,10 @@ class SimulationGroup:
                     integ_polar_total += integ_polar.real
                 else:
                     integ_polar_total += integ.real
-            # total_diff = np.abs(flux_total.real - integ_total.real)/flux_total.real
-            # total_diff_polar = np.abs(flux_total.real - integ_polar_total.real)/flux_total.real
-            total_diff = np.real(flux_total.real - integ_total.real)/flux_total.real
-            total_diff_polar = np.real(flux_total.real - integ_polar_total.real)/flux_total.real
+            total_diff = np.abs(flux_total.real - integ_total.real)/np.abs(flux_total)
+            total_diff_polar = np.abs(flux_total.real - integ_polar_total.real)/np.abs(flux_total)
+            # total_diff = np.real(flux_total.real - integ_total.real)/flux_total.real
+            # total_diff_polar = np.real(flux_total.real - integ_polar_total.real)/flux_total.real
             if 'total' in results_dict:
                 results_dict['total'][0].append(flux_total.real)
                 results_dict['total'][1].append(integ_total.real)
@@ -1904,6 +1924,7 @@ class SimulationGroup:
                   'relativediff_polar': 4}
         if quant is not None:
             quants = {q: ind for q, ind in quants.items() if q in quant}
+        xvals = 1e9*consts.c/xvals
         for layer in layers:
             results = results_dict[layer]
             for name, ind in quants.items():
@@ -1915,10 +1936,15 @@ class SimulationGroup:
                     ax = input_ax
                 pfile = os.path.join(results_dir,
                                      '{}_{}.png'.format(layer, name))
+                print(np.amin(results[ind]))
                 ax.plot(xvals, results[ind], marker, label=leg_label)
+                ylims = ax.get_ylim()
+                ax.set_ylim([0, ylims[-1]])
                 ax.set_xlabel(self.grouped_against[-1])
                 if ylabel:
                     ax.set_ylabel(ylabel)
+                if xlabel:
+                    ax.set_xlabel(xlabel)
                 if title:
                     ax.set_title(title)
                 if input_ax is None:
@@ -2036,9 +2062,14 @@ class SimulationGroup:
         refl_l = np.zeros(self.num_sims)
         trans_l = np.zeros(self.num_sims)
         absorb_l = np.zeros(self.num_sims)
+        bport = port.encode('utf-8')
         for i, sim in enumerate(self.sims):
             # Unpack data for the port we passed in as an argument
-            ref, trans, absorb = sim.data['transmission_data'][port]
+            tdata = sim.data['transmission_data']
+            pdata = tdata[tdata.port == bport][0]
+            ref = pdata[1]
+            trans = pdata[2]
+            absorb = pdata[3]
             freq = sim.conf['Simulation']['params']['frequency']
             freqs[i] = freq
             trans_l[i] = trans
@@ -2083,15 +2114,15 @@ class SimulationGroup:
                 qarr = sim.data['{}_qvals'.format(lname)]
                 label = 'Numbasis: {}'
                 label = label.format(sim.conf[('Simulation','params','numbasis')])
-                plt.scatter(qarr.real, qarr.imag, s=.75, label=label)
+                plt.scatter(qarr.real, qarr.imag/(2*np.pi), s=.75, label=label)
                 # pt = (qarr[0].real, qarr[0].imag)
                 # theta = np.linspace(0, 1.48, 200)
                 # plt.plot(pt[0]*np.cos(theta), pt[1]/np.cos(theta), 'r--')
                 # plt.annotate(leg_str, xy=(.95,.95), xycoords='axes fraction',
                 #              size=14, ha='right', va='top',
                 #              bbox=dict(boxstyle='round', fc='w'))
-            plt.xlabel('Real Part')
-            plt.ylabel('Imaginary Part')
+            plt.xlabel('Re(q) [radians/micron]')
+            plt.ylabel('Im(q) [1/microns]')
             plot_path = os.path.join(base, '{}_qvals.png'.format(lname))
             plt.grid(True)
             plt.legend(loc='best')

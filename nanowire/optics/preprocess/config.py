@@ -6,9 +6,9 @@ import re
 from collections import MutableMapping, OrderedDict
 from copy import deepcopy
 import pprint
-from mako.template import Template
 import conff
-from .utils import get_combos, do_profile
+import delimited
+from nanowire.optics.utils.utils import get_combos, do_profile
 from line_profiler import LineProfiler
 
 
@@ -358,7 +358,10 @@ class Config(MutableMapping):
         return deepcopy(self.data)
 
     def write(self, path):
-        """Dumps this config object to its YAML representation given a path to a file"""
+        """
+        Dumps this config object to its YAML representation given a path to a
+        file
+        """
         path = os.path.expandvars(path)
         with open(path, 'w') as out:
             out.write(yaml.dump(self.data, default_flow_style=False))

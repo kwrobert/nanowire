@@ -425,7 +425,7 @@ def filter_by_param(confs, pars):
     :params pars: A dict whose keys are dot separated paths to a config item
     and values are a list of possible values for that parameter. Any simulation
     whose parameter does not match any of the provided values is removed from
-    the sims and sim_groups attribute :type pars: dict 
+    the sims and sim_groups attribute :type pars: dict
     """
 
     assert(type(pars) == dict)
@@ -435,7 +435,8 @@ def filter_by_param(confs, pars):
     return confs
 
 
-def make_hash(o, hash_dict=None, hasher=None):
+def make_hash(o, hash_dict=None, hasher=None,
+              skip_keys=['General', 'Postprocessing']):
     """
     A recursive function for hasing any python built-in data type. Probably
     won't work on custom objects. It is consistent across runs and handles
@@ -465,7 +466,7 @@ def make_hash(o, hash_dict=None, hasher=None):
     # If its a dict, recurse through the dictionary and update the hasher as we
     # go
     for k, v in sorted(o.items(), key=lambda tup: tup[0]):
-        if k == 'General' or k == 'Postprocessing':
+        if k in skip_keys:
             continue
         else:
             ret = make_hash(v, hasher=hasher).encode('utf-8')
@@ -570,8 +571,8 @@ def arithmetic_arange(a, b, dx0, d, endpoint=True):
     return pts
 
 def ipv4():
-    """ 
-    Get all IPv4 addresses for all interfaces. 
+    """
+    Get all IPv4 addresses for all interfaces.
     """
 
     try:
@@ -584,9 +585,9 @@ def ipv4():
                 for link in config[AF_INET]:
                 # loopback holds a 'peer' instead of a 'broadcast' address
                     if 'addr' in link.keys() and 'peer' not in link.keys():
-                        addresses.append(link['addr']) 
+                        addresses.append(link['addr'])
         return addresses
-    except ImportError: 
+    except ImportError:
         return []
 
 def get_public_iface():
@@ -596,7 +597,7 @@ def get_public_iface():
     for routing traffic, then get the interface name from that
     """
 
-    interface = netifaces.gateways()['default'][netifaces.AF_INET][1] 
+    interface = netifaces.gateways()['default'][netifaces.AF_INET][1]
     return interface
 
 def get_public_ip(iface, version=4):

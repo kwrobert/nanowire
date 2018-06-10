@@ -1443,51 +1443,37 @@ class SimulationGroup:
         normvec = normvec[start:end]**2
         return vecs, normvec
 
-    def local_error(self, field, exclude=False):
-        """Computes the average of the local error between the vector fields of two simulations at
-        each point in space"""
-        self.log.info('Running the local error computation for quantity %s', field)
-        # If we need to exclude calculate the indices
-        if exclude:
-            start, end = self.get_slice(self.sims[0])
-            excluded = '_excluded'
-        else:
-            start = 0
-            end = None
-            excluded = ''
-        base = self.sims[0].conf['General']['results_dir']
-        errpath = os.path.join(base, 'localerror_%s%s.dat' % (field, excluded))
-        with open(errpath, 'w') as errfile:
-            self.log.info('Computing local error for sweep %s', base)
-            # Set the reference sim
-            ref_sim = self.sims[-1]
-            # Get the comparison vector
-            vecs1, normvec = self.get_comp_vec(ref_sim, field, start, end)
-            # For all other sims in the groups, compare to best estimate
-            # and write to error file
-            for i in range(0, self.num_sims - 1):
-                sim2 = self.sims[i]
-                vecs2, normvec2 = self.get_comp_vec(sim2, field, start, end)
-                self.log.info("Computing local error between numbasis %i and numbasis %i",
-                              ref_sim.conf['Simulation'][ 'params']['numbasis'],
-                              sim2.conf['Simulation']['params']['numbasis'])
-                # Get the array containing the magnitude of the difference vector at each point
-                # in space
-                mag_diff_vec = self.diff_sq(vecs1, vecs2)
-                # Normalize the magnitude squared of the difference vector by the magnitude squared of
-                # the local electric field of the comparison simulation at
-                # each point in space
-                if len(mag_diff_vec) != len(normvec):
-                    self.log.error("The normalization vector has an incorrect number of elements!!!")
-                    raise ValueError
-                norm_mag_diff = mag_diff_vec / normvec
-                # Compute the average of the normalized magnitude of all
-                # the difference vectors
-                avg_diffvec_mag = np.sum(norm_mag_diff) / norm_mag_diff.size
-                errfile.write('%i,%f\n' % (sim2.conf['Simulation']['params']['numbasis'],
-                                           avg_diffvec_mag))
-                sim2.clear_data()
-            ref_sim.clear_data()
+    def difference_squared(self, field, layer_name, sim1, sim2):
+        """
+        Computes the difference squared between the given field in the given
+        layer of two simulations at each point in space, for example normE or
+        genRate. If any vector components are passed in, this is also handled
+        appropriately (for example Ex, Ey, or Ez)
+
+        :param field: The field or field component you wish to compare
+        :type field: str
+        :param layer_name: The name of the layer in which you wish to make the
+        comparison
+        :type layer_name: str
+        :return: An array containing the difference squared at each point in
+        space.
+        :rtype: np.ndarray
+        """
+
+        if field in ('Ex', 'Ey', 'Ez'):
+            field = '{}_{}'.format(layer_name, field)
+        self.log.info('Running the difference squared computation for quantity %s', field)
+        layer_obj = self.layers[layer_name]
+        # Set the reference sim
+        # Get the comparison vector
+        ref_arr = sim1.data[field][layer_obj.get_slice()]
+        # For all other sims in the groups, compare to best estimate
+        # and write to error file
+        comp_arr = sim2.data[field][layer_obj.get_slice()]
+        # Get the array containing the magnitude of the difference vector
+        # at each point in space
+        diff_sq = np.absolute(ref_arr - comp_arr)**2
+        return diff_sq
 
     def global_error(self, field, exclude=False):
         """Computes the global error between the vector fields of two simulations. This is the sum
@@ -1719,7 +1705,7 @@ class SimulationGroup:
         if not tuple(self.grouped_against) == ('Simulation', 'params', 'frequency'):
             raise ValueError('Can only compute photocurrent density when '
                              'grouped against frequency')
-         
+
 
         base = os.path.expandvars(self.sims[0].conf['General']['results_dir'])
         period = self.sims[0].conf['Simulation']['params']['array_period']

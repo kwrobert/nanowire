@@ -617,3 +617,20 @@ def get_public_ip(iface, version=4):
     else:
         raise ValueError("version must be either 4 or 6")
     return ipadd
+
+
+def sorted_dict(adict, reverse=False):
+    """
+    Returns a sorted version of a dictionary sorted by the 'order' key.
+    Used to sort layers, geometric shapes into their proper physical order.
+    Can pass in a kwarg to reverse the order if desired
+    """
+
+    try:
+        sorted_layers = OrderedDict(sorted(adict.items(),
+                                           key=lambda tup: tup[1]['order'],
+                                           reverse=reverse))
+    except KeyError:
+        raise KeyError('The dictionary you are attempting to sort must '
+                       'itself contain a dictionary that has an "order" key')
+    return sorted_layers

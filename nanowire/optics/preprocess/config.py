@@ -1,24 +1,15 @@
 import os
-import numpy
-# import logging
-import ruamel.yaml as yaml
+import posixpath
 import re
+from dicthash import generate_hash_from_dict
 from collections import MutableMapping, OrderedDict
-from copy import deepcopy
-import pprint
-import conff
-import delimited
-from nanowire.optics.utils.utils import get_combos, do_profile
-from line_profiler import LineProfiler
-
-
-
-def numpy_float64_representer(dumper, data):
-    node = dumper.represent_scalar(u'tag:yaml.org,2002:float',
-                                   data.__repr__())
-    return node
-
-yaml.add_representer(numpy.float64, numpy_float64_representer)
+import yaml
+from yaml import load as yload, dump as ydump
+try:
+    from yaml import CLoader as Loader, CDumper as Dumper
+except ImportError:
+    from yaml import Loader, Dumper
+import json
 
 
 def get_env_variable(match):
@@ -33,304 +24,93 @@ def get_env_variable(match):
     return res
 
 
-class Config(MutableMapping):
-    """An object to represent the simulation config that behaves like a dict.
-    It can be initialized with a path, or an actual python data structure as
-    with the usual dict but has some extra convenience methods"""
+def splitall(path):
+    """
+    Get each individual component in a path separated by forward slashes.
+    Relative paths are normalized first.
 
-    def __init__(self, path=None, data=None, raw_text=None):
-        # self.log = logging.getLogger(name='config')
-        # self.log.debug('CONFIG INIT')
-        if path:
-            self.data = self._parse_file(path)
-        elif raw_text:
-            self.data = yaml.load(raw_text, Loader=yaml.CLoader)
+    :param path: A slash separated path /like/this/../here
+    :type path: str
+
+    :return: A list of all the parts in the path
+    :rtype: list
+    """
+
+    path = posixpath.normpath(path.strip('/'))
+    allparts = []
+    while True:
+        parts = posixpath.split(path)
+        if parts[1] == path:  # sentinel for relative paths
+            allparts.insert(0, parts[1])
+            break
         else:
-            self.data = {}
-            self.update(dict(data))
-        # self._update_params()
-        # self.dep_graph = {}
-        # self.resolved = False
+            path = parts[0]
+            allparts.insert(0, parts[1])
+    return allparts
 
-    def _parse_file(self, path):
-        """Parse the YAML file provided at the command line"""
-        # self.log.info('Parsing YAML file')
-        path = os.path.expandvars(path)
-        with open(path, 'r') as cfile:
-            text = cfile.read()
-        conf = yaml.load(text, Loader=yaml.CLoader)
-        return conf
 
-    def expand_vars(self, in_table=None, old_key=None, update=True):
-        """
-        Recurse through a dictionary and expand environment variables found in
-        any string values.
+def find_lists(o, keypath=[], list_locs=None, lists=None):
+    """
+    Find all lists in a dictionary recursively
+    """
 
-        If in_table is not provided, the self.data dict will be recursed
-        through by default, updated in place and also returned.
-
-        If in_table is provided, that dictionary will be recursed through,
-        updated, and returned.
-
-        If update=False, the relevant table will not be updated, but instead
-        will be copied and a new dictionary will be returned. The original dict
-        will remain unmodified
-        """
-        if in_table:
-            t = in_table
-        else:
-            t = self.data
-        if not update:
-            t = deepcopy(t)
-        for key, value in t.items():
-            # If we get a dict, recurse
-            if isinstance(value, dict):
-                if old_key:
-                    new_key = '%s.%s' % (old_key, key)
-                else:
-                    new_key = key
-                self.expand_vars(in_table=value, old_key=new_key)
-            elif isinstance(value, str):
-                # If we get string, first replace environment variables
-                value = re.sub('\$([A-z0-9-_]+)', get_env_variable, value)
-                t[key] = value
-        return t
-
-    def _find_references(self, in_table=None, old_key=None):
-        """Build out the dependency graph of references in the config. Will
-        also resolve any environment variable references in any config items of
-        string type. Environment variable references must begin with a dollar
-        sign and can contain alphanumeric characters, dashes, or underscores.
-        Everything from the dollar sign up to the first character not in the
-        specified groups will be replaced with the environment variable
-        matching the parsed string after the dollar sign."""
-        if in_table:
-            t = in_table
-        else:
-            t = self.data
-        for key, value in t.items():
-            # If we got a dict back, recurse
-            if isinstance(value, dict):
-                if old_key:
-                    new_key = '%s.%s' % (old_key, key)
-                else:
-                    new_key = key
-                self._find_references(in_table=value, old_key=new_key)
-            elif isinstance(value, str):
-                # Next check for matches to the replacement string and loop
-                # through all of then
-                matches = re.findall('%\(([^)]+)\)s', value)
-                new_key = '%s.%s' % (old_key, key)
-                for match in matches:
-                    # If we've already found this reference before, increment
-                    # its reference count and update the list of keys referring
-                    # to it
-                    if match in self.dep_graph:
-                        self.dep_graph[match]['ref_count'] += 1
-                        self.dep_graph[match]['ref_by'].append(new_key)
-                    else:
-                        self.dep_graph[match] = {
-                            'ref_count': 1, 'ref_by': [new_key]}
-
-    def build_dependencies(self):
-        """
-        Build out the dependency graph that determines which other config item a
-        particular config item refers to, and which config items refer to it.
-        We can then use this graph to determine which substitutions we need to
-        perform first when calling interpolate
-        """
-        # First we find all the references and the exact location(s) in the config
-        # that each reference ocurrs at
-        self._find_references()
-        # Next we determine if any of the things we refer to in the dependency
-        # graph have backticks, meaning they must be evaluated before the
-        # things that refer to them actually resolve their value
-        for path in self.dep_graph.keys():
-            key_seq = path.split('.')
-            val = self.getfromseq(key_seq)
-            if isinstance(val, str) and (val[0] == '`' and val[-1] == '`'):
-                self.dep_graph[path].update({'evaluated': False})
+    list_locs = list_locs if list_locs is not None else []
+    lists = lists if lists is not None else []
+    if isinstance(o, dict):
+        for key in o.keys():
+            loc = keypath + [key]
+            val = o[key]
+            if isinstance(val, list):
+                list_locs.append(loc)
+                lists.append(val)
+            elif isinstance(val, dict):
+                find_lists(val, keypath=loc, list_locs=list_locs, lists=lists)
             else:
-                self.dep_graph[path].update({'evaluated': True})
+                continue
+    return list_locs, lists
 
-        # Now we build out the "refers_to" entry for each reference to see if a
-        # reference at one place in the table refers to some other value
-        # For each reference we found
-        for ref, data in self.dep_graph.items():
-            # Loop through all the other references. If the above reference exists
-            # in the "ref_by" table, we know the above reference refers to another
-            # value and we need to resolve that value first. Note we also do this
-            # for ref itself so we can catch circular references
-            for other_ref, its_data in self.dep_graph.items():
-                if ref in its_data['ref_by']:
-                    if other_ref == ref:
-                        raise ValueError('There is a circular reference in your'
-                                         ' config file at %s' % ref)
-                    else:
-                        if 'ref_to' in data:
-                            data['ref_to'].append(other_ref)
-                        else:
-                            data['ref_to'] = [other_ref]
-            # Nothing has been resolved at this poing
-            data['resolved'] = False
 
-    def _resolve(self, ref):
-        ref_data = self.dep_graph[ref]
-        # Retrieve the value of this reference
-        key_seq = ref.split('.')
-        repl_val = self[key_seq]
-        # Loop through all the locations that contain this reference
-        for loc in ref_data['ref_by']:
-            # Get the string we need to run the replacement on
-            rep_seq = loc.split('.')
-            entry_to_repl = self[rep_seq]
-            # Run the actual replacement and set the value at this
-            # location to the new string
-            pattern = '%\({}\)s'.format(ref)
-            rep_par = re.sub(pattern, str(repl_val), entry_to_repl)
-            self[rep_seq] = rep_par
+class Config(MutableMapping):
+    def __init__(self, *args, skip_keys=None, **kwargs):
+        self._d = dict(*args, **kwargs)
+        self.skip_keys = skip_keys if skip_keys is not None else []
+        self.ID = self.gen_id()
 
-    def _check_resolved(self, refs):
-        """Checks if a list of references have all been resolved"""
-        bools = []
-        for ref in refs:
-            bools.append(self.dep_graph[ref]['resolved'])
-        return all(bools)
-
-    def _check_evaled(self, refs):
-        """Checks if a list of references have all been evaluated"""
-        bools = []
-        for ref in refs:
-            bools.append(self.dep_graph[ref]['evaluated'])
-        return all(bools)
-
-    def interpolate(self):
-        """Scans the config for any reference strings and resolves them to
-        their actual values by retrieving them from elsewhere in the config"""
-        # self.log.debug('Interpolating replacement strings')
-        self.build_dependencies()
-        while not self.resolved:
-            # self.log.debug('CONFIG NOT RESOLVED, MAKING PASS')
-            # Now we can actually perform any resolutions
-            for ref, ref_data in self.dep_graph.items():
-                # Has this config item already been resolved?
-                is_resolved = ref_data['resolved']
-                if not is_resolved:
-                    if 'ref_to' not in ref_data:
-                        # self.log.debug('NO REFERENCES, RESOLVING')
-                        # Before resolving all the places in the config
-                        # that where this reference occurs, we first need
-                        # to evaluate value at this path so we don't
-                        # resolve references to this path with a string
-                        # surrounded in backticks
-                        evaled = ref_data['evaluated']
-                        if not evaled:
-                            key_seq = ref.split('.')
-                            val = self.getfromseq(key_seq)
-                            res = self.eval_expr(val)
-                            self.setfromseq(key_seq, res)
-                            self.dep_graph[ref]['evaluated'] = True
-                        self._resolve(ref)
-                        self.dep_graph[ref]['resolved'] = True
-                    else:
-                        # If all the locations this reference points to are
-                        # resolved and evaluated, then we can go ahead and
-                        # resolve this one
-                        if self._check_resolved(ref_data['ref_to']) and self._check_evaled(ref_data['ref_to']):
-                            evaled = ref_data['evaluated']
-                            if not evaled:
-                                key_seq = ref.split('.')
-                                val = self.getfromseq(key_seq)
-                                res = self.eval_expr(val)
-                                self.setfromseq(key_seq, res)
-                                self.dep_graph[ref]['evaluated'] = True
-                            self._resolve(ref)
-                            self.dep_graph[ref]['resolved'] = True
-            self.resolved = self._check_resolved(self.dep_graph.keys())
-
-    def eval_expr(self, expr_str):
+    def __getitem__(self, k):
         """
-        Evaluate the provided expression string and return the result
+        This override allows us to get a nested value in a dict using a forward
+        slash separated string
         """
-        expr = expr_str.strip('`')
-        result = eval(expr)
-        return result
 
-    def evaluate(self, in_table=None, old_key=None):
+        parts = self._get_parts(k)
+        return self.getfromseq(parts)
+
+    def __setitem__(self, k, v):
         """
-        Evaluates any expressions surrounded in back ticks
+        This setup allows setting a value inside a nested dictionary using
+        either a slash separated string or a list/tuple with the usual []
+        operator.
         """
-        if in_table:
-            t = in_table
+
+        parts = self._get_parts(k)
+        self.setfromseq(parts, v)
+        self._update_id()
+
+    def __delitem__(self, k):
+        parts = self._get_parts(k)
+        self.delfromseq(parts)
+        self._update_id()
+
+    def _get_parts(self, k):
+        if isinstance(k, str):
+            parts = splitall(k)
+
+        elif isinstance(k, (tuple, list)):
+            parts = k
         else:
-            t = self.data
-        for key, value in t.items():
-            # If we got a table back, recurse
-            if isinstance(value, dict):
-                if old_key:
-                    new_key = '%s.%s' % (old_key, key)
-                else:
-                    new_key = key
-                self.evaluate(value, new_key)
-            elif isinstance(value, str):
-                if value[0] == '`' and value[-1] == '`':
-                    result = self.eval_expr(value)
-                    key_seq = old_key.split('.')
-                    key_seq.append(key)
-                    self.setfromseq(key_seq, result)
-
-
-    def _update_params(self):
-        # self.log.info('Updating params')
-        self.variable = []
-        self.variable_thickness = []
-        self.optimized = []
-
-    def __getitem__(self, key):
-        """This setup allows us to get a value using a sequence with the usual
-        [] operator"""
-        # self.log.debug('Getting key: {}'.format(key))
-        if isinstance(key, tuple):
-            val = self.getfromseq(key)
-        elif isinstance(key, list):
-            val = self.getfromseq(key)
-        else:
-            val = self.data[key]
-        # if isinstance(val, str):
-        #     # If we get string, first replace environment variables
-        #     val = re.sub('\$([A-z0-9-_]+)', get_env_variable, val)
-        # elif isinstance(val, dict):
-        #     val = self.expand_vars(in_table=val, update=False)
-        return val
-
-    def __setitem__(self, key, value):
-        """This setup allows us to set a value using a sequence with the usual
-        [] operator. It also updates the parameter lists to reflect any
-        potential changes"""
-        if isinstance(key, tuple):
-            self.setfromseq(key, value)
-        elif isinstance(key, list):
-            self.setfromseq(key, value)
-        else:
-            self.data[key] = value
-
-    def __delitem__(self, key):
-        if isinstance(key, tuple):
-            self.delfromseq(key)
-        elif isinstance(key, list):
-            self.delfromseq(key)
-        else:
-            del self.data[key]
-
-    def __iter__(self):
-        return iter(self.data)
-
-    def __len__(self):
-        return len(self.data)
-
-    def __str__(self):
-        """We'll just borrow the string representation from dict"""
-        return dict.__str__(self.data)
+            raise ValueError('Key must be a slash separated string, list, '
+                             'or tuple')
+        return parts
 
     def getfromseq(self, keyset):
         """
@@ -338,49 +118,155 @@ class Config(MutableMapping):
         at the end of the sequence of keys
         """
 
-        section = self.data
-        for key in keyset:
-            section = section[key]
-        return section
+        try:
+            ret = self._d
+            for key in keyset:
+                ret = ret[key]
+        except KeyError as ex:
+            key = ex.args[0]
+            msg = 'Key {} missing from path {}'.format(key, keyset)
+            ex.args = (msg,)
+            raise
+        return ret
 
     def setfromseq(self, keyset, value):
-        """A convenience method to set the a value in the config given a sequence of keys"""
-        sect = self.getfromseq(keyset[:-1])
+        """
+        A convenience method to set the a value in the config given a sequence
+        of keys
+        """
+        sect = self._d
+        for key in keyset[:-1]:
+            if key in sect:
+                sect = sect[key]
+            else:
+                sect[key] = {}
+                sect = sect[key]
         sect[keyset[-1]] = value
 
     def delfromseq(self, keyset):
-        """Deletes the section of the config located at the end of a sequence
-        of keys"""
+        """
+        Deletes the section of the config located at the end of a sequence
+        of keys
+        """
         del self.getfromseq(keyset[:-1])[keyset[-1]]
 
-    def copy(self):
-        """Returns a deep copy of the self.data dict"""
-        return deepcopy(self.data)
+    def __iter__(self):
+        return iter(self._d)
 
-    def write(self, path):
+    def __len__(self):
+        return len(self._d)
+
+    def __str__(self):
+        return str(self._d)
+
+    def __repr__(self):
+        return repr(self._d)
+
+    def gen_id(self):
+        # Just return some simple string for an empty dict
+        if not self._d:
+            return 'empty'
+        if self.skip_keys:
+            return generate_hash_from_dict(self._d, blacklist=self.skip_keys)
+        else:
+            return generate_hash_from_dict(self._d)
+
+    def _update_id(self):
+        self.ID = self.gen_id()
+
+    def flatten(self, branch=None, flattened=None, keypath=''):
+        """
+        Returned a flattened form of the nested data structure. The keys will
+        be the full path to the item's location in the nested data structure,
+        and the value will be the value at that location
+        """
+
+        flattened = flattened if flattened is not None else {}
+        if keypath:
+            branch = branch if branch is not None else self._d[keypath]
+        else:
+            branch = branch if branch is not None else self._d
+        if isinstance(branch, dict):
+            for key, val in branch.items():
+                newpath = posixpath.join(keypath, key)
+                if isinstance(val, dict):
+                    self.flatten(branch=val, flattened=flattened,
+                                 keypath=newpath)
+                else:
+                    flattened[newpath] = val
+        return flattened
+
+    @classmethod
+    def _to_yaml(cls, dumper, conf):
+        return dumper.represent_dict({'ID': conf.ID,
+                                      'skip_keys': conf.skip_keys,
+                                      '_d': conf._d})
+
+    @classmethod
+    def fromYAML(cls, *args, **kwargs):
+        """
+        Return an instance of a Config object given a raw YAML string or a
+        file-like object containing valid YAML syntax. Handles arbitrary YAML
+        and YAML dumped by another Config object
+        """
+        data = yload(*args, **kwargs)
+        skip_keys = []
+        if 'skip_keys' in data:
+            for item in data['skip_keys']:
+                if isinstance(item, list):
+                    skip_keys.append(tuple(item))
+                else:
+                    skip_keys.append(item)
+            del data['skip_keys']
+        if 'ID' in data and '_d' in data:
+            return cls(data['_d'], skip_keys=skip_keys)
+        else:
+            return cls(data, skip_keys=skip_keys)
+
+    @staticmethod
+    def fromJSON(stream, **kwargs):
+        """
+        Load config from a JSON stream (either string or file-like object)
+        """
+        return json.loads(stream)
+
+    @classmethod
+    def fromFile(cls, path, syntax='yaml', **kwargs):
+        """
+        Load config from a file given a path. File must be in YAML or JSON
+        syntax
+        """
+        syntax = syntax.lower()
+        if syntax not in ('yaml', 'json'):
+            raise ValueError('Can only load from yaml or JSON files')
+        path = os.path.expandvars(path)
+        if not os.path.isfile(path):
+            raise ValueError("Path {} is not a regular file".format(path))
+        d = {'yaml': cls.fromYAML, 'json': cls.fromJSON}
+        with open(path, 'r') as stream:
+            inst = d[syntax](stream, **kwargs)
+        return inst
+
+    def write(self, f):
         """
         Dumps this config object to its YAML representation given a path to a
         file
         """
-        path = os.path.expandvars(path)
-        with open(path, 'w') as out:
-            out.write(yaml.dump(self.data, default_flow_style=False))
-        return
+        if isinstance(f, str):
+            f = os.path.expandvars(f)
+            f = open(f, 'w')
+        ydump(self, stream=f, default_flow_style=False)
 
     def dump(self):
-        """Returns YAML representation of this particular config"""
-        return yaml.dump(self.data, default_flow_style=False)
+        """
+        Returns YAML representation of this particular config
+        """
+        return ydump(self, default_flow_style=False)
 
 
-    def sorted_dict(self, adict, reverse=False):
-        """Returns a sorted version of a dictionary sorted by the 'order' key.
-        Used to sort layers, geometric shapes into their proper physical order.
-        Can pass in a kwarg to reverse the order if desired"""
-        try:
-            sorted_layers = OrderedDict(sorted(adict.items(),
-                                               key=lambda tup: tup[1]['order'],
-                                               reverse=reverse))
-        except KeyError:
-            raise KeyError('The dictionary you are attempting to sort must '
-                           'itself contain a dictionary that has an "order" key')
-        return sorted_layers
+def represent_odict(dumper, data):
+    return dumper.represent_dict(data)
+
+
+yaml.add_representer(OrderedDict, represent_odict)
+yaml.add_representer(Config, Config._to_yaml)

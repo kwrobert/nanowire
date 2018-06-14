@@ -174,7 +174,8 @@ class Config(MutableMapping):
     def _update_id(self):
         self.ID = self.gen_id()
 
-    def flatten(self, branch=None, flattened=None, keypath=''):
+    def flatten(self, branch=None, flattened=None, keypath='',
+                skip_branch=None, sep='/'):
         """
         Returned a flattened form of the nested data structure. The keys will
         be the full path to the item's location in the nested data structure,
@@ -188,10 +189,13 @@ class Config(MutableMapping):
             branch = branch if branch is not None else self._d
         if isinstance(branch, dict):
             for key, val in branch.items():
-                newpath = posixpath.join(keypath, key)
+                newpath = sep.join([keypath, key]).strip(sep)
+                if keypath in skip_branch:
+                    continue
                 if isinstance(val, dict):
                     self.flatten(branch=val, flattened=flattened,
-                                 keypath=newpath)
+                                 keypath=newpath, skip_branch=skip_branch,
+                                 sep=sep)
                 else:
                     flattened[newpath] = val
         return flattened

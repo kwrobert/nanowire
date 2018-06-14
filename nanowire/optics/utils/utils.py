@@ -1,5 +1,6 @@
 import sys
 import os
+import posixpath
 import six
 import hashlib
 import logging
@@ -7,6 +8,7 @@ import itertools
 import netifaces
 import tempfile as tmp
 import numpy as np
+import tables as tb
 import scipy.integrate as intg
 from scipy import interpolate
 from scipy import constants
@@ -636,3 +638,70 @@ def sorted_dict(adict, reverse=False):
         raise KeyError('The dictionary you are attempting to sort must '
                        'itself contain a dictionary that has an "order" key')
     return sorted_layers
+
+
+def get_numpy_dtype(data, skip_keys=[], keypath=''):
+    """
+    Given a dict, generate a nested numpy dtype
+
+    :param skip_keys: A list of slash separated paths that should be skipped
+    when constructing a nested dtype
+    """
+
+    # Normalize all the paths in skip_keys
+    skip_keys = [posixpath.normpath(p.strip('/')) for p in skip_keys]
+    fields = []
+    for (key, value) in data.items():
+        newpath = posixpath.join(keypath, key)
+        if newpath in skip_keys:
+            continue
+        if isinstance(value, str):
+            value += ' ' * (64 - (len(value) % 64))
+            value = value.encode('utf-8')
+        if value is None:
+            value = bool(value)
+
+        if isinstance(value, dict):
+            fields.append((key, get_numpy_dtype(value, keypath=newpath)))
+        else:
+            value = np.array(value)
+            fields.append((key, '%s%s' % (value.shape, value.dtype)))
+    return np.dtype(fields)
+
+
+def get_pytables_desc(data, skip_keys=[], keypath=''):
+    """
+    Given a dict, generate a dictionary of potentially nested PyTables Column
+    objects
+
+    :param skip_keys: A list of slash separated paths that should be skipped
+    when constructing the description
+    """
+
+    # Normalize all the paths in skip_keys
+    skip_keys = [posixpath.normpath(p.strip('/')) for p in skip_keys]
+    fields = {}
+    for (key, value) in data.items():
+        newpath = posixpath.join(keypath, key)
+        if newpath in skip_keys:
+            continue
+        if isinstance(value, str):
+            value += ' ' * (64 - (len(value) % 64))
+            value = value.encode('utf-8')
+        if value is None:
+            value = bool(value)
+
+        if isinstance(value, dict):
+            fields[key] = get_numpy_dtype(value, keypath=newpath)
+        else:
+            value = np.array(value)
+            fields[key] = tb.Col.from_dtype(value.dtype)
+    return fields
+
+def _recurse_row(row, base, data):
+    for (key, value) in data.items():
+        new = base + key
+        if isinstance(value, dict):
+            _recurse_row(row, new + '/', value)
+        else:
+            row[new] = value

@@ -2,17 +2,16 @@ import os
 import conff
 import posixpath
 import itertools
-import pprint
-from collections import MutableMapping, OrderedDict
-from ..utils.utils import get_combos, do_profile, make_hash
+import tables as tb
+from ..utils.utils import get_pytables_desc
 from .config import Config, find_lists
-from line_profiler import LineProfiler
-from yaml import load as yload, dump as ydump
-try:
-    from yaml import CLoader as Loader, CDumper as Dumper
-except ImportError:
-    from yaml import Loader, Dumper
-import json
+# from line_profiler import LineProfiler
+# from yaml import load as yload, dump as ydump
+# try:
+#     from yaml import CLoader as Loader, CDumper as Dumper
+# except ImportError:
+#     from yaml import Loader, Dumper
+# import json
 
 
 def fn_pint_quantity(*args):
@@ -62,8 +61,8 @@ class Preprocessor:
 
         locs, lists = find_lists(self.in_pars)
         paths = [posixpath.join(*l) for l in locs]
-        combos = itertools.product(*lists)
-        # print(list(combos))
+        combos = list(itertools.product(*lists))
+        print('combo len: ', len(combos))
         parser = conff.Parser(fns={'Q': fn_pint_quantity})
         names = Config({'P': self.in_pars})
         for combo in combos:
@@ -92,3 +91,47 @@ class Preprocessor:
             if not os.path.isdir(outdir):
                 os.makedirs(outdir)
             conf.write(outfile)
+
+    def add_to_database(self, db_path, tb_path='/', tb_name='simulations',
+                        skip_keys=None):
+        """
+        Add the generated configs to table located immediately beneath path
+        `tb_path` with name 'tb_name' inside a PyTables HDF5 file located on
+        the filesystem at `db_path`.
+
+        If there is no file located at `db_path`, it is created. If no table
+        with matching location exists inside the HDF5 file, all intermediate
+        groups along the path and the table at the end of the path are created
+        """
+
+        skip_keys = skip_keys if skip_keys is not None else []
+        # Generate table description
+        flat_conf = self.confs[0].flatten(skip_branch=skip_keys, sep='__')
+        desc_dict = {'ID': self.confs[0].ID}
+        desc_dict.update(flat_conf)
+        desc = get_pytables_desc(desc_dict, skip_keys=skip_keys)
+        desc['ID']._v_pos = 0
+        # Open in append mode!
+        hdf = tb.open_file(db_path, mode='a')
+        try:
+            table = hdf.create_table(where=tb_path, name=tb_name,
+                                     description=desc, createparents=True)
+            existing_ids = []
+        # Table already exists
+        except tb.NodeError:
+            table = hdf.get_node(where=tb_path, name=tb_name,
+                                 classname='Table')
+            existing_ids = table.read(field='ID')
+        conf_row = table.row
+        print(len(self.confs))
+        for conf in self.confs:
+            if conf.ID.encode('utf-8') in existing_ids:
+                print('ID already in table')
+                continue
+            flat = conf.flatten(skip_branch=skip_keys, sep='__')
+            conf_row['ID'] = conf.ID
+            for k, v in flat.items():
+                conf_row[k] = v
+            conf_row.append()
+        table.flush()
+        hdf.close()

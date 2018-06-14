@@ -1,11 +1,11 @@
 import os
 import conff
-from conff.utils import Munch2, munchify
 import posixpath
 import itertools
 import pprint
+from collections import MutableMapping, OrderedDict
 from ..utils.utils import get_combos, do_profile, make_hash
-from dicthash import generate_hash_from_dict
+from .config import Config, find_lists
 from line_profiler import LineProfiler
 from yaml import load as yload, dump as ydump
 try:
@@ -13,92 +13,6 @@ try:
 except ImportError:
     from yaml import Loader, Dumper
 import json
-
-class Config(Munch2):
-    def __init__(self, *args, skip_keys=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.skip_keys = skip_keys if skip_keys is not None else []
-        # self.skip_keys = skip_keys + ['ID'] if skip_keys is not None else ['ID']
-        self.ID = self.gen_id()
-
-    def __setitem__(self, k, v):
-        super().__setitem__(k, v)
-        self.gen_id()
-
-    def __delitem__(self, k, v):
-        super().__setitem__(k, v)
-        self.gen_id()
-
-    def gen_id(self):
-        return generate_hash_from_dict(self._d, blacklist=self.skip_keys)
-
-    def _update_id(self):
-        self.ID = self.gen_id()
-
-    @staticmethod
-    def fromYAML(*args, **kwargs):
-        return munchify(yload(*args, **kwargs), factory=Config)
-
-    @staticmethod
-    def fromJSON(stream, **kwargs):
-        """
-        Load config from a JSON stream (either string or file-like object)
-        """
-        return munchify(json.loads(stream), factory=Config)
-
-    @classmethod
-    def fromFile(cls, path, syntax='yaml', **kwargs):
-        """
-        Load config from a file given a path. File must be in YAML or JSON
-        syntax
-        """
-        syntax = syntax.lower()
-        if syntax not in ('yaml', 'json'):
-            raise ValueError('Can only load from yaml or JSON files')
-        path = os.path.expandvars(path)
-        if not os.path.isfile(path):
-            raise ValueError("Path {} is not a regular file".format(path))
-        d = {'yaml': cls.fromYAML, 'json': cls.fromJSON}
-        with open(path, 'r') as stream:
-            inst = d[syntax](stream, **kwargs)
-        return inst
-
-    def write(self, path):
-        """
-        Dumps this config object to its YAML representation given a path to a
-        file
-        """
-        path = os.path.expandvars(path)
-        with open(path, 'w') as out:
-            ydump(self, out, default_flow_style=False)
-        return
-
-    def dump(self):
-        """
-        Returns YAML representation of this particular config
-        """
-        return ydump(self, default_flow_style=False)
-
-
-def find_lists(o, keypath=[], list_locs=None, lists=None):
-    """
-    Find all lists in a dictionary recursively
-    """
-
-    list_locs = list_locs if list_locs is not None else []
-    lists = lists if lists is not None else []
-    if isinstance(o, dict):
-        for key in o.keys():
-            loc = keypath + [key]
-            val = o[key]
-            if isinstance(val, list):
-                list_locs.append(loc)
-                lists.append(val)
-            elif isinstance(val, dict):
-                find_lists(val, keypath=loc, list_locs=list_locs, lists=lists)
-            else:
-                continue
-    return list_locs, lists
 
 
 def fn_pint_quantity(*args):
@@ -139,7 +53,6 @@ class Preprocessor:
         self.optimized = []
         self.confs = []
 
-
     def generate_configs(self):
         """
         Generate all the unique Config objects containing a single set of
@@ -152,7 +65,7 @@ class Preprocessor:
         combos = itertools.product(*lists)
         # print(list(combos))
         parser = conff.Parser(fns={'Q': fn_pint_quantity})
-        names = Munch2.fromDict({'P': self.in_pars})
+        names = Config({'P': self.in_pars})
         for combo in combos:
             for i, val in enumerate(combo):
                 path = posixpath.join('P', paths[i])

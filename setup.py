@@ -73,13 +73,12 @@ setup(
     maintainer_email='kyle.wesley@me.com',
     url='https://github.com/kwrobert/nanowire',
     license='MIT/Apache-2.0',
-    scripts=['nanowire/optics/scripts/run_optics', 
-             'nanowire/optics/scripts/process_optics'],
-    keywords=[
-        '',
-    ],
+    entry_points='''
+        [console_scripts]
+        optics=nanowire/optics/scripts/optics:optics
+    ''',
+    keywords=['', ],
     include_package_data=True,
-
     classifiers=[
         'Development Status :: 4 - Beta',
         'Intended Audience :: Developers',

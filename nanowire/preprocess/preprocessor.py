@@ -6,13 +6,6 @@ import tables as tb
 import logging
 from ..utils.utils import get_pytables_desc
 from .config import Config, find_lists
-# from line_profiler import LineProfiler
-# from yaml import load as yload, dump as ydump
-# try:
-#     from yaml import CLoader as Loader, CDumper as Dumper
-# except ImportError:
-#     from yaml import Loader, Dumper
-# import json
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())

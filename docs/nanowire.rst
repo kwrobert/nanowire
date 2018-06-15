@@ -7,6 +7,8 @@ Subpackages
 .. toctree::
 
     nanowire.optics
+    nanowire.preprocess
+    nanowire.scripts
 
 Module contents
 ---------------

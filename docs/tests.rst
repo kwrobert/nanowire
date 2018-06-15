@@ -4,32 +4,40 @@ tests package
 Submodules
 ----------
 
-tests.dict\_attr module
------------------------
+tests\.dict\_attr module
+------------------------
 
 .. automodule:: tests.dict_attr
     :members:
     :undoc-members:
     :show-inheritance:
 
-tests.group module
-------------------
+tests\.group module
+-------------------
 
 .. automodule:: tests.group
     :members:
     :undoc-members:
     :show-inheritance:
 
-tests.infiniteslab module
--------------------------
+tests\.infiniteslab module
+--------------------------
 
 .. automodule:: tests.infiniteslab
     :members:
     :undoc-members:
     :show-inheritance:
 
-tests.test\_vacuum module
--------------------------
+tests\.test\_config module
+--------------------------
+
+.. automodule:: tests.test_config
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+tests\.test\_vacuum module
+--------------------------
 
 .. automodule:: tests.test_vacuum
     :members:

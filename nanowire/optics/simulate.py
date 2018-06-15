@@ -17,37 +17,37 @@ import scipy.optimize as optz
 import tables as tb
 # from tables.node import filenode
 import time
-import ruamel.yaml as yaml
 import logging
 import traceback
 # import logging_tree
 import S4
 import dispy
 import scipy.interpolate as spi
-import scipy.integrate as intg
 import scipy.constants as constants
 # import gc3libs
 # from gc3libs.core import Core, Engine
-
+from sympy import Circle
 from lxml import etree
 from lxml.builder import E
 # get our custom config object and the logger function
 # from . import postprocess as pp
-from .data_manager import HDF5DataManager, NPZDataManager
-from .utils.utils import (
+from .data_manager import HDF5DataManager
+from ..utils.utils import (
     make_hash,
-    get_combos,
     IdFilter,
-    get_incident_amplitude,
+    get_combos,
     find_inds,
     merge_and_sort,
     arithmetic_arange,
     get_public_ip,
     get_public_iface
 )
-from .utils.config import Config
-from .utils.geometry import Layer, get_layers
-
+from .utils.utils import (
+    get_incident_amplitude,
+)
+from ..utils.utils import sorted_dict
+from ..preprocess.config import Config
+from .utils.geometry import get_layers
 
 DISPY_LOOKUP = {dispy.DispyJob.Abandoned: 'Abandoned',
                 dispy.DispyJob.Cancelled: 'Cancelled',
@@ -56,9 +56,6 @@ DISPY_LOOKUP = {dispy.DispyJob.Abandoned: 'Abandoned',
                 dispy.DispyJob.ProvisionalResult: 'ProvisionalResult',
                 dispy.DispyJob.Running: 'Running',
                 dispy.DispyJob.Terminated: 'Terminated'}
-
-# from rcwa_app import RCWA_App
-
 
 # Configure logging for this module
 # Get numeric level safely
@@ -108,38 +105,6 @@ def handle_exception(exc_type, exc_value, exc_traceback):
 sys.excepthook = handle_exception
 
 
-class LogExceptions(object):
-    def __init__(self, callable):
-        self.__callable = callable
-
-    def __call__(self, *args, **kwargs):
-        try:
-            result = self.__callable(*args, **kwargs)
-        except Exception as e:
-            # Here we add some debugging help.
-            log = logging.getLogger(__name__)
-            log.error(traceback.format_exc())
-            # Re-raise the original exception so the Pool worker can clean up.
-            # This kills the parent process if it calls .get or .wait on the
-            # AsyncResult object returned by apply_async
-            # raise
-        # It was fine, give a normal answer
-        return result
-
-
-class LoggingPool(Pool):
-    def apply_async(self, func, args=(), kwds={}, callback=None):
-        return Pool.apply_async(self, LogExceptions(func), args, kwds,
-                                callback)
-
-
-def parse_file(path):
-    """Super simple utility to parse a yaml file given a path"""
-    with open(path, 'r') as cfile:
-        text = cfile.read()
-    conf = yaml.load(text, Loader=yaml.CLoader)
-    return conf
-
 def update_sim(conf, samples, q=None):
     """
     Wrapper for updating field arrays for a simulation. Expects the Config
@@ -152,11 +117,11 @@ def update_sim(conf, samples, q=None):
         conf['General']['z_samples'] = samples
         sim = Simulator(copy.deepcopy(conf))
         sim.setup()
-        log.info('Updating arrays for sim %s', sim.id[0:10])
+        log.info('Updating arrays for sim %s', sim.ID[0:10])
         sim.update_zsamples()
     except:
         trace = traceback.format_exc()
-        msg = 'Sim {} raised the following exception:\n{}'.format(sim.id,
+        msg = 'Sim {} raised the following exception:\n{}'.format(sim.ID,
                                                                   trace)
         log.error(msg)
         # We might encounter an exception before the logger instance for this
@@ -167,72 +132,38 @@ def update_sim(conf, samples, q=None):
             pass
         raise
 
-def run_sim(conf, q=None, skip_hash=False):
+
+def run_sim(conf, output_dir):
     """
-    Actually runs simulation in a given directory. Expects the Config
-    for the simulation as an argument.
+    Runs a single simulation given a Config object representing the
+    configuration for the simulation and a string pointing to a directory the
+    simulation should write its output data to.
+
+    .. note:: It is important that the Config object has the correct structure
+    for the simulation to run properly
+
+    :param conf: A Config object representing the configuration for this
+    particular simulation
+    :type conf: nanowire.preprocess.config.Config
+    :param output_dir: Directory the simulation will write its data to
+    :type output_dir: str
     """
+
     log = logging.getLogger(__name__)
     start = time.time()
-    sim = Simulator(copy.deepcopy(conf), q=q, skip_hash=skip_hash)
+    sim = Simulator(copy.deepcopy(conf))
     try:
-        if not sim.conf.variable_thickness:
-            sim.setup(skip_hash=skip_hash)
-            log.info('Executing sim %s', sim.id[0:10])
-            sim.save_all()
-            # path = osp.join(osp.basename(sim.dir), 'sim.hdf5')
-            # sim.q.put(path, block=True)
-            # sim.mode_solve()
-        else:
-            log.info('Computing a thickness sweep at %s' % sim.id[0:10])
-            orig_id = sim.id[0:10]
-            # Get all combinations of layer thicknesses
-            keys, combos = get_combos(sim.conf, sim.conf.variable_thickness)
-            # Update base directory to new sub directory
-            sim.conf['General']['base_dir'] = sim.dir
-            # Set things up for the first combo
-            first_combo = combos.pop()
-            # First update all the thicknesses in the config. We make a copy of the
-            # list because it gets continually updated in the config object
-            var_thickness = sim.conf.variable_thickness
-            for i, param_val in enumerate(first_combo):
-                keyseq = var_thickness[i]
-                sim.conf[keyseq] = param_val
-            # With all the params updated we can now run substutions and
-            # evaluations in the config that make have referred to some thickness
-            # data, then make the subdir from the sim id and get the data
-            sim.evaluate_config()
-            sim.update_id()
-            try:
-                os.makedirs(sim.dir)
-            except OSError:
-                pass
-            sim.make_logger()
-            subpath = osp.join(orig_id, sim.id[0:10])
-            log.info('Computing initial thickness at %s', subpath)
-            sim.save_all()
-            # path = osp.join(sim.dir, 'data.hdf5')
-            # sim.q.put(path, block=True)
-            # Now we can repeat the same exact process, but instead of rebuilding
-            # the device we just update the thicknesses
-            for combo in combos:
-                for i, param_val in enumerate(combo):
-                    keyseq = var_thickness[i]
-                    sim.conf[keyseq] = param_val
-                sim.update_id()
-                subpath = osp.join(orig_id, sim.id[0:10])
-                log.info('Computing additional thickness at %s', subpath)
-                os.makedirs(sim.dir)
-                sim.save_all(update=True)
-                # path = osp.join(sim.dir, 'data.hdf5')
-                # sim.q.put(path, block=True)
+        sim.setup()
+        log.info('Executing sim %s', sim.ID[0:10])
+        sim.save_all()
+        # sim.mode_solve()
+        sim.clean_sim()
         end = time.time()
         runtime = end - start
-        log.info('Simulation %s completed in %.2f seconds!', sim.id[0:10], runtime)
-        sim.clean_sim()
+        log.info('Simulation %s completed in %.2f seconds!', sim.ID[0:10], runtime)
     except:
         trace = traceback.format_exc()
-        msg = 'Sim {} raised the following exception:\n{}'.format(sim.id,
+        msg = 'Sim {} raised the following exception:\n{}'.format(sim.ID,
                                                                   trace)
         log.error(msg)
         # We might encounter an exception before the logger instance for this
@@ -280,7 +211,7 @@ def run_sim_dispy(conf):
             # rel_dir = osp.basename(sim.dir)
             # sim.dir = rel_dir
             # sim.conf['General']['sim_dir'] = rel_dir
-            log.info('Executing sim %s', sim.id[0:10])
+            log.info('Executing sim %s', sim.ID[0:10])
             sim.save_all()
             for f in os.listdir(sim.dir):
                 fpath = osp.join(sim.dir, f)
@@ -289,8 +220,8 @@ def run_sim_dispy(conf):
             # sim.q.put(path, block=True)
             # sim.mode_solve()
         else:
-            log.info('Computing a thickness sweep at %s' % sim.id[0:10])
-            orig_id = sim.id[0:10]
+            log.info('Computing a thickness sweep at %s' % sim.ID[0:10])
+            orig_id = sim.ID[0:10]
             # Get all combinations of layer thicknesses
             keys, combos = get_combos(sim.conf, sim.conf.variable_thickness)
             # Update base directory to new sub directory
@@ -305,7 +236,7 @@ def run_sim_dispy(conf):
                 sim.conf[keyseq] = param_val
             # With all the params updated we can now run substutions and
             # evaluations in the config that make have referred to some thickness
-            # data, then make the subdir from the sim id and get the data
+            # data, then make the subdir from the sim.ID and get the data
             sim.evaluate_config()
             sim.update_id()
             try:
@@ -313,7 +244,7 @@ def run_sim_dispy(conf):
             except OSError:
                 pass
             sim.make_logger()
-            subpath = osp.join(orig_id, sim.id[0:10])
+            subpath = osp.join(orig_id, sim.ID[0:10])
             log.info('Computing initial thickness at %s', subpath)
             sim.save_all()
             # path = osp.join(sim.dir, 'data.hdf5')
@@ -325,7 +256,7 @@ def run_sim_dispy(conf):
                     keyseq = var_thickness[i]
                     sim.conf[keyseq] = param_val
                 sim.update_id()
-                subpath = osp.join(orig_id, sim.id[0:10])
+                subpath = osp.join(orig_id, sim.ID[0:10])
                 log.info('Computing additional thickness at %s', subpath)
                 os.makedirs(sim.dir)
                 sim.save_all(update=True)
@@ -333,7 +264,7 @@ def run_sim_dispy(conf):
                 # sim.q.put(path, block=True)
         end = time.time()
         runtime = end - start
-        log.info('Simulation %s completed in %.2f seconds!', sim.id[0:10], runtime)
+        log.info('Simulation %s completed in %.2f seconds!', sim.ID[0:10], runtime)
         sim.clean_sim()
     except Exception as e:
         print(traceback.format_exc())
@@ -344,138 +275,6 @@ class LayerFlux(tb.IsDescription):
     layer = tb.StringCol(60, pos=0)
     forward = tb.ComplexCol(pos=1, itemsize=8)
     backward = tb.ComplexCol(pos=2, itemsize=8)
-
-
-
-class FileMerger(threading.Thread):
-
-    def __init__(self, q, write_dir='', group=None, target=None, name=None):
-        super(FileMerger, self).__init__(group=group, target=target, name=name)
-        self.q = q
-        outpath = osp.join(write_dir, 'data.hdf5')
-        print('Main file is %s' % outpath)
-        self.hdf5 = tb.open_file(outpath, 'w')
-
-    def run(self):
-        while True:
-            # print('QSIZE: %i'%self.q.qsize())
-            try:
-                path = self.q.get(False)
-            except Queue.Empty:
-                time.sleep(.1)
-                continue
-            else:
-                if path is None:
-                    self.hdf5.close()
-                    break
-                subfile = tb.open_file(path, 'r')
-                # assert subfile != self.hdf5
-                # # Path is the string to the file we want to merge
-                # # self.hdf5.copy_children(subfile.root, self.hdf5.root,
-                # #                         recursive=True, overwrite=True)
-                # # subfile.copy_children(subfile.root, self.hdf5.root,
-                # #                       recursive=True)
-                for group in subfile.iter_nodes('/', classname='Group'):
-                    # abssubdir, subfname = osp.split(path)
-                    # subdir = osp.basename(abssubdir)
-                    # where = '{}:{}'.format(osp.join(subdir, subfname),
-                    #                        group._v_name)
-                    # print('Saving here', where)
-                    self.hdf5.create_external_link('/', group._v_name, group)
-                subfile.close()
-                #     print('Copying group ', group)
-                #     # self.hdf5.copy_node(group, newparent=self.hdf5.root,
-                #     #                   recursive=True)
-                #     group._f_copy(newparent=self.hdf5.root, recursive=True)
-        return
-
-
-class FileWriter(threading.Thread):
-
-    def __init__(self, q, write_dir='', group=None, target=None, name=None):
-        super(FileWriter, self).__init__(group=group, target=target, name=name)
-        self.q = q
-        outpath = osp.join(write_dir, 'data.hdf5')
-        self.hdf5 = tb.open_file(outpath, 'a')
-
-    def run(self):
-        while True:
-            # print('QSIZE: %i'%self.q.qsize())
-            try:
-                data = self.q.get(False)
-            except Queue.Empty:
-                time.sleep(.1)
-                continue
-            else:
-                if data is None:
-                    self.hdf5.close()
-                    break
-                # Data tuple contains the following:
-                # (string of method name to call, args list, kwargs dict)
-                getattr(self, data[0])(*data[1], **data[2])
-        return
-
-    def create_array(self, *args, **kwargs):
-        """
-        This method is a completely tranparent wrapper around the create_array
-        method of a PyTables HDF5 file object. It passes through any arguments
-        and keyword arguments through untouched
-        """
-        if 'compression' in kwargs and kwargs['compression']:
-            del kwargs['compression']
-            filter_obj = tb.Filters(complevel=4, complib='blosc')
-            try:
-                self.hdf5.create_carray(*args, filters=filter_obj, **kwargs)
-            except tb.NodeError:
-                self.hdf5.remove_node(args[0], name=args[1])
-                self.hdf5.create_carray(*args, filters=filter_obj, **kwargs)
-        else:
-            try:
-                self.hdf5.create_array(*args, **kwargs)
-            except tb.NodeError:
-                self.hdf5.remove_node(args[0], name=args[1])
-                self.hdf5.create_array(*args, **kwargs)
-
-    def create_flux_table(self, flux_dict, *args, **kwargs):
-        """
-        Creates the table of layer fluxes for a simulation. Expects a
-        dictionary whose keys are layer names and whose values are tuples
-        containing the (forward, backward) complex fluxes as arguments. All
-        following args and kwargs are passed through to the create_table method
-        of the PyTables file object
-        """
-
-        try:
-            table = self.hdf5.create_table(*args, description=LayerFlux,
-                                           **kwargs)
-        except tb.NodeError:
-            table = self.hdf5.get_node(args[0], name=args[1],
-                                       classname='Table')
-            table.remove_rows(0)
-        row = table.row
-        for layer, (forward, backward) in flux_dict.items():
-            row['layer'] = layer
-            row['forward'] = forward
-            row['backward'] = backward
-            row.append()
-        table.flush()
-
-    def save_attr(self, attr, path, name):
-        """
-        Save an attribute under the given name to a node in the config file
-        """
-        node = self.hdf5.get_node(path)
-        node._v_attrs[name] = attr
-        # fnode = filenode.new_node(self.hdf5, where=path, name='sim_conf.yml')
-        # fnode.write(conf_str)
-        # fnode.close()
-
-    def clean_file(self, *args, **kwargs):
-        """
-        Deletes everything beneath the root group in the file
-        """
-        for node in self.hdf5.iter_nodes('/'):
-            self.hdf5.remove_node(node._v_pathname, recursive=True)
 
 
 class SimulationManager:
@@ -501,76 +300,6 @@ class SimulationManager:
         #                             logfile=lfile, name=__name__)
         self.log = logging.getLogger(__name__)
         self.sim_confs = []
-        self.write_queue = None
-        self.reader = None
-
-    def make_queue(self):
-        """
-        Makes the queue for transferring data from simulation subprocesses to
-        the FileWriter thread. Sets a maximum size on the queue based on the
-        number of data points in the arrays and the total ram on the system.
-        """
-        total_mem = psutil.virtual_memory().total
-        # If we have hardcoded in a fixed number of samples, we can compute the
-        # number of data points here.
-        samps = [self.gconf['General'][s] for s in ('x_samples',
-                                                    'y_samples',
-                                                    'z_samples')]
-        # We can multiply by the ones that are hardcoded. For those
-        # that are not, we have no way of evaluating the string expressions yet
-        # so we'll just assume that they are 150 points
-        # TODO: Maybe fix this random guessing
-        max_points = 1
-        for samp in samps:
-            if type(samp) == int or type(samp) == float:
-                max_points *= round(samp)
-            else:
-                max_points *= 150
-        # Numpy complex128 consists of two 64 bit numbers, plus some overhead.
-        # So 16 bytes + 8 bytes of overhead to be safe
-        arr_mem = max_points*24
-        # Subtract a gigabyte from total system memory to leave safety room
-        maxsize = round((total_mem-(1024**3))/arr_mem)
-        self.log.info('Maximum Queue Size: %i', maxsize)
-        manager = mp.Manager()
-        # We can go ahead and use maxsize directly because we left safety space
-        # and there will also be items on the queue that are not massive arrays
-        # and thus take up less space
-        self.write_queue = manager.Queue(maxsize=maxsize)
-
-    def make_listener(self):
-        """
-        Sets up the thread that listens to a queue for requests to write data
-        to an HDF5 file. This prevents multiple subprocesses from attempting to
-        write data to the HDF5 file at the same time
-        """
-
-        self.log.debug('Making listener')
-        if self.write_queue is None:
-            self.make_queue()
-        basedir = self.gconf['General']['base_dir']
-        self.reader = FileMerger(self.write_queue, write_dir=basedir)
-        # self.reader = FileWriter(self.write_queue, write_dir=basedir)
-        self.reader.start()
-
-    def make_confs(self):
-        """Make all the configuration dicts for each parameter combination"""
-        self.log.info('Constructing Config objects ...')
-        locs, combos = get_combos(self.gconf, self.gconf.variable)
-        for combo in combos:
-            # Make a copy of the global config for this parameter combos. This copy
-            # represents an individual simulation
-            sim_conf = self.gconf.copy()
-            if 'Postprocessing' in sim_conf:
-                del sim_conf['Postprocessing']
-            # Now we just overwrite all the variable parameters with their new
-            # fixed values. Note that itertools.product is so wonderful and
-            # nice that it preserves the order of the values in every combo
-            # such that the combo values always line up with the proper
-            # parameter name
-            for i, combo in enumerate(combo):
-                sim_conf[self.gconf.variable[i]] = combo
-            self.sim_confs.append(sim_conf)
 
     def load_confs(self):
         """
@@ -612,25 +341,9 @@ class SimulationManager:
 
         if self.gconf['General']['execution'] == 'serial':
             self.log.info('Executing sims serially')
-            # Make the write queue, then instanstiate and run the thread that
-            # pulls data from the queue and writes to the HDF5 file
-            # if self.gconf['General']['save_as'] == 'hdf5':
-            #     self.make_listener()
-            # else:
-            #     self.make_queue()
             for conf in self.sim_confs:
                 func(conf, q=self.write_queue)
-            # self.write_queue.put(None, block=True)
-            # if self.reader is not None:
-            #     self.log.info('Joining FileWriter thread')
-            #     self.reader.join()
         elif self.gconf['General']['execution'] == 'parallel':
-            # if self.gconf['General']['save_as'] == 'hdf5':
-            #     self.make_listener()
-            # else:
-            #     self.make_queue()
-            # All this crap is necessary for killing the parent and all child
-            # processes with CTRL-C
             self.log.info('Total sims to execute: %i', len(self.sim_confs))
             num_procs = self.gconf['General']['num_cores']
             if num_procs > len(self.sim_confs):
@@ -707,13 +420,6 @@ class SimulationManager:
             except KeyboardInterrupt:
                 pool.terminate()
                 pool.join()
-            # self.write_queue.put(None, block=True)
-            # if self.reader is not None:
-            #     self.log.info('Joining FileWriter thread')
-            #     self.reader.join()
-            # for res in results:
-            #     print(res)
-            #     print(res.get())
         elif self.gconf['General']['execution'] == 'dispy':
             self.log.info('Executing jobs using dispy cluster')
             self.dispy_submit()
@@ -831,19 +537,19 @@ class SimulationManager:
                     elif conv_status == 'unconverged':
                         conv_dict[freq] = (False, numbasis)
             for sim in sims:
-                freq = str(sim.conf['Simulation']['params']['frequency'])
+                freq = str(sim.conf['Simulation']['frequency'])
                 conv, numbasis = conv_dict[freq]
                 # Turn off adaptive convergence and update the number of basis
                 # terms
                 if conv:
                     self.log.info('Frequency %s converged at %s basis terms', freq, numbasis)
                     sim.conf['General']['adaptive_convergence'] = False
-                    sim.conf['Simulation']['params']['numbasis'] = int(numbasis)
+                    sim.conf['Simulation']['numbasis'] = int(numbasis)
                 # For sims that haven't converged, set the number of basis terms to the last
                 # tested value so we're closer to our goal of convergence
                 else:
                     self.log.info('Frequency %s converged at %s basis terms', freq, numbasis)
-                    sim.conf['Simulation']['params']['numbasis'] = int(numbasis)
+                    sim.conf['Simulation']['numbasis'] = int(numbasis)
         # With the leaf directories made and the number of basis terms adjusted,
         # we can now kick off our frequency sweep
         self.execute_jobs()
@@ -885,7 +591,7 @@ class SimulationManager:
             self.log.info('Storing adaptive convergence results ...')
             with open(info_file, 'w') as info:
                 for sim in sims:
-                    freq = sim.conf['Simulation']['params']['frequency']
+                    freq = sim.conf['Simulation']['frequency']
                     conv_path = osp.join(sim.dir, 'converged_at.txt')
                     nconv_path = osp.join(sim.dir, 'not_converged_at.txt')
                     if osp.isfile(conv_path):
@@ -903,7 +609,7 @@ class SimulationManager:
                         # convergence was switched off and there will be no file to
                         # read from
                         conv = 'converged'
-                        numbasis = sim.conf['Simulation']['params']['numbasis']
+                        numbasis = sim.conf['Simulation']['numbasis']
                     info.write('%s,%s,%s\n' % (str(freq), numbasis, conv))
             self.log.info('Finished storing convergence results!')
         #print('Total time = %f'%delta)
@@ -986,21 +692,12 @@ class SimulationManager:
 
 class Simulator:
 
-    def __init__(self, conf, q=None, skip_hash=False):
+    def __init__(self, conf):
         self.conf = conf
-        self.q = q
-        numbasis = self.conf['Simulation']['params']['numbasis']
-        period = self.conf['Simulation']['params']['array_period']
-        if skip_hash:
-            # TODO: Remove this when all the existing simulations are cleaned up
-            try:
-                self.id = conf['General']['ID']
-            except KeyError:
-                self.id = self.conf['General']['sim_dir']
-        else:
-            self.id = make_hash(conf.data)
-            self.conf['General']['ID'] = self.id
-        sim_dir = self.id[0:10]
+        numbasis = self.conf['Simulation']['numbasis']
+        period = self.conf['Simulation']['array_period']
+        self.ID = conf.ID
+        sim_dir = self.ID[0:10]
         self.conf['General']['sim_dir'] = sim_dir
         self.base = osp.realpath(osp.expandvars(self.conf['General']['base_dir']))
         self.dir = osp.expandvars(sim_dir)
@@ -1021,23 +718,6 @@ class Simulator:
         if self.conf['General']['save_as'] == 'hdf5':
             self.hdf5.close()
 
-    def _get_data_manager(self):
-        """
-        Factory function that instantiates the correct data manager object
-        depending on the file type specified in the config
-        """
-
-        ftype = self.conf['General']['save_as']
-
-        if not ftype:
-            return {}
-        elif ftype == 'hdf5':
-            self.open_hdf5()
-            return HDF5DataManager(self.conf, self.log)
-        else:
-            m = 'Invalid value {} in config at' \
-                ' General.save_as'.format(self.conf['General']['save_as'])
-            raise ValueError(m)
 
     def _clean_logger(self):
         """
@@ -1058,9 +738,6 @@ class Simulator:
         Runs all the necessary setup functions so one can begin running the
         simulation and collecting data
         """
-        self.evaluate_config()
-        if not skip_hash:
-            self.update_id()
         try:
             os.makedirs(self.path)
         except OSError:
@@ -1072,6 +749,42 @@ class Simulator:
         self.configure()
         self.build_device()
         self.set_excitation()
+
+    def make_logger(self, log_level='info'):
+        """Makes the logger for this simulation"""
+        self._clean_logger()
+        # Add the file handler for this instance's log file and attach it to
+        # the module level logger
+        self.fhandler = logging.FileHandler(osp.join(self.path, 'sim.log'))
+        self.fhandler.addFilter(IdFilter(ID=self.ID))
+        formatter = logging.Formatter('%(asctime)s [%(name)s:%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
+        self.fhandler.setFormatter(formatter)
+        self.fhandler.setLevel(logging.DEBUG)
+        log = logging.getLogger(__name__)
+        log.addHandler(self.fhandler)
+        # Store the logger adapter to the module level logger as an attribute.
+        # We use this to log in any methods, and the sim.ID of this instance
+        # will get stored in the log record
+        self.log = logging.LoggerAdapter(log, {'ID': self.ID})
+        self.log.debug('Logger initialized')
+
+    def _get_data_manager(self):
+        """
+        Factory function that instantiates the correct data manager object
+        depending on the file type specified in the config
+        """
+
+        ftype = self.conf['General']['save_as']
+
+        if not ftype:
+            return {}
+        elif ftype == 'hdf5':
+            self.open_hdf5()
+            return HDF5DataManager(self.conf, self.log)
+        else:
+            m = 'Invalid value {} in config at' \
+                ' General.save_as'.format(self.conf['General']['save_as'])
+            raise ValueError(m)
 
     def get_layers(self):
         self.layers = get_layers(self)
@@ -1119,6 +832,42 @@ class Simulator:
         self.data.update({"xcoords": self.X, "ycoords": self.Y,
                           "zcoords": self.Z})
 
+    def configure(self):
+        """Configure options for the RCWA solver"""
+        if self.conf['General']['output_pattern']:
+            prefix = osp.join(self.ID[0:10], "VectorField")
+            self.s4.SetOptions(BasisFieldDumpPrefix=prefix, **self.conf['Solver'])
+        else:
+            self.s4.SetOptions(**self.conf['Solver'])
+
+    def build_device(self):
+        """Build the device geometry"""
+
+        # First define all the materials
+        for mat, mat_path in self.conf['Materials'].items():
+            eps = self._get_epsilon(osp.expandvars(mat_path))
+            self.s4.SetMaterial(Name=mat, Epsilon=eps)
+        self.s4.SetMaterial(Name='vacuum', Epsilon=complex(1, 0))
+        # self.layers is an ordered_dict which has been properly sorted because
+        # order DOES matter. Light will be incident upon the first layer
+        # specified
+        for layer_name, layer in self.layers.items():
+            self.log.debug('Building layer: %s' % layer_name)
+            base_mat = layer.base_material
+            layer_t = layer.thickness
+            self.s4.AddLayer(Name=layer_name, Thickness=layer_t,
+                             Material=base_mat)
+            self.log.debug('Building geometry in layer: {}'.format(layer_name))
+            for shape_name, (shape, shape_mat) in layer.shapes.items():
+                self.log.debug('Building object %s of type %s', shape_name,
+                               shape)
+                if isinstance(shape, Circle):
+                    self.s4.SetRegionCircle(Layer=layer_name, Material=shape_mat,
+                                            Center=tuple(shape.center),
+                                            Radius=float(shape.radius))
+                else:
+                    raise NotImplementedError('Shape %s is not yet implemented'%shape)
+
     def add_interpolator(self, key, method='linear'):
         """
         Add an interpolator method to this object for the data located at
@@ -1144,45 +893,6 @@ class Simulator:
         except AttributeError:
             pass
 
-    def make_logger(self, log_level='info'):
-        """Makes the logger for this simulation"""
-        self._clean_logger()
-        # Add the file handler for this instance's log file and attach it to
-        # the module level logger
-        self.fhandler = logging.FileHandler(osp.join(self.path, 'sim.log'))
-        self.fhandler.addFilter(IdFilter(ID=self.id))
-        formatter = logging.Formatter('%(asctime)s [%(name)s:%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
-        self.fhandler.setFormatter(formatter)
-        self.fhandler.setLevel(logging.DEBUG)
-        log = logging.getLogger(__name__)
-        log.addHandler(self.fhandler)
-        # Store the logger adapter to the module level logger as an attribute.
-        # We use this to log in any methods, and the sim_id of this instance
-        # will get stored in the log record
-        self.log = logging.LoggerAdapter(log, {'ID': self.id})
-        self.log.debug('Logger initialized')
-
-    def evaluate_config(self):
-        """
-        Expands all environment variables in the config and resolves all
-        references
-        """
-        self.conf.interpolate()
-        self.conf.evaluate()
-
-    def update_id(self):
-        """Update sim id. Used after changes are made to the config"""
-        self.id = make_hash(self.conf.data)
-        sim_dir = self.id[0:10]
-        self.conf['General']['sim_dir'] = sim_dir
-        self.conf['General']['ID'] = self.id
-        self.base = osp.realpath(osp.expandvars(self.conf['General']['base_dir']))
-        self.dir = osp.expandvars(sim_dir)
-        self.path = osp.join(self.base, self.dir)
-        # try:
-        #     os.makedirs(self.path)
-        # except OSError:
-        #     pass
 
     def set_numbasis(self, numbasis):
         """
@@ -1195,7 +905,7 @@ class Simulator:
         .. note:: You will need to call self.setup() after calling this
         function
         """
-        self.conf['Simulation']['params']['numbasis'] = numbasis
+        self.conf['Simulation']['numbasis'] = numbasis
         self.s4 = S4.New(Lattice=((self.period, 0), (0, self.period)),
                          NumBasis=int(round(numbasis)))
         self.setup()
@@ -1211,25 +921,18 @@ class Simulator:
         .. note:: You will need to call self.setup() after calling this
         function
         """
-        self.conf['Simulation']['params']['array_period'] = period
-        numbasis = self.conf['Simulation']['params']['numbasis']
+        self.conf['Simulation']['array_period'] = period
+        numbasis = self.conf['Simulation']['numbasis']
         self.s4 = S4.New(Lattice=((period, 0), (0, period)),
                          NumBasis=int(round(numbasis)))
         self.setup()
 
-    def configure(self):
-        """Configure options for the RCWA solver"""
-        if self.conf['General']['output_pattern']:
-            prefix = osp.join(self.id[0:10], "VectorField")
-            self.s4.SetOptions(BasisFieldDumpPrefix=prefix, **self.conf['Solver'])
-        else:
-            self.s4.SetOptions(**self.conf['Solver'])
 
     def _get_epsilon(self, path):
         """Returns complex dielectric constant for a material by pulling in nk
         text file, interpolating, computing nk values at freq, and
         converting"""
-        freq = self.conf['Simulation']['params']['frequency']
+        freq = self.conf['Simulation']['frequency']
         # Get data
         freq_vec, n_vec, k_vec = np.loadtxt(path, unpack=True)
         # Get n and k at specified frequency via interpolation
@@ -1246,7 +949,7 @@ class Simulator:
         return epsilon
 
     def _get_incident_amplitude_anna(self):
-        freq = self.conf['Simulation']['params']['frequency']
+        freq = self.conf['Simulation']['frequency']
         path = '$HOME/software/nanowire/nanowire/spectra/Input_sun_power.txt'
         freq_vec, p_vec = np.loadtxt(osp.expandvars(path), unpack=True)
         p_of_f = spi.interp1d(freq_vec, p_vec)
@@ -1264,15 +967,13 @@ class Simulator:
 
     def set_excitation(self):
         """Sets the exciting plane wave for the simulation"""
-        f_phys = self.conf['Simulation']['params']['frequency']
+        f_phys = self.conf['Simulation']['frequency']
         self.log.debug('Physical Frequency = %E' % f_phys)
         c_conv = constants.c / self.conf['Simulation']['base_unit']
         f_conv = f_phys / c_conv
         self.s4.SetFrequency(f_conv)
-        E_mag = get_incident_amplitude(self)
-        # E_mag = self._get_incident_amplitude_anna()
-        polar = self.conf['Simulation']['params']['polar_angle']
-        azimuth = self.conf['Simulation']['params']['azimuthal_angle']
+        polar = self.conf['Simulation']['polar_angle']
+        azimuth = self.conf['Simulation']['azimuthal_angle']
         # To define circularly polarized light from the point of view of the
         # source, basically just stick a j
         # (imaginary number) in front of one of your components. The component
@@ -1292,80 +993,39 @@ class Simulator:
         if polarization == 'rhcp':
             # Right hand circularly polarized
             self.s4.SetExcitationPlanewave(IncidenceAngles=(polar, azimuth),
-                                           sAmplitude=complex(0,
-                                                              -E_mag/np.sqrt(2)),
-                                           pAmplitude=complex(E_mag/np.sqrt(2), 0))
+                                           sAmplitude=complex(0, -1),
+                                           pAmplitude=complex(1, 0))
         elif polarization == 'lhcp':
             # Left hand circularly polarized
             self.s4.SetExcitationPlanewave(IncidenceAngles=(polar, azimuth),
-                                           sAmplitude=complex(0,
-                                                              E_mag/np.sqrt(2)),
-                                           pAmplitude=complex(E_mag/np.sqrt(2), 0))
+                                           sAmplitude=complex(0, 1),
+                                           pAmplitude=complex(1, 0))
         elif polarization == 'lpx':
             # Linearly polarized along x axis (TM polarixation)
             self.s4.SetExcitationPlanewave(IncidenceAngles=(polar, azimuth),
                                            sAmplitude=complex(0, 0),
-                                           pAmplitude=complex(E_mag, 0))
+                                           pAmplitude=complex(1, 0))
         elif polarization == 'lpy':
             # Linearly polarized along y axis (TE polarization)
             self.s4.SetExcitationPlanewave(IncidenceAngles=(polar, azimuth),
-                                           sAmplitude=complex(E_mag, 0),
+                                           sAmplitude=complex(1, 0),
                                            pAmplitude=complex(0, 0))
         else:
             raise ValueError('Invalid polarization specification')
 
-    def build_device(self):
-        """Build the device geometry"""
-
-        # First define all the materials
-        for mat, mat_path in self.conf['Materials'].items():
-            eps = self._get_epsilon(osp.expandvars(mat_path))
-            # eps = self._get_epsilon(mat_path)
-            self.s4.SetMaterial(Name=mat, Epsilon=eps)
-        self.s4.SetMaterial(Name='vacuum', Epsilon=complex(1, 0))
-        # We need to properly sort our layers because order DOES matter. Light
-        # will be incident upon the first layer specified
-        for layer, ldata in sorted(self.conf['Layers'].items(),
-                                   key=lambda tup: tup[1]['order']):
-            self.log.debug('Building layer: %s' % layer)
-            self.log.debug('Layer Order %i' % ldata['order'])
-            base_mat = ldata['base_material']
-            layer_t = ldata['params']['thickness']
-            self.s4.AddLayer(Name=layer, Thickness=layer_t,
-                             Material=base_mat)
-            if 'geometry' in ldata:
-                self.log.debug('Building geometry in layer: {}'.format(layer))
-                for shape, sdata in sorted(ldata['geometry'].items(), key=lambda tup: tup[1]['order']):
-                    self.log.debug('Building object {} of type {} at order'
-                                  ' {}'.format(shape, sdata['type'], sdata['order']))
-                    shape_mat = sdata['material']
-                    if sdata['type'] == 'circle':
-                        rad = sdata['radius']
-                        cent = sdata['center']
-                        coord = (cent['x'], cent['y'])
-                        self.s4.SetRegionCircle(Layer=layer, Material=shape_mat, Center=coord,
-                                                Radius=rad)
-                    else:
-                        raise NotImplementedError(
-                            'Shape %s is not yet implemented' % sdata['type'])
 
     def get_height(self):
         """Get the total height of the device"""
-
-        height = 0
-        for layer, ldata in self.conf['Layers'].items():
-            layer_t = ldata['params']['thickness']
-            height += layer_t
-        return height
+        return sum(layer.thicknes for layer in self.layers.values())
 
     def set_lattice(self, period):
         """Updates the S4 simulation object with a new array period"""
-        numbasis = self.conf['Simulation']['params']['numbasis']
+        numbasis = self.conf['Simulation']['numbasis']
         self.s4 = S4.New(Lattice=((period, 0), (0, period)), NumBasis=numbasis)
 
     def set_basis(self, numbasis):
         """Updates the S4 simulation object with a new set of basis terms"""
-        period = self.conf['Simulation']['params']['array_period']
+        period = self.conf['Simulation']['array_period']
         self.s4 = S4.New(Lattice=((period, 0), (0, period)), NumBasis=numbasis)
 
     def update_thicknesses(self):
@@ -1373,7 +1033,7 @@ class Simulator:
         allows reuse of any layer eigenmodes already computed and utilizes a
         fundamental efficiency of the RCWA solver"""
         for layer, ldata in self.conf['Layers'].items():
-            thickness = ldata['params']['thickness']
+            thickness = ldata['thickness']
             self.s4.SetLayerThickness(Layer=layer, Thickness=thickness)
 
     # @do_profile(out='$nano/tests/profile_writing/line_profiler.txt', follow=[])
@@ -1622,7 +1282,7 @@ class Simulator:
         gridded data because the x-y sampling remains unchanged, however the
         gridding may become nonuniform in the z direction
         """
-        pbase = '/sim_{}'.format(self.id[0:10])
+        pbase = '/sim_{}'.format(self.ID[0:10])
         # Make sure we have the field arrays
         if self.conf["General"]["compute_h"]:
             fields = ('Ex', 'Ey', 'Ez', 'Hx', 'Hy', 'Hz')
@@ -1686,7 +1346,7 @@ class Simulator:
             forw, back = self.s4.GetPowerFlux(Layer=layer)
             flux_arr[counter] = (layer, forw, back)
             # This gets flux at the bottom
-            offset = ldata['params']['thickness']
+            offset = ldata['thickness']
             forw, back = self.s4.GetPowerFlux(Layer=layer, zOffset=offset)
             key = layer + '_bottom'
             flux_arr[counter+1] = (key, forw, back)
@@ -1724,7 +1384,7 @@ class Simulator:
                     eps_mat[ix, iy] = eps_val
             key = 'dielectric_profile_{}'.format(layer)
             self.data[key] = eps_mat
-            z += ldata['params']['thickness']
+            z += ldata['thickness']
         self.log.debug('Finished computing dielectric profile!')
 
     def compute_dielectric_profile_at_point(self, x, y, z):
@@ -1784,7 +1444,7 @@ class Simulator:
         print(fname)
         if osp.isfile(fname):
             self.log.info("Loading from: %s", fname)
-            log.info("Simulator %s loading solution from: %s", self.id[0:10], fname)
+            log.info("Simulator %s loading solution from: %s", self.ID[0:10], fname)
             self.s4.LoadSolution(Filename=fname)
             self.log.info("Solution loaded!")
             log.info("Solution loaded!")
@@ -1808,70 +1468,20 @@ class Simulator:
             self.log.info("Solution saved!")
         self.s4.SaveSolution(Filename=fname)
         self.log.info("Solution saved!")
-    # def get_integrals(self):
-    #     self.log.debug('Computing volume integrals')
-    #     integrals = {}
-    #     for layer, ldata in self.conf['Layers'].items():
-    #         self.log.debug('Computing integral through layer: %s' % layer)
-    #         result = self.s4.GetLayerVolumeIntegral(Layer=layer, Quantity='E')
-    #         self.log.debug('Integral = %s', str(result))
-    #         integrals[layer] = result
-    #     print(integrals)
-    #     return integrals
 
-    def write_xdmf(self):
-        """
-        Writes an XMDF file for the electric fields, allowing import into
-        Paraview for visualization
-        """
-
-        grid = E.Grid
-        domain = E.Domain
-        topo = E.Topology
-        geo = E.Geometry
-        ditem = E.DataItem
-        attr = E.Attribute
-        base = 'sim.hdf5:/sim_{}'.format(self.id[0:10])
-        dims = '{} {} {}'.format(self.zsamps, self.xsamps, self.ysamps)
-        doc = (
-        E.Xdmf({'Version': '3.0'},
-            domain(
-                grid({'GridType': 'Uniform', 'Name': 'FullGrid'},
-                    topo({'TopologyType': '3DRectMesh'}),
-                    geo({'GeometryType': 'VXVYVZ'},
-                       ditem(base+'/xcoords', {'Name': 'xcoords',
-                                               'Dimensions': str(self.xsamps),
-                                               'NumberType': 'Float',
-                                               'Precision': '4',
-                                               'Precision': '4',
-                                               'Format': 'HDF',
-                                               'Compression': 'Zlib'}),
-                       ditem(base+'/ycoords', {'Name': 'ycoords',
-                                               'Dimensions': str(self.ysamps),
-                                               'NumberType': 'Float',
-                                               'Precision': '4',
-                                               'Format': 'HDF',
-                                               'Compression': 'Zlib'}),
-                       ditem(base+'/zcoords', {'Name': 'zcoords',
-                                               'Dimensions': str(self.zsamps),
-                                               'NumberType': 'Float',
-                                               'Precision': '4',
-                                               'Format': 'HDF',
-                                               'Compression': 'Zlib'}),
-                    ),
-                    attr({'Name': 'Electric Field Components', 'AttributeType': 'Scalar',
-                          'Center': 'Node'},
-                        ditem(base+'/Ex', {'Dimensions': dims}),
-                        ditem(base+'/Ey', {'Dimensions': dims}),
-                        ditem(base+'/Ez', {'Dimensions': dims})
-                    )
-                )
-            )
-        )
-        )
-        path = osp.join(self.path, 'sim.xdmf')
-        with open(path, 'wb') as out:
-            out.write(etree.tostring(doc, pretty_print=True))
+    def get_integrals(self):
+        raise NotImplementedError("The underlying volume integral functions "
+                                  "in S4 are broken. Don't use this function "
+                                  " until I fix them")
+        self.log.debug('Computing volume integrals')
+        integrals = {}
+        for layer, ldata in self.conf['Layers'].items():
+            self.log.debug('Computing integral through layer: %s' % layer)
+            result = self.s4.GetLayerVolumeIntegral(Layer=layer, Quantity='E')
+            self.log.debug('Integral = %s', str(result))
+            integrals[layer] = result
+        print(integrals)
+        return integrals
 
     def save_data(self):
         """
@@ -1893,92 +1503,6 @@ class Simulator:
             raise ValueError('Invalid value {} in config at'
                              ' General.save_as'.format(self.conf['General']['save_as']))
 
-    # def save_data(self):
-    #     """Saves the self.data dictionary to an npz file. This dictionary
-    #     contains all the fields and the fluxes dictionary"""
-
-    #     start = time.time()
-    #     if self.hdf5 is None:
-    #         self.open_hdf5()
-    #     if self.conf['General']['save_as'] == 'npz':
-    #         self.log.debug('Saving fields to NPZ')
-    #         if self.conf['General']['adaptive_convergence']:
-    #             if self.converged[0]:
-    #                 out = osp.join(self.path, 'converged_at.txt')
-    #             else:
-    #                 out = osp.join(self.path, 'not_converged_at.txt')
-    #             self.log.debug('Writing convergence file ...')
-    #             with open(out, 'w') as outf:
-    #                 outf.write('{}\n'.format(self.converged[1]))
-    #         out = osp.join(self.path, self.conf["General"]["base_name"])
-    #         # Compression adds a small amount of time. The time cost is
-    #         # nonlinear in the file size, meaning the penalty gets larger as the
-    #         # field grid gets finer. However, the storage gains are enormous!
-    #         # Compression brought the file from 1.1G to 3.9M in a test case.
-    #         # I think the compression ratio is so high because npz is a binary
-    #         # format, and all compression algs benefit from large sections of
-    #         # repeated characters
-    #         np.savez_compressed(out, **self.data)
-    #     elif self.conf['General']['save_as'] == 'hdf5':
-    #         compression = self.conf['General']['compression']
-    #         if compression:
-    #             # filter_obj = tb.Filters(complevel=8, complib='blosc')
-    #             filter_obj = tb.Filters(complevel=4, complib='zlib')
-    #         gpath = '/sim_'+self.id[0:10]
-    #         for name, arr in self.data.items():
-    #             # Check for recarrays first because they are subclass of
-    #             # ndarrays
-    #             if isinstance(arr, np.recarray):
-    #                 self.log.info("Saving record array %s", name)
-    #                 num_rows = len(list(self.conf['Layers'].keys()))
-    #                 table = self.hdf5.create_table(gpath, name,
-    #                                                description=arr.dtype,
-    #                                                expectedrows=num_rows,
-    #                                                createparents=True)
-    #                 row = table.row
-    #                 fields = arr.dtype.names
-    #                 for record in arr:
-    #                     for (i, el) in enumerate(record):
-    #                         row[fields[i]] = el
-    #                     row.append()
-    #                 table.flush()
-    #             elif isinstance(arr, np.ndarray):
-    #                 self.log.debug("Saving array %s", name)
-    #                 if compression:
-    #                     self.hdf5.create_carray(gpath, name, createparents=True,
-    #                                        atom=tb.Atom.from_dtype(arr.dtype),
-    #                                        obj=arr, filters=filter_obj)
-    #                 else:
-    #                     self.hdf5.create_array(gpath, name, createparents=True,
-    #                                       atom=tb.Atom.from_dtype(arr.dtype),
-    #                                       obj=arr)
-
-    #         # Write XMDF xml file for importing into Paraview
-    #         self.write_xdmf()
-    #         end = time.time()
-    #         diff = end - start
-    #         self.log.info('Time to write data to disk: %f seconds', diff)
-    #                 # # Save the field arrays
-    #                 # self.log.debug('Saving fields to HDF5')
-    #                 # path = '/sim_'+self.id[0:10]
-    #                 # for name, arr in self.data.items():
-    #             # self.log.debug("Saving array %s", name)
-    #             # tup = ('create_array', (path, name),
-    #                 #    {'compression': self.conf['General']['compression'],
-    #                 #     'createparents': True, 'obj': arr,
-    #                 #     'atom': tb.Atom.from_dtype(arr.dtype)})
-    #             # self.q.put(tup, block=True)
-    #         # # Save the flux dict to a table
-    #         # self.log.debug('Saving fluxes to HDF5')
-    #         # self.log.debug(self.flux_dict)
-    #         # tup = ('create_flux_table', (self.flux_dict, path, 'fluxes'),
-    #                # {'createparents': True,
-    #                 # 'expectedrows': len(list(self.conf['Layers'].keys()))})
-    #         # self.q.put(tup, block=True)
-    #         self.hdf5.flush()
-    #     else:
-    #         raise ValueError('Invalid file type specified in config')
-
     def save_conf(self):
         """
         Saves the simulation config object to a file
@@ -1990,7 +1514,7 @@ class Simulator:
             pass
         elif self.conf['General']['save_as'] == 'hdf5':
             self.log.debug('Saving conf to HDF5 file')
-            gname = 'sim_{}'.format(self.id[0:10])
+            gname = 'sim_{}'.format(self.ID[0:10])
             try:
                 node = self.hdf5.get_node('/'+gname)
             except tb.NoSuchNodeError:
@@ -2010,7 +1534,7 @@ class Simulator:
             pass
         elif self.conf['General']['save_as'] == 'hdf5':
             self.log.debug('Saving runtime to HDF5 file')
-            path = '/sim_{}'.format(self.id[0:10])
+            path = '/sim_{}'.format(self.ID[0:10])
             try:
                 node = self.hdf5.get_node(path)
             except tb.NoSuchNodeError:
@@ -2018,9 +1542,6 @@ class Simulator:
                 'simulation before you can set attributes on it. Creating now')
                 node = self.hdf5.create_group(path)
             node._v_attrs['runtime'] = self.runtime
-            # attr_name = 'runtime'
-            # tup = ('save_attr', (self.runtime, path, attr_name), {})
-            # self.q.put(tup, block=True)
         else:
             raise ValueError('Invalid value {} in config at'
                              ' General.save_as'.format(self.conf['General']['save_as']))
@@ -2052,7 +1573,7 @@ class Simulator:
         Returns the field array, last number of basis terms simulated, and a
         boolean representing whether or not the simulation is converged"""
         self.log.debug('Beginning adaptive convergence procedure')
-        start_basis = self.conf['Simulation']['params']['numbasis']
+        start_basis = self.conf['Simulation']['numbasis']
         basis_step = self.conf['General']['basis_step']
         ex, ey, ez = self.compute_fields()
         max_diff = self.conf['General']['max_diff']
@@ -2127,6 +1648,6 @@ class Simulator:
         end = time.time()
         self.runtime = end - start
         self.log.info('Simulation {} completed in {:.2}'
-                      ' seconds!'.format(self.id[0:10], self.runtime))
+                      ' seconds!'.format(self.ID[0:10], self.runtime))
         self.save_data()
         return None

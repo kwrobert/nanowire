@@ -7,7 +7,8 @@ from sympy.abc import x as _x
 from sympy.abc import y as _y
 from matplotlib.path import Path
 from collections import OrderedDict
-from .utils import get_nk
+from nanowire.optics.utils.utils import get_nk
+from nanowire.utils.utils import sorted_dict
 
 
 def get_mask_by_shape(shape, xcoords, ycoords):
@@ -63,7 +64,7 @@ def get_layers(sim):
     :rtype: OrderedDict
     """
 
-    ordered_layers = sim.conf.sorted_dict(sim.conf['Layers'])
+    ordered_layers = sorted_dict(sim.conf['Layers'])
     start = 0
     layers = OrderedDict()
     materials = sim.conf['Materials']
@@ -73,7 +74,7 @@ def get_layers(sim):
         # beyond max_depth
         if max_depth and start >= max_depth:
             break
-        layer_t = ldata['params']['thickness']
+        layer_t = ldata['thickness']
         # end = start + layer_t + sim.dz
         end = start + layer_t
         # Things are discretized, so start needs to be a location that we
@@ -113,8 +114,8 @@ class Layer:
         if geometry:
             self._collect_shapes(geometry, materials)
         else:
-            self.shapes = {}
-            
+            self.shapes = OrderedDict()
+
     def _collect_shapes(self, d, materials):
         """
         Collect and instantiate the dictionary stored in the shapes attribute
@@ -122,9 +123,8 @@ class Layer:
         """
 
         shapes = OrderedDict()
-        sorted_d = OrderedDict(sorted(d.items(),
-                                      key=lambda tup: tup[1]['order']))
-        for name, data in sorted_d.items():
+        sorted_shapes = sorted_dict(d)
+        for name, data in sorted_shapes.items():
             shape = data['type'].lower()
             if shape == 'circle':
                 center = Point(data['center']['x'], data['center']['y'])
@@ -143,7 +143,7 @@ class Layer:
         """
         Given a set of z coordinates, get a length 3 tuple can be used to
         retrieve the chunk of a 3D array that falls within this layer. This
-        assumes the z direction is along the zeroth axis (i.e arr[z, x, y]). 
+        assumes the z direction is along the zeroth axis (i.e arr[z, x, y]).
         So, one can slice out the chunk of the 3D array with
         arr[layer.get_slice()]
         """

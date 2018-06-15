@@ -4,7 +4,7 @@ import numpy as np
 import tables as tb
 from collections import MutableMapping
 from abc import ABCMeta, abstractmethod
-from .utils.utils import open_atomic
+from ..utils.utils import open_atomic
 
 
 class TransmissionData(tb.IsDescription):

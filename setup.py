@@ -75,7 +75,7 @@ setup(
     license='MIT/Apache-2.0',
     entry_points='''
         [console_scripts]
-        optics=nanowire/optics/scripts/optics:optics
+        optics=nanowire.scripts.optics_cli:optics
     ''',
     keywords=['', ],
     include_package_data=True,

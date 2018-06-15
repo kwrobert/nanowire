@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 import os
 import click
 # from nanowire.optics.simulate import SimulationManager, run_sim, update_sim

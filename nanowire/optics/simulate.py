@@ -31,8 +31,8 @@ from lxml import etree
 from lxml.builder import E
 # get our custom config object and the logger function
 # from . import postprocess as pp
-from .data_manager import HDF5DataManager
-from ..utils.utils import (
+from nanowire.optics.data_manager import HDF5DataManager
+from nanowire.utils.utils import (
     make_hash,
     IdFilter,
     get_combos,
@@ -40,14 +40,15 @@ from ..utils.utils import (
     merge_and_sort,
     arithmetic_arange,
     get_public_ip,
-    get_public_iface
+    get_public_iface,
+    sorted_dict,
+    build_query
 )
-from .utils.utils import (
+from nanowire.optics.utils.utils import (
     get_incident_amplitude,
 )
-from ..utils.utils import sorted_dict
-from ..preprocess.config import Config
-from .utils.geometry import get_layers
+from nanowire.preprocess.config import Config
+from nanowire.optics.utils.geometry import get_layers
 
 DISPY_LOOKUP = {dispy.DispyJob.Abandoned: 'Abandoned',
                 dispy.DispyJob.Cancelled: 'Cancelled',
@@ -150,9 +151,9 @@ def run_sim(conf, output_dir):
     """
 
     log = logging.getLogger(__name__)
-    start = time.time()
-    sim = Simulator(copy.deepcopy(conf))
     try:
+        start = time.time()
+        sim = Simulator(copy.deepcopy(conf))
         sim.setup()
         log.info('Executing sim %s', sim.ID[0:10])
         sim.save_all()
@@ -280,16 +281,12 @@ class LayerFlux(tb.IsDescription):
 class SimulationManager:
 
     """
-    A class to manage running many simulations either in series or in parallel,
-    collect and emit logs, write out data to files, etc
+    A class to manage running many simulations either in series or in parallel
+    using a variety of different execution backends
     """
 
-    def __init__(self, gconf, log_level='INFO'):
-        if osp.isfile(gconf):
-            self.gconf = Config(path=osp.abspath(gconf))
-        else:
-            self.gconf = gconf
-        # self.gconf.expand_vars()
+    def __init__(self, gconf, base_dir='', log_level='INFO'):
+        self.gconf = gconf
         lfile = osp.join(self.gconf['General']['base_dir'],
                              'logs/sim_manager.log')
         try:
@@ -301,134 +298,164 @@ class SimulationManager:
         self.log = logging.getLogger(__name__)
         self.sim_confs = []
 
-    def load_confs(self):
+    def load_confs(self, db, base_dir='', query='', table_path='/',
+                   table_name='simulations'):
         """
-        Collect all the simulations beneath the base of the directory tree
+        Load configs from disk
+
+        Collect all the simulations contained in the database `db` satisfying
+        the query `query` which are located within the directory tree rooted at
+        `base_dir`
         """
 
-        sims = []
-        failed_sims = []
+        confs = []
         # Find the data files and instantiate Config objects
-        base = osp.expandvars(self.gconf['General']['base_dir'])
-        self.log.info(base)
-        for root, dirs, files in os.walk(base):
-            conf_path = osp.join(root, 'sim_conf.yml')
-            if 'sim_conf.yml' in files and 'sim.hdf5' in files:
-                self.log.info('Gather sim at %s', root)
-                conf_obj = Config(conf_path)
-                # sim_obj.conf.expand_vars()
-                sims.append(conf_obj)
-            elif 'sim_conf.yml' in files:
-                conf_obj = Config(conf_path)
-                self.log.error('Sim missing its data file: %s',
-                               conf_obj.conf['General']['sim_dir'])
-                failed_sims.append(conf_obj)
-        self.sim_confs = sims
-        self.failed_sims = failed_sims
-        if not sims:
-            self.log.error('Unable to find any successful simulations')
-            raise RuntimeError('Unable to find any successful simulations')
-        return sims, failed_sims
+        if not base_dir:
+            base_dir = osp.expandvars(self.gconf['General']['base_dir'])
+        self.log.info(base_dir)
+        print(query)
+        with tb.open_file(db, 'r') as hdf:
+            table = hdf.get_node(table_path, name=table_name,
+                                 classname='Table')
+            if query:
+                condvars = {k.replace('/', '__'): v
+                            for k, v in table.colinstances.items()}
 
-    def execute_jobs(self, *args, func=run_sim, **kwargs):
-        """
-        Given a list of configuration dictionaries, run them either serially or
-        in parallel by applying the provided func (default run_sim) to each
-        dict. We do this instead of applying to an actual Simulator object
-        because the Simulator objects are not pickeable and thus cannot be
-        parallelized by the multiprocessing lib
-        """
+                sim_ids = [row['ID'] for row in table.where(query,
+                                                            condvars=condvars)]
+            else:
+                sim_ids = [row['ID'] for row in table.read()]
+        short_ids = [ID.decode()[0:10] for ID in sim_ids]
+        for root, dirs, files in os.walk(base_dir):
+            if os.path.basename(root) in short_ids and 'sim_conf.yml' in files:
+                conf_path = osp.join(root, 'sim_conf.yml')
+                self.log.info('Loading config: %s', conf_path)
+                conf_obj = Config.fromFile(conf_path)
+                confs.append((conf_path, conf_obj))
+        self.sim_confs = confs
+        if not confs:
+            self.log.error('Unable to find any configs')
+            raise RuntimeError('Unable to find any configs')
+        return confs
 
-        if self.gconf['General']['execution'] == 'serial':
-            self.log.info('Executing sims serially')
-            for conf in self.sim_confs:
-                func(conf, q=self.write_queue)
-        elif self.gconf['General']['execution'] == 'parallel':
-            self.log.info('Total sims to execute: %i', len(self.sim_confs))
-            num_procs = self.gconf['General']['num_cores']
-            if num_procs > len(self.sim_confs):
-                num_procs = len(self.sim_confs)
-            self.log.info('Executing sims in parallel using %s cores ...', str(num_procs))
-            # pool = LoggingPool(processes=num_procs)
-            pool = mp.Pool(processes=num_procs, maxtasksperchild=2)
-            # pool = mp.Pool(processes=num_procs)
-            total_sims = len(self.sim_confs)
-            remaining_sims = len(self.sim_confs)
-            def callback(ind):
-                callback.remaining_sims -= 1
-                callback.log.info('%i out of %i simulations remaining'%(callback.remaining_sims,
-                                                                callback.total_sims))
-                return None
-            callback.remaining_sims = remaining_sims
-            callback.total_sims = total_sims
-            callback.log = self.log
-            results = {}
-            self.log.debug('Entering try, except pool clause')
-            try:
-                for ind, conf in enumerate(self.sim_confs):
-                    res = pool.apply_async(func, (conf, *args),
-                                           {'q':self.write_queue, **kwargs},
-                                           callback=callback)
-                    results[ind] = res
-                # self.log.debug('Closing pool')
-                # pool.close()
-                self.log.debug("Waiting on results")
-                self.log.debug('Results before wait loop: %s',
-                               str(list(results.keys())))
-                # while len(results) > num_procs:
-                while results:
-                    inds = list(results.keys())
-                    for ind in inds:
-                        # We need to add this really long timeout so that
-                        # subprocesses receive keyboard interrupts. If our
-                        # simulations take longer than this timeout, an exception
-                        # would be raised but that should never happen
-                        res = results[ind]
-                        self.log.debug('Sim #%i', ind)
-                        if res.ready():
-                            success = res.successful()
-                            if success:
-                                self.log.debug('Sim #%i completed successfully!', ind)
-                                res.get(10)
-                                self.log.debug('Done getting Sim #%i', ind)
-                            else:
-                                self.log.warning('Sim #%i raised exception!',
-                                                 ind)
-                                res.wait(10)
-                                # try:
-                                #     res.get(100)
-                                # except Exception as e:
-                                #     self.log.warning('Sim #%i raised following'
-                                #                      ' exception: %s', ind,
-                                #                      traceback.format_exc())
-                            del results[ind]
+    def filter_sims(self, filter_dict):
+        """
+        Remove Configs from the self.sim_confs attribute based on the
+        filter_dict
+        """
+        raise NotImplementedError
+
+
+    def run_serial(self, func=run_sim, args=(), kwargs={}):
+        """
+        Apply the provided function `func` to all the loaded Config objects
+        serially.  args and kwargs are passed on to the provided function
+        unmodified using the usual *args and **kwargs argument expansion.
+
+        :param func: A Python callable that consumes a Config object as its
+        first positional argument, and any number of positional arguments and
+        keywords arguments thereafter. So, signature must be:
+            func(conf, *args, **kwargs)
+        :type func: callable
+        :param args: A tuple of extra arguments to be passed to the provided
+        callable
+        :type args: tuple
+        :param kwargs: A tuple of extra keyword arguments to be passed to the
+        provided callable
+        :type kwargs: dict
+        """
+        self.log.info('Executing sims serially')
+        counter = 0
+        total = len(self.sim_confs)
+        for conf_path, conf in self.sim_confs:
+            func(conf, conf_path)
+            counter += 1
+            self.log.info('%d out of %d simulations complete', counter, total)
+
+    def run_parallel(self, *args, func=run_sim, **kwargs):
+        self.log.info('Total sims to execute: %i', len(self.sim_confs))
+        num_procs = self.gconf['General']['num_cores']
+        if num_procs > len(self.sim_confs):
+            num_procs = len(self.sim_confs)
+        self.log.info('Executing sims in parallel using %i cores ...', num_procs)
+        pool = mp.Pool(processes=num_procs)
+        total_sims = len(self.sim_confs)
+        remaining_sims = len(self.sim_confs)
+        def callback(ind):
+            callback.remaining_sims -= 1
+            callback.log.info('%i out of %i simulations remaining'%(callback.remaining_sims,
+                                                            callback.total_sims))
+            return None
+        callback.remaining_sims = remaining_sims
+        callback.total_sims = total_sims
+        callback.log = self.log
+        results = {}
+        self.log.debug('Entering try, except pool clause')
+        try:
+            for ind, (conf_path, conf) in enumerate(self.sim_confs):
+                res = pool.apply_async(func, (conf, conf_path, *args),
+                                       **kwargs,
+                                       callback=callback)
+                results[ind] = res
+            # self.log.debug('Closing pool')
+            # pool.close()
+            self.log.debug("Waiting on results")
+            self.log.debug('Results before wait loop: %s',
+                           str(list(results.keys())))
+            # while len(results) > num_procs:
+            while results:
+                inds = list(results.keys())
+                for ind in inds:
+                    # We need to add this really long timeout so that
+                    # subprocesses receive keyboard interrupts. If our
+                    # simulations take longer than this timeout, an exception
+                    # would be raised but that should never happen
+                    res = results[ind]
+                    self.log.debug('Sim #%i', ind)
+                    if res.ready():
+                        success = res.successful()
+                        if success:
+                            self.log.debug('Sim #%i completed successfully!', ind)
+                            res.get(10)
+                            self.log.debug('Done getting Sim #%i', ind)
                         else:
-                            self.log.debug('Sim #%i not ready', ind)
-                    self.log.debug('Cleaned results: %s',
-                                   str(list(results.keys())))
-                    time.sleep(1)
+                            self.log.warning('Sim #%i raised exception!',
+                                             ind)
+                            res.wait(10)
+                            # try:
+                            #     res.get(100)
+                            # except Exception as e:
+                            #     self.log.warning('Sim #%i raised following'
+                            #                      ' exception: %s', ind,
+                            #                      traceback.format_exc())
+                        del results[ind]
+                    else:
+                        self.log.debug('Sim #%i not ready', ind)
+                self.log.debug('Cleaned results: %s',
+                               str(list(results.keys())))
+                time.sleep(1)
 
-                    # res.wait(99999999)
-                    # res.get(99999999)
-                    # self.log.debug('Number of items in queue: %i',
-                    #                self.write_queue.qsize())
-                self.log.debug('Closing pool')
-                pool.close()
-                self.log.debug('Finished waiting')
-                self.log.debug('Joining pool')
-                pool.join()
-            except KeyboardInterrupt:
-                pool.terminate()
-                pool.join()
-        elif self.gconf['General']['execution'] == 'dispy':
-            self.log.info('Executing jobs using dispy cluster')
-            self.dispy_submit()
-        self.log.info('Finished executing jobs!')
+                # res.wait(99999999)
+                # res.get(99999999)
+                # self.log.debug('Number of items in queue: %i',
+                #                self.write_queue.qsize())
+            self.log.debug('Closing pool')
+            pool.close()
+            self.log.debug('Finished waiting')
+            self.log.debug('Joining pool')
+            pool.join()
+        except KeyboardInterrupt:
+            pool.terminate()
+            pool.join()
 
-    def dispy_submit(self):
+    def run_dispy(self):
+        """
+        Run jobs in parallel using dispy
+        """
         import time
         log = logging.getLogger(__name__)
-        log.info("Beginning dispy submit procedure")
+        log.info('Executing jobs using dispy cluster')
+        # log.info("Beginning dispy submit procedure")
         try:
             nodes = self.gconf['General']['nodes']
             ip = self.gconf['General']['ip_addr']
@@ -486,208 +513,52 @@ class SimulationManager:
                 del jobs[job_id]
         return None
 
-    def spectral_wrapper(self, opt_pars):
-        """A wrapper function to handle spectral sweeps and postprocessing for the scipy minimizer. It
-        accepts the initial guess as a vector, the base config file, and the keys that map to the
-        initial guesses. It runs a spectral sweep (in parallel if specified), postprocesses the results,
-        and returns the spectrally weighted reflection"""
-        # TODO: Pass in the quantity we want to optimize as a parameter, then compute and return that
-        # instead of just assuming reflection
-
-        # Optimizing shell thickness could result is negative thickness so we need to take absolute
-        # value here
-        # opt_pars[0] = abs(opt_pars[0])
-        self.log.info('Param keys: %s', str(self.gconf.optimized))
-        self.log.info('Current values %s', str(opt_pars))
-        # Clean up old data unless the user asked us not to. We do this first so on the last
-        # iteration all our data is left intact
-        basedir = self.gconf['General']['base_dir']
-        ftype = self.gconf['General']['save_as']
-        hdf_file = osp.join(basedir, 'data.hdf5')
-        if not self.gconf['General']['opt_keep_intermediates']:
-            for item in os.listdir(basedir):
-                if osp.isdir(item) and item != 'logs':
-                    shutil.rmtree(item)
-                if 'data.hdf5' in item:
-                    os.remove(hdf_file)
-
-        # Set the value key of all the params we are optimizing over to the current
-        # guess
-        for i in range(len(self.gconf.optimized)):
-            keyseq = self.gconf.optimized[i]
-            self.log.info(keyseq)
-            self.gconf[keyseq] = opt_pars[i]
-        # Make all the sim objects
-        self.sim_confs = []
-        sims = self.make_confs()
-        # Let's reuse the convergence information from the previous iteration if it exists
-        # NOTE: This kind of assumes your initial guess was somewhat decent with regards to the in plane
-        # geometric variables and the optimizer is staying relatively close to that initial guess. If
-        # the optimizer is moving far away from its previous guess at each step, then the fact that a
-        # specific frequency may have been converged previously does not mean it will still be converged
-        # with this new set of variables.
-        info_file = osp.join(basedir, 'conv_info.txt')
-        if osp.isfile(info_file):
-            conv_dict = {}
-            with open(info_file, 'r') as info:
-                for line in info:
-                    freq, numbasis, conv_status = line.strip().split(',')
-                    if conv_status == 'converged':
-                        conv_dict[freq] = (True, numbasis)
-                    elif conv_status == 'unconverged':
-                        conv_dict[freq] = (False, numbasis)
-            for sim in sims:
-                freq = str(sim.conf['Simulation']['frequency'])
-                conv, numbasis = conv_dict[freq]
-                # Turn off adaptive convergence and update the number of basis
-                # terms
-                if conv:
-                    self.log.info('Frequency %s converged at %s basis terms', freq, numbasis)
-                    sim.conf['General']['adaptive_convergence'] = False
-                    sim.conf['Simulation']['numbasis'] = int(numbasis)
-                # For sims that haven't converged, set the number of basis terms to the last
-                # tested value so we're closer to our goal of convergence
-                else:
-                    self.log.info('Frequency %s converged at %s basis terms', freq, numbasis)
-                    sim.conf['Simulation']['numbasis'] = int(numbasis)
-        # With the leaf directories made and the number of basis terms adjusted,
-        # we can now kick off our frequency sweep
-        self.execute_jobs()
-        # We need to wait for the writer thread to empty the queue for us
-        # before we can postprocess the data
-        if ftype == 'hdf5' and self.write_queue is not None:
-            while not self.write_queue.empty():
-                self.log.info('Waiting for queue to empty')
-                self.log.info(self.write_queue.qsize())
-                time.sleep(.1)
-        #####
-        # TODO: This needs to be generalized. The user could pass in the name of
-        # a postprocessing function in the config file. The function will be called
-        # and used as the quantity for optimization
-        #####
-
-        # With our frequency sweep done, we now need to postprocess the results.
-        # Configure logger
-        # log = configure_logger('error','postprocess',
-        #                          osp.join(self.gconf['General']['base_dir'],'logs'),
-        #                          'postprocess.log')
-        # Compute transmission data for each individual sim
-        cruncher = pp.Cruncher(self.gconf)
-        cruncher.collect_sims()
-        for sim in cruncher.sims:
-            # cruncher.transmissionData(sim)
-            sim.get_data()
-            sim.transmissionData()
-            sim.write_data()
-        # Now get the fraction of photons absorbed
-        gcruncher = pp.Global_Cruncher(
-            self.gconf, cruncher.sims, cruncher.sim_groups, cruncher.failed_sims)
-        gcruncher.group_against(
-            ['Simulation', 'params', 'frequency', 'value'], self.gconf.variable)
-        photon_fraction = gcruncher.fractional_absorbtion()[0]
-        # Lets store information we discovered from our adaptive convergence procedure so we can resue
-        # it in the next iteration.
-        if self.gconf['General']['adaptive_convergence']:
-            self.log.info('Storing adaptive convergence results ...')
-            with open(info_file, 'w') as info:
-                for sim in sims:
-                    freq = sim.conf['Simulation']['frequency']
-                    conv_path = osp.join(sim.dir, 'converged_at.txt')
-                    nconv_path = osp.join(sim.dir, 'not_converged_at.txt')
-                    if osp.isfile(conv_path):
-                        conv_f = open(conv_path, 'r')
-                        numbasis = conv_f.readline().strip()
-                        conv_f.close()
-                        conv = 'converged'
-                    elif osp.isfile(nconv_path):
-                        conv_f = open(nconv_path, 'r')
-                        numbasis = conv_f.readline().strip()
-                        conv_f.close()
-                        conv = 'unconverged'
-                    else:
-                        # If we were converged on a previous iteration, adaptive
-                        # convergence was switched off and there will be no file to
-                        # read from
-                        conv = 'converged'
-                        numbasis = sim.conf['Simulation']['numbasis']
-                    info.write('%s,%s,%s\n' % (str(freq), numbasis, conv))
-            self.log.info('Finished storing convergence results!')
-        #print('Total time = %f'%delta)
-        #print('Num calls after = %i'%gcruncher.weighted_transmissionData.called)
-        # This is a minimizer, we want to maximize the fraction of photons absorbed and thus minimize
-        # 1 minus that fraction
-        return 1 - photon_fraction
-
-
-    def run_optimization(self):
-        """Runs an optimization on a given set of parameters"""
-        self.log.info("Running optimization")
-        self.log.info(self.gconf.optimized)
-        # Make sure the only variable parameter we have is a sweep through
-        # frequency
-        for keyseq in self.gconf.variable:
-            if keyseq[-1] != 'frequency':
-                self.log.error('You should only be sweep through frequency during an '
-                          'optimization')
-                quit()
-        # Collect all the guesses
-        guess = np.zeros(len(self.gconf.optimized))
-        for i in range(len(self.gconf.optimized)):
-            keyseq = self.gconf.optimized[i]
-            par_data = self.gconf.get(keyseq)
-            guess[i] = par_data['guess']
-        # Max iterations and tolerance
-        tol = self.gconf['General']['opt_tol']
-        ftol = self.gconf['General']['func_opt_tol']
-        max_iter = self.gconf['General']['opt_max_iter']
-        os.makedirs(osp.join(self.gconf['General']['base_dir'], 'opt_dir'))
-        # Run the simplex optimizer
-        opt_val = optz.minimize(self.spectral_wrapper,
-                                guess,
-                                method='Nelder-Mead',
-                                options={'maxiter': max_iter, 'xatol': tol,
-                                         'fatol': ftol, 'disp': True})
-        self.log.info(opt_val.message)
-        self.log.info('Optimal values')
-        self.log.info(self.gconf.optimized)
-        self.log.info(opt_val.x)
-        # Write out the results to a file
-        out_file = osp.join(
-            self.gconf['General']['base_dir'], 'optimization_results.txt')
-        with open(out_file, 'w') as out:
-            out.write('# Param name, value\n')
-            for key, value in zip(self.gconf.optimized, opt_val.x):
-                out.write('%s: %f\n' % (str(key), value))
-        self.write_queue.put(None, block=True)
-        return opt_val.x
-
-    def run(self, *args, filter_dict={}, load=False, func=run_sim, **kwargs):
+    def run(self, *args, func=run_sim, **kwargs):
         """
-        The main run methods that decides what kind of simulation to run based
-        on the provided config objects
+        Run the loaded configurations in parallel by applying the provided func
+        (default run_sim) to each dict using the Python multiprocessing library
+        and the apply_async function. We do this instead of applying to an
+        actual Simulator object because the Simulator objects are not pickeable
+        and thus cannot be parallelized by the multiprocessing lib
         """
 
-        if not self.gconf.optimized:
-            # Get all the sims
-            if load:
-                self.load_confs()
-            else:
-                self.make_confs()
+        self.log.info('Total sims to execute: %i', len(self.sim_confs))
+        if self.gconf['General']['execution'] == 'serial':
+            self.run_serial(func=func)
+        elif self.gconf['General']['execution'] == 'parallel':
+            self.run_parallel(func=func)
+        elif self.gconf['General']['execution'] == 'dispy':
+            self.run_dispy()
+        self.log.info('Finished executing jobs!')
 
-            if filter_dict:
-                for k, vals in filter_dict.items():
-                    par = [ks for ks in k.split('.')]
-                    vals = list(map(type(self.sim_confs[0][par]), vals))
-                    self.sim_confs = [c for c in self.sim_confs if c[par] in vals]
-            self.log.info("Executing job campaign")
-            self.execute_jobs(func=func, *args, **kwargs)
-        elif self.gconf.optimized:
-            self.run_optimization()
-        else:
-            self.log.error('Unsupported configuration for a simulation run. Not a '
-                           'single sim, sweep, or optimization. Make sure your sweeps are '
-                           'configured correctly, and if you are running an optimization '
-                           'make sure you do not have any sorting parameters specified')
+
+    # def run(self, *args, filter_dict={}, load=False, func=run_sim, **kwargs):
+    #     """
+    #     The main run methods that decides what kind of simulation to run based
+    #     on the provided config objects
+    #     """
+
+    #     if not self.gconf.optimized:
+    #         # Get all the sims
+    #         if load:
+    #             self.load_confs()
+    #         else:
+    #             self.make_confs()
+
+    #         if filter_dict:
+    #             for k, vals in filter_dict.items():
+    #                 par = [ks for ks in k.split('.')]
+    #                 vals = list(map(type(self.sim_confs[0][par]), vals))
+    #                 self.sim_confs = [c for c in self.sim_confs if c[par] in vals]
+    #         self.log.info("Executing job campaign")
+    #         self.execute_jobs(func=func, *args, **kwargs)
+    #     elif self.gconf.optimized:
+    #         self.run_optimization()
+    #     else:
+    #         self.log.error('Unsupported configuration for a simulation run. Not a '
+    #                        'single sim, sweep, or optimization. Make sure your sweeps are '
+    #                        'configured correctly, and if you are running an optimization '
+    #                        'make sure you do not have any sorting parameters specified')
 
 
 class Simulator:

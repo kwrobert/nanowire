@@ -573,3 +573,23 @@ def add_row(tbl, data):
             row[key] = value
     row.append()
     tbl.flush()
+
+def build_query(filter_dict):
+    """
+    Build a query string conforming to PyTables table.where syntax
+
+    Parameters
+    ----------
+    filter_dict : dict
+        A dictionary specifying the parameters of the query. The keys of the
+        dictionary are the names of the variables in the query, and the values
+        are a list of tuples. The first element of the tuple is a string form
+        of the comparison operator, and the second element of the tuple is the
+        value to compare to.
+    """
+    query = ''
+    for var, ops in filter_dict.items():
+        for op, val in ops:
+            query += '{} {} {}'.format(var, op, val)
+    return query
+

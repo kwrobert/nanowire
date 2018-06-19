@@ -13,7 +13,7 @@ from multiprocessing import Pool
 from line_profiler import LineProfiler
 from contextlib import contextmanager
 from itertools import accumulate, repeat, chain, product
-from collections import Iterable, OrderedDict
+from collections import Iterable, OrderedDict, MutableMapping
 
 
 def do_profile(follow=[], out=''):
@@ -546,8 +546,30 @@ def get_pytables_desc(data, skip_keys=[], keypath=''):
             value = bool(value)
 
         if isinstance(value, dict):
-            fields[key] = get_numpy_dtype(value, keypath=newpath)
+            fields[key] = get_pytables_desc(value, keypath=newpath)
         else:
             value = np.array(value)
             fields[key] = tb.Col.from_dtype(value.dtype)
     return fields
+
+
+def _recurse_row(row, base, data):
+    for (key, value) in data.items():
+        new = base + key
+        if isinstance(value, dict):
+            _recurse_row(row, new + '/', value)
+        else:
+            row[new] = value
+
+
+def add_row(tbl, data):
+    """Add a new row to a table based on the contents of a dict.
+    """
+    row = tbl.row
+    for (key, value) in data.items():
+        if isinstance(value, MutableMapping):
+            _recurse_row(row, key + '/', value)
+        else:
+            row[key] = value
+    row.append()
+    tbl.flush()

@@ -15,7 +15,7 @@ def optics():
     """
     The command line interface to the nanowire optics library.
 
-    type optics [SUBCOMMAND] --help for help with the various subcommands
+    Type optics [SUBCOMMAND] --help for help with the various subcommands
     """
 
 
@@ -38,15 +38,20 @@ h4 = "A list of keys within the configs to skip when generating the config ID"
               show_default=True)
 def preprocess(template, db, params, table_path, table_name, skip_keys):
     """
-    Preprocess the template file located at path TEMPLATE and generate
-    Config object(s) which are stored in the HDF5 file DB.
+    Preprocess the template file located at path TEMPLATE.
+
+    The preprocessor consumes a YAML template and an optional params file. For
+    each unique combination of parameters in the params file (Cartesian product
+    of the parameters), a Config object is generated from the template and
+    stored in the HDF5 file DB, as well as on disk in a subdirectory named
+    using the first 10 characters of the Config ID
     """
 
     import nanowire.preprocess.preprocessor as pp
 
-    pp = pp.Preprocessor(template, params=params)
+    pp = pp.Preprocessor(template)
     click.echo('Generating configs ...')
-    pp.generate_configs()
+    pp.generate_configs(params=params)
     click.echo('Writing configs to disk ...')
     pp.write_configs()
     click.echo('Writing configs to database ...')
@@ -64,7 +69,7 @@ h1 = "The directory to store all the simulation outputs in. Defaults to " \
 @click.option('-o', '--output_dir', type=exist_read_dir, default=None, help=h1)
 def run(config, output_dir):
     """
-    Run a single simulation
+    Run a single simulation.
 
     CONFIG must be a path to a config file for a single simulation in valid
     YAML format. No preprocessing is performed on this file. If this file was
@@ -79,3 +84,72 @@ def run(config, output_dir):
     if output_dir is None:
         output_dir = os.path.dirname(config)
     simul.run_sim(conf, output_dir)
+    return None
+
+
+h0 = "Base directory containing all configs. If not specified, defaults to " \
+     "the directory of the input config"
+h1 = "Only run simulations whose parameter match the ones provided. TEXT " \
+     "must be a slash separated string to a param in the simulation config " \
+     "and FLOAT must be the value you wish to keep.\n" \
+     "Example: Simulation/numbasis 200"
+h2 = "Update the electric field arrays with new z samples without " \
+     "overwriting the old data. Can only upate the sampling in z " \
+     "because there is no way to update in x-y without destroying " \
+     "the regularity of the grid"
+
+
+@optics.command()
+@click.argument('config', type=exist_read_path)
+@click.option('-b', '--base_dir',
+              callback=lambda ctx, p, v: os.path.dirname(ctx.params['config']) if not v else v,
+              type=exist_read_dir, help=h0)
+@click.option('-p', '--params', default=None, type=exist_read_path,
+              help="Optional params for the config file parser")
+@click.option('-f', '--filter_by', multiple=True, nargs=2,
+              type=click.Tuple([str, float]), help=h1)
+@click.option('-u', '--update', default=False, is_flag=True, help=h2)
+@click.option('-v', '--log_level', help="Set verbosity of logging",
+              type=click.Choice(['info', 'debug', 'warning', 'critical', 'error']),
+              default='info')
+def run_all(config, base_dir, params, filter_by, update, log_level):
+    """
+    Run all the simulations located beneath BASE_DIR.
+
+    The directory tree beneath BASE_DIR is traversed recursively from the top
+    down and all the config files beneath it are collected. A simulation is run
+    for each config file found, and the output of each simulation is stored in
+    the same directory as the corresponding config file.
+
+    Can optionally configure how the manager runs via a config file, command
+    line parameters, or a combination of the two. The config file will be
+    treated as a template and can thus contain any special templating syntax
+    """
+
+    import nanowire.optics.simulate as simul
+    import nanowire.preprocess.preprocessor as pp
+
+    print(base_dir)
+    print(filter_by)
+
+    processor = pp.Preprocessor(config)
+    parsed_dicts = processor.generate_configs(params=params)
+    if len(parsed_dicts) != 1:
+        raise ValueError('Must have only 1 set of unique parameters for the '
+                         'manager configuration')
+    conf = parsed_dicts[0]
+    filter_dict = {}
+    for par, val in filter_by:
+        if par in filter_dict:
+            filter_dict[par].append(val)
+        else:
+            filter_dict[par] = [val]
+    # See https://docs.python.org/3/library/logging.html#levels. Built in
+    # logging lib levels are integers that are multiples of 10 (0, 10, 20, 30,
+    # 40, and 50). Lower number means more logging
+    if update:
+        manager = simul.SimulationManager(conf, log_level=log_level.upper())
+        manager.run(filter_dict=filter_dict, func=simul.update_sim, load=True)
+    else:
+        manager = simul.SimulationManager(conf, log_level=log_level.upper())
+        manager.run(filter_dict=filter_dict)

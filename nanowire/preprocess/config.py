@@ -174,14 +174,47 @@ class Config(MutableMapping):
     def _update_id(self):
         self.ID = self.gen_id()
 
-    def flatten(self, branch=None, flattened=None, keypath='',
-                skip_branch=None, sep='/'):
+    def flatten(self, skip_branch=None, sep='/'):
         """
-        Returned a flattened form of the nested data structure. The keys will
-        be the full path to the item's location in the nested data structure,
-        and the value will be the value at that location
-        """
+        Returned a flattened copy of the nested data structure.
 
+        The keys will be the full path to the item's location in the nested
+        data structure separated using the optional sep kwarg, and the value
+        will be the value at that location
+
+        Parameters
+        ----------
+        sep : str, default '/'
+            The separating character used for all paths
+        skip_branch : list, optional
+            A list of `sep` separated paths to branches in the config that you
+            would like to skip when flattening. This can be leaves in the
+            Config or entire branches
+
+        Returns
+        -------
+        dict
+            A dict whose keys are `sep` separated strings representing the full
+            path to the value in the originally nested dictionary. The values
+            are the same as those from the original dictionary.
+
+        Examples
+        --------
+        >>> c = Config({'a': {'b': 1, 'c': 2})
+        >>> c.flatten()
+        {'a/b': 1, 'a/c': 2}
+        >>> c.flatten(sep='_')
+        {'a_b': 1, 'a_c': 2}
+        >>> c.flatten(sep='_', skip_branch='a_c')
+        {'a_b': 1}
+        """
+        self._flatten(skip_branch=skip_branch, sep=sep)
+
+    def _flatten(self, branch=None, flattened=None, keypath='',
+                 skip_branch=None, sep='/'):
+        """
+        Internal, recursive flattening implementation
+        """
         flattened = flattened if flattened is not None else {}
         if keypath:
             branch = branch if branch is not None else self._d[keypath]
@@ -193,9 +226,9 @@ class Config(MutableMapping):
                 if keypath in skip_branch:
                     continue
                 if isinstance(val, dict):
-                    self.flatten(branch=val, flattened=flattened,
-                                 keypath=newpath, skip_branch=skip_branch,
-                                 sep=sep)
+                    self._flatten(branch=val, flattened=flattened,
+                                  keypath=newpath, skip_branch=skip_branch,
+                                  sep=sep)
                 else:
                     flattened[newpath] = val
         return flattened

@@ -10,6 +10,10 @@ try:
 except ImportError:
     from yaml import Loader, Dumper
 import json
+from nanowire.utils.utils import (
+    remove_fields,
+    numpy_arr_to_dict,
+)
 
 
 def get_env_variable(match):
@@ -240,14 +244,14 @@ class Config(MutableMapping):
                                       '_d': conf._d})
 
     @classmethod
-    def fromYAML(cls, *args, **kwargs):
+    def fromYAML(cls, *args, skip_keys=None, **kwargs):
         """
         Return an instance of a Config object given a raw YAML string or a
         file-like object containing valid YAML syntax. Handles arbitrary YAML
         and YAML dumped by another Config object
         """
         data = yload(*args, **kwargs)
-        skip_keys = []
+        skip_keys = skip_keys if skip_keys is not None else []
         if 'skip_keys' in data:
             for item in data['skip_keys']:
                 if isinstance(item, list):
@@ -283,6 +287,13 @@ class Config(MutableMapping):
         with open(path, 'r') as stream:
             inst = d[syntax](stream, **kwargs)
         return inst
+
+    @classmethod
+    def from_array(cls, array, skip_fields=[], **kwargs):
+        if skip_fields:
+            array = remove_fields(array, skip_fields)
+        d = numpy_arr_to_dict(array)
+        return cls(d, **kwargs)
 
     def write(self, f):
         """

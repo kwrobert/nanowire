@@ -47,9 +47,9 @@ def preprocess(template, db, params, table_path, table_name, skip_keys):
     using the first 10 characters of the Config ID
     """
 
-    import nanowire.preprocess.preprocessor as pp
+    import nanowire.preprocess as prep
 
-    pp = pp.Preprocessor(template)
+    pp = prep.Preprocessor(template)
     click.echo('Generating configs ...')
     pp.generate_configs(params=params)
     click.echo('Writing configs to disk ...')
@@ -78,9 +78,9 @@ def run(config, output_dir):
     """
 
     import nanowire.optics.simulate as simul
-    import nanowire.preprocess.preprocessor as pp
+    import nanowire.preprocess as prep
 
-    conf = pp.Config.fromFile(config)
+    conf = prep.Config.fromFile(config)
     if output_dir is None:
         output_dir = os.path.dirname(config)
     simul.run_sim(conf, output_dir)
@@ -134,12 +134,9 @@ def run_all(config, db, base_dir, params, query, update, table_path,
     """
 
     import nanowire.optics.simulate as simul
-    import nanowire.preprocess.preprocessor as pp
+    import nanowire.preprocess as prep
 
-    print(base_dir)
-    print(query)
-
-    processor = pp.Preprocessor(config)
+    processor = prep.Preprocessor(config)
     parsed_dicts = processor.generate_configs(params=params)
     if len(parsed_dicts) != 1:
         raise ValueError('Must have only 1 set of unique parameters for the '

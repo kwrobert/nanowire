@@ -123,14 +123,12 @@ class Preprocessor:
         skip_keys = skip_keys if skip_keys is not None else []
         # Generate table description
         # flat_conf = self.confs[0].flatten(sep='__')
-        print(self.confs[0])
         desc_dict = {'ID': self.confs[0].ID}
         # desc_dict.update(flat_conf)
         desc_dict.update(self.confs[0])
         # desc = get_pytables_desc(desc_dict, skip_keys=skip_keys)
         desc = get_pytables_desc(desc_dict)
         desc['ID']._v_pos = 0
-        pprint.pprint(desc)
         # Open in append mode!
         hdf = tb.open_file(db_path, mode='a')
         try:

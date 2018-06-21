@@ -42,12 +42,13 @@ from nanowire.utils.utils import (
     get_public_ip,
     get_public_iface,
     sorted_dict,
-    build_query
+    find_keypaths,
+    group_against,
 )
 from nanowire.optics.utils.utils import (
     get_incident_amplitude,
 )
-from nanowire.preprocess.config import Config
+from nanowire.preprocess import Config
 from nanowire.optics.utils.geometry import get_layers
 
 DISPY_LOOKUP = {dispy.DispyJob.Abandoned: 'Abandoned',
@@ -296,42 +297,110 @@ class SimulationManager:
         # self.log = configure_logger(level=log_level, console=True,
         #                             logfile=lfile, name=__name__)
         self.log = logging.getLogger(__name__)
-        self.sim_confs = []
+        self.sim_confs = {}
+        self.t_sweeps = {}
 
     def load_confs(self, db, base_dir='', query='', table_path='/',
                    table_name='simulations'):
         """
         Load configs from disk
 
-        Collect all the simulations contained in the database `db` satisfying
-        the query `query` which are located within the directory tree rooted at
-        `base_dir`
+        Collect all the simulations contained in the HDF5 database file located
+        at filesystem path `db` satisfying the query `query`.
+
+        Parameters
+        ----------
+        db : str
+            A path to an HDF5 file containing the database of simulation
+            configs
+        base_dir : str, optional
+            The base directory of the directory tree that all simulations will
+            dump their output data into. If not specified, defaults to the
+            directory of the database file.
+        query : str, optional
+            A query string conforming to PyTables table.where syntax specifying
+            which configs should be loaded from the HDF5 database. If not
+            specified, all configs in the database are loaded
+        table_path : str, optional
+            String specifying path inside the HDF5 database to the group
+            containing the HDF5 simulations table. Default: '/'
+        table_path : str, optional
+            String specifying the name of the HDF5 simulations table.
+            Default: 'simulations'
+
+        Returns
+        -------
+        list
+            A list of :py:class:`nanowire.preprocess.config.Config` objects
         """
 
-        confs = []
         # Find the data files and instantiate Config objects
         if not base_dir:
-            base_dir = osp.expandvars(self.gconf['General']['base_dir'])
+            base_dir = osp.dirname(db)
         self.log.info(base_dir)
-        print(query)
         with tb.open_file(db, 'r') as hdf:
             table = hdf.get_node(table_path, name=table_name,
                                  classname='Table')
+            confs = {}
             if query:
                 condvars = {k.replace('/', '__'): v
                             for k, v in table.colinstances.items()}
-
-                sim_ids = [row['ID'] for row in table.where(query,
-                                                            condvars=condvars)]
+                for row in table.read_where(query, condvars=condvars):
+                    short_id = row['ID'].decode()[0:10]
+                    conf_path = osp.join(base_dir, short_id, 'sim_conf.yml')
+                    self.log.info('Loading config: %s', conf_path)
+                    conf = Config.from_array(row, skip_fields=['ID'],
+                                             skip_keys=['General'])
+                    if row['ID'].decode() != conf.ID:
+                        raise ValueError('ID in database and ID of loaded '
+                                         'config do not match')
+                    confs[conf.ID] = (conf, conf_path)
             else:
-                sim_ids = [row['ID'] for row in table.read()]
-        short_ids = [ID.decode()[0:10] for ID in sim_ids]
-        for root, dirs, files in os.walk(base_dir):
-            if os.path.basename(root) in short_ids and 'sim_conf.yml' in files:
-                conf_path = osp.join(root, 'sim_conf.yml')
-                self.log.info('Loading config: %s', conf_path)
-                conf_obj = Config.fromFile(conf_path)
-                confs.append((conf_path, conf_obj))
+                for row in table.read():
+                    short_id = row['ID'].decode()[0:10]
+                    conf_path = osp.join(base_dir, short_id, 'sim_conf.yml')
+                    self.log.info('Loading config: %s', conf_path)
+                    conf = Config.from_array(row, skip_fields=['ID'],
+                                             skip_keys=['General'])
+                    if row['ID'].decode() != conf.ID:
+                        raise ValueError('ID in database and ID of loaded '
+                                         'config do not match')
+                    confs[conf.ID] = (conf, conf_path)
+        confs_list = [tup[0] for tup in confs.values()]
+        thickness_paths = find_keypaths(confs_list[0], 'thickness')
+        # We need to handle the case of thickness sweeps to take advantage of
+        # a core efficiency of RCWA, which is that thickness sweeps should come
+        # for free. t_sweeps is a dict whose keys and values are both
+        # simulation IDs. The keys are ID's of simulations who have a different
+        # thickness from the corresponding value, but otherwise have identical
+        # parameters. The values in the dict will be the simulations we
+        # actually run, and the keys are simulations whose solution will just
+        # point to the corresponding value
+        t_sweeps = {}
+        for path in thickness_paths:
+            print(path)
+            # Skip max_depth when comparing because it depends on layer
+            # thicknesses
+            groups = group_against(confs_list, path,
+                                   skip_keys=['Simulation/max_depth'])
+            for i, b in enumerate([len(group) > 1 for group in groups]):
+                if b:
+                    self.log.info('Found thickness sweep over %s', path)
+                    keep_id = groups[i][0].ID
+                    for c in groups[i][1:]:
+                        t_sweeps[c.ID] = keep_id
+        print(t_sweeps)
+        print(len(list(t_sweeps.keys())))
+        print(len(set(t_sweeps.keys())))
+        print(len(list(t_sweeps.values())))
+        print(len(set(t_sweeps.values())))
+        self.t_sweeps = t_sweeps
+        # for root, dirs, files in os.walk(base_dir):
+        #     if os.path.basename(root) in short_ids and 'sim_conf.yml' in files:
+        #         conf_path = osp.join(root, 'sim_conf.yml')
+        #         self.log.info('Loading config: %s', conf_path)
+        #         conf_obj = Config.fromFile(conf_path)
+        #         confs.append((conf_path, conf_obj))
         self.sim_confs = confs
         if not confs:
             self.log.error('Unable to find any configs')
@@ -346,7 +415,7 @@ class SimulationManager:
         raise NotImplementedError
 
 
-    def run_serial(self, func=run_sim, args=(), kwargs={}):
+    def run_serial(self, to_run, func=run_sim, args=(), kwargs={}):
         """
         Apply the provided function `func` to all the loaded Config objects
         serially.  args and kwargs are passed on to the provided function
@@ -366,13 +435,13 @@ class SimulationManager:
         """
         self.log.info('Executing sims serially')
         counter = 0
-        total = len(self.sim_confs)
-        for conf_path, conf in self.sim_confs:
+        total = len(to_run)
+        for conf, conf_path in to_run:
             func(conf, conf_path)
             counter += 1
             self.log.info('%d out of %d simulations complete', counter, total)
 
-    def run_parallel(self, *args, func=run_sim, **kwargs):
+    def run_parallel(self, to_run, *args, func=run_sim, **kwargs):
         self.log.info('Total sims to execute: %i', len(self.sim_confs))
         num_procs = self.gconf['General']['num_cores']
         if num_procs > len(self.sim_confs):
@@ -392,7 +461,7 @@ class SimulationManager:
         results = {}
         self.log.debug('Entering try, except pool clause')
         try:
-            for ind, (conf_path, conf) in enumerate(self.sim_confs):
+            for ind, (conf, conf_path) in enumerate(self.sim_confs.values()):
                 res = pool.apply_async(func, (conf, conf_path, *args),
                                        **kwargs,
                                        callback=callback)
@@ -448,7 +517,7 @@ class SimulationManager:
             pool.terminate()
             pool.join()
 
-    def run_dispy(self):
+    def run_dispy(self, func=run_sim_dispy):
         """
         Run jobs in parallel using dispy
         """
@@ -486,7 +555,7 @@ class SimulationManager:
             time.sleep(1)
         cluster.print_status()
         jobs = {}
-        for i, conf in enumerate(self.sim_confs):
+        for i, (conf, conf_path) in enumerate(self.sim_confs.values()):
             job = cluster.submit(conf)
             job.id = i
             jobs[i] = job
@@ -522,14 +591,41 @@ class SimulationManager:
         and thus cannot be parallelized by the multiprocessing lib
         """
 
-        self.log.info('Total sims to execute: %i', len(self.sim_confs))
-        if self.gconf['General']['execution'] == 'serial':
-            self.run_serial(func=func)
-        elif self.gconf['General']['execution'] == 'parallel':
-            self.run_parallel(func=func)
-        elif self.gconf['General']['execution'] == 'dispy':
-            self.run_dispy()
+        if self.t_sweeps:
+            to_run_ids = set(self.t_sweeps.values())
+            to_run = [self.sim_confs[ID] for ID in to_run_ids]
+        else:
+            to_run = list(self.sim_confs.values())
+        self.log.info('Total sims to execute: %i', len(to_run))
+        runners = {'serial': self.run_serial, 'parallel': self.run_parallel,
+                   'dispy': self.run_dispy}
+        mode = self.gconf['General']['execution']
+        # if self.gconf['General']['execution'] == 'serial':
+        #     self.run_serial(to_run, func=func)
+        # elif self.gconf['General']['execution'] == 'parallel':
+        #     self.run_parallel(to_run, func=func)
+        # elif self.gconf['General']['execution'] == 'dispy':
+        #     self.run_dispy(to_run)
+        runners[mode](to_run)
         self.log.info('Finished executing jobs!')
+        if self.t_sweeps:
+            self.log.info('Linking thickness sweeps to solutions')
+            to_run = []
+            for dup_id, ran_id in self.t_sweeps.items():
+                print("dup_id = {}".format(dup_id))
+                print("ran_id = {}".format(ran_id))
+                sol_file = self.sim_confs[ran_id][0]['General/solution_file']
+                existing_dir = os.path.dirname(self.sim_confs[ran_id][1])
+                existing_sol = os.path.join(existing_dir, sol_file)
+                dup_dir = os.path.dirname(self.sim_confs[dup_id][1])
+                dup_sol = os.path.join(dup_dir, sol_file)
+                try:
+                    os.link(existing_sol, dup_sol)
+                except FileExistsError:
+                    pass
+                to_run.append(self.sim_confs[dup_id])
+            self.log.info('Total sims to execute: %i', len(to_run))
+            runners[mode](to_run)
 
 
     # def run(self, *args, filter_dict={}, load=False, func=run_sim, **kwargs):
@@ -761,6 +857,7 @@ class Simulator:
             self._clean_logger()
             del self.log
             del self.s4
+            self.data.close()
         except AttributeError:
             pass
 

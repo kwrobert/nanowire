@@ -6,6 +6,7 @@ import hashlib
 import logging
 import netifaces
 import traceback
+import copy
 import tempfile as tmp
 import numpy as np
 import tables as tb
@@ -332,28 +333,88 @@ def make_hash(o, hash_dict=None, hasher=None,
     return hasher.hexdigest()
 
 
-def cmp_dicts(d1, d2):
+def cmp_dicts(d1, d2, skip_keys=[]):
+    """
+    Recursively compares two configs
 
-    """Recursively compares two dictionaries"""
-    # First test the keys
-    for k1 in d1.keys():
-        if k1 not in d2:
-            return False
-    for k2 in d2.keys():
-        if k2 not in d1:
-            return False
-    # Now we need to test the contents recursively. We store the results of
-    # each recursive comparison in a list and assert that they all must be True
-    # at the end
-    comps = []
-    for k1, v1 in d1.items():
-        v2 = d2[k1]
-        if isinstance(v1, dict) and isinstance(v2, dict):
-            comps.append(cmp_dicts(v1, v2))
-        else:
-            if v1 != v2:
+    Parameters
+    ----------
+    d1, d2: dict
+       The dictionaries to compare
+    skip_keys : list, optional
+        A list of forward slash separated strings representing locations in the
+        config that should be ignored when doing the comparison. The value of
+        this key can differ between `d1` and `d2`, or be present in one dict
+        but not the other, and this function will still return True
+
+    Returns
+    -------
+    bool
+        Boolean indicating whether or not the dicts have the same contents and
+        keys
+    """
+    def _cmp_dicts(d1, d2, skip_keys=[], keypath=''):
+        for k1 in d1.keys():
+            this_path = posixpath.join(keypath, k1)
+            if this_path in skip_keys:
+                continue
+            if k1 not in d2:
+                # print('{} not in d2'.format(k1))
                 return False
-    return all(comps)
+        for k2 in d2.keys():
+            this_path = posixpath.join(keypath, k1)
+            if this_path in skip_keys:
+                continue
+            if k2 not in d1:
+                # print('{} not in d1'.format(k2))
+                return False
+        for k1, v1 in d1.items():
+            v2 = d2[k1]
+            this_path = posixpath.join(keypath, k1)
+            if this_path in skip_keys:
+                continue
+            if isinstance(v1, MutableMapping) and isinstance(v2, MutableMapping):
+                ret = _cmp_dicts(v1, v2, skip_keys=skip_keys, keypath=this_path)
+                # print("ret = {}".format(ret))
+                if not ret:
+                    return False
+            else:
+                if v1 != v2:
+                    # print('{} != {}'.format(v1, v2))
+                    return False
+        return True
+    return _cmp_dicts(d1, d2, skip_keys=skip_keys)
+
+
+def find_keypaths(d, key):
+    """
+    Find all ocurrences of the key `key` in dictionary `d` recursively
+
+    Parameters
+    ----------
+    d : dict
+        The dictionary in which to search
+    key : str
+        The key to search for. If `key` exists anywhere in the path to a
+        item in the dict, that path is added to the list
+
+    Returns
+    -------
+    list
+        A list of forward slash separated paths containing the key `key` in the
+        dictionary
+    """
+
+    def _find_paths(d, key, paths=None, keypath=''):
+        paths = paths if paths is not None else []
+        for k, v in d.items():
+            this_path = posixpath.join(keypath, k)
+            if key in this_path:
+                paths.append(this_path)
+            if isinstance(v, MutableMapping):
+                _find_paths(v, key, paths=paths, keypath=this_path)
+        return paths
+    return _find_paths(d, key)
 
 
 def find_inds(a, b, unique=False):
@@ -574,22 +635,163 @@ def add_row(tbl, data):
     row.append()
     tbl.flush()
 
-def build_query(filter_dict):
+def view_fields(a, names):
     """
-    Build a query string conforming to PyTables table.where syntax
+    Create a view of a structured numpy array containing specified fields
+
+    Creates and returns a view of a structured numpy array containing only
+    fields in the given collection of field names. Because this function
+    returns a _view_, no copying is done and modifying the returned view also
+    modifies the original array.
 
     Parameters
     ----------
-    filter_dict : dict
-        A dictionary specifying the parameters of the query. The keys of the
-        dictionary are the names of the variables in the query, and the values
-        are a list of tuples. The first element of the tuple is a string form
-        of the comparison operator, and the second element of the tuple is the
-        value to compare to.
-    """
-    query = ''
-    for var, ops in filter_dict.items():
-        for op, val in ops:
-            query += '{} {} {}'.format(var, op, val)
-    return query
 
+    a : np.recarray, np.void
+        The original array you wish to construct a view of.
+    names : iterable
+        An iterable of strings which are the field names to keep.
+
+    Returns
+    -------
+    type(a)
+        A view of the array `a` (not a copy), which has the same type as `a`.
+    """
+    dt = a.dtype
+    formats = [dt.fields[name][0] for name in names]
+    offsets = [dt.fields[name][1] for name in names]
+    itemsize = a.dtype.itemsize
+    newdt = np.dtype(dict(names=names,
+                          formats=formats,
+                          offsets=offsets,
+                          itemsize=itemsize))
+    b = a.view(newdt)
+    return b
+
+
+def remove_fields(a, names):
+    """
+    Create a view of a structured numpy array without specified fields
+
+    Creates and returns a view of a structured numpy array `a` without the
+    fields in the `names`. Because this function returns a _view_, no copying
+    is done and modifying the returned view also modifies the original array.
+
+    Parameters
+    ----------
+
+    a : np.recarray, np.void
+        The original array you wish to construct a view of.
+    names : iterable
+        An iterable of strings which are the field names to remove.
+
+    Returns
+    -------
+    type(a)
+        A view of the array `a` (not a copy), which has the same type as `a`,
+        but without the fields contained in `names`
+    """
+    dt = a.dtype
+    keep_names = [name for name in dt.names if name not in names]
+    return view_fields(a, keep_names)
+
+
+def numpy_arr_to_dict(arr):
+    """
+    Convert (potentially) nested numpy structured array to a dictionary
+    containing only builtin Python types
+    """
+    ret = {}
+    for k, v in zip(arr.dtype.names, arr):
+        if isinstance(v, np.void):
+            ret[k] = numpy_arr_to_dict(v)
+        elif isinstance(v, (np.int_, np.int)):
+            ret[k] = int(v)
+        elif isinstance(v, (np.bool_, np.bool)):
+            ret[k] = bool(v)
+        elif isinstance(v, (np.float_, np.float)):
+            ret[k] = float(v)
+        elif isinstance(v, (np.bytes_, np.str_, np.str)):
+            ret[k] = v.decode()
+        else:
+            print('Missed type!!')
+            print(type(v))
+            print(v)
+            ret[k] = v
+    return ret
+
+
+def group_against(confs, key, sort_key=None, skip_keys=None):
+    """
+    Group configs against particular parameter.
+
+    Group a list of config objects against a particular parameter. Within each
+    group, the parameter specified by `key` will vary, and all other parameters
+    will remain fixed. Useful for examining the affect of a single parameter on
+    simulation outputs, and for generating line plots with the parameter
+    specified by `key` on the x-axis.
+
+    Parameters
+    ----------
+    confs : list
+        A list of :py:class:`nanowire.preprocess.config.Config` objects
+    key : str
+        A key specifying which parameter simulations will be grouped against.
+        Individual simulations within each group will be sorted in increasing
+        order of this parameter, and all other parameters will remain constant
+        within the group. Key can be a slash-separated string pointing to
+        nested items in the config.
+    sort_key : str, optional
+        An optional key used to sort the order of the inner lists within the
+        returned outer list of groups. Works because all parameters within each
+        internal group are constant (excluding the parameter specified by
+        `key`). The outer list of group lists will be sorted in increasing
+        order of the specified sort_key.
+    skip_keys : list
+        A list of keys to skip when comparing two Configs.
+
+    Returns
+    -------
+    list
+        A list of lists. Each inner list is a group, sorted in increasing order
+        of the parameter `key`. All other parameters in each group are
+        constant. The outer list may optionally be sorted in increasing order
+        of an additonal `sort_key`
+
+    Notes
+    -----
+    The config options in the input list `confs` are not copied, and references
+    to the original Config objects are stored in the returned data structure
+    """
+
+    # We need only need a shallow copy of the list containing all the Config
+    # objects. We don't want to modify the orig list but we wish to share
+    # the sim objects the two lists contain
+    skip_keys = skip_keys if skip_keys is not None else []
+    skip_keys.append(key)
+    sim_confs = copy.copy(confs)
+    sim_groups = [[sim_confs.pop()]]
+    while sim_confs:
+        conf = sim_confs.pop()
+        # Loop through each group, checking if this sim belongs in the
+        # group
+        match = False
+        for group in sim_groups:
+            conf2 = group[0]
+            params_same = cmp_dicts(conf, conf2, skip_keys=skip_keys)
+            if params_same:
+                group.append(conf)
+                match = True
+                break
+        # If we didnt find a matching group, we need to create a new group
+        # for this simulation
+        if not match:
+            sim_groups.append([conf])
+    for group in sim_groups:
+        # Sort the individual sims within a group in increasing order of
+        # the parameter we are grouping against a
+        group.sort(key=lambda aconf: aconf[key])
+    # Sort the groups in increasing order of the provided sort key
+    if sort_key:
+        sim_groups.sort(key=lambda agroup: agroup[0][sort_key])
+    return sim_groups

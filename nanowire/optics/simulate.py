@@ -47,6 +47,7 @@ from nanowire.utils.utils import (
 )
 from nanowire.optics.utils.utils import (
     get_incident_amplitude,
+    get_nk,
 )
 from nanowire.preprocess import Config
 from nanowire.optics.utils.geometry import get_layers
@@ -895,20 +896,13 @@ class Simulator:
                          NumBasis=int(round(numbasis)))
         self.setup()
 
-
     def _get_epsilon(self, path):
         """Returns complex dielectric constant for a material by pulling in nk
         text file, interpolating, computing nk values at freq, and
         converting"""
         freq = self.conf['Simulation']['frequency']
         # Get data
-        freq_vec, n_vec, k_vec = np.loadtxt(path, unpack=True)
-        # Get n and k at specified frequency via interpolation
-        f_n = spi.interp1d(freq_vec, n_vec, kind='nearest',
-                           bounds_error=False, fill_value='extrapolate')
-        f_k = spi.interp1d(freq_vec, k_vec, kind='nearest',
-                           bounds_error=False, fill_value='extrapolate')
-        n, k = f_n(freq), f_k(freq)
+        n, k = get_nk(path, freq)
         # Convert to dielectric constant
         # NOTE!!: This assumes the relative magnetic permability (mew) is 1
         epsilon_real = n**2 - k**2

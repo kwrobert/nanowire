@@ -155,7 +155,7 @@ def run_sim(conf, output_dir):
     log = logging.getLogger(__name__)
     try:
         start = time.time()
-        sim = Simulator(copy.deepcopy(conf))
+        sim = Simulator(copy.deepcopy(conf), output_dir)
         sim.setup()
         log.info('Executing sim %s', sim.ID[0:10])
         sim.save_all()
@@ -177,7 +177,7 @@ def run_sim(conf, output_dir):
             pass
     return None
 
-def run_sim_dispy(conf):
+def run_sim_dispy(conf, outdir):
     try:
         import sys
         import os
@@ -187,17 +187,17 @@ def run_sim_dispy(conf):
         import dispy
         import socket
         from nanowire.optics.data_manager import HDF5DataManager, NPZDataManager
-        from nanowire.optics.utils.utils import (
+        from nanowire.utils.utils import (
             make_hash,
             get_combos,
             IdFilter,
-            get_incident_amplitude,
             find_inds,
             merge_and_sort,
             arithmetic_arange
         )
-        from nanowire.optics.utils.config import Config
+        from nanowire.optics.utils.utils import get_incident_amplitude
         from nanowire.optics.utils.geometry import Layer, get_layers
+        from nanowire.preprocess import Config
         from nanowire.optics.simulate import Simulator
         log = logging.getLogger(__name__)
         start = time.time()
@@ -206,73 +206,34 @@ def run_sim_dispy(conf):
         # global_vars['__file__'] = act_path
         # exec(compile(open(act_path, "rb").read(), act_path, 'exec'),
         #      global_vars, locals())
-        sim = Simulator(copy.deepcopy(conf), q=None)
-        # return 'returned a thing'
-        if not sim.conf.variable_thickness:
-            sim.setup()
-            # rel_dir = osp.join('./', osp.basename(sim.dir))
-            # rel_dir = osp.basename(sim.dir)
-            # sim.dir = rel_dir
-            # sim.conf['General']['sim_dir'] = rel_dir
-            log.info('Executing sim %s', sim.ID[0:10])
-            sim.save_all()
-            for f in os.listdir(sim.dir):
-                fpath = osp.join(sim.dir, f)
-                dispy_send_file(fpath)
-            # path = osp.join(osp.basename(sim.dir), 'sim.hdf5')
-            # sim.q.put(path, block=True)
-            # sim.mode_solve()
-        else:
-            log.info('Computing a thickness sweep at %s' % sim.ID[0:10])
-            orig_id = sim.ID[0:10]
-            # Get all combinations of layer thicknesses
-            keys, combos = get_combos(sim.conf, sim.conf.variable_thickness)
-            # Update base directory to new sub directory
-            sim.conf['General']['base_dir'] = sim.dir
-            # Set things up for the first combo
-            first_combo = combos.pop()
-            # First update all the thicknesses in the config. We make a copy of the
-            # list because it gets continually updated in the config object
-            var_thickness = sim.conf.variable_thickness
-            for i, param_val in enumerate(first_combo):
-                keyseq = var_thickness[i]
-                sim.conf[keyseq] = param_val
-            # With all the params updated we can now run substutions and
-            # evaluations in the config that make have referred to some thickness
-            # data, then make the subdir from the sim.ID and get the data
-            sim.evaluate_config()
-            sim.update_id()
-            try:
-                os.makedirs(sim.dir)
-            except OSError:
-                pass
-            sim.make_logger()
-            subpath = osp.join(orig_id, sim.ID[0:10])
-            log.info('Computing initial thickness at %s', subpath)
-            sim.save_all()
-            # path = osp.join(sim.dir, 'data.hdf5')
-            # sim.q.put(path, block=True)
-            # Now we can repeat the same exact process, but instead of rebuilding
-            # the device we just update the thicknesses
-            for combo in combos:
-                for i, param_val in enumerate(combo):
-                    keyseq = var_thickness[i]
-                    sim.conf[keyseq] = param_val
-                sim.update_id()
-                subpath = osp.join(orig_id, sim.ID[0:10])
-                log.info('Computing additional thickness at %s', subpath)
-                os.makedirs(sim.dir)
-                sim.save_all(update=True)
-                # path = osp.join(sim.dir, 'data.hdf5')
-                # sim.q.put(path, block=True)
+        abs_path, subdir = os.path.split(outdir)
+        print("outdir = {}".format(outdir))
+        print("subdir = {}".format(subdir))
+        print("abs_path = {}".format(abs_path))
+        sim = Simulator(copy.deepcopy(conf), subdir)
+        sim.setup()
+        # rel_dir = osp.join('./', osp.basename(sim.dir))
+        # rel_dir = osp.basename(sim.dir)
+        # sim.dir = rel_dir
+        # sim.conf['General']['sim_dir'] = rel_dir
+        log.info('Executing sim %s', sim.ID[0:10])
+        sim.save_all()
+        for f in os.listdir(sim.dir):
+            fpath = os.path.join(sim.dir, f)
+            dispy_send_file(fpath)
+        # path = osp.join(osp.basename(sim.dir), 'sim.hdf5')
+        # sim.q.put(path, block=True)
+        # sim.mode_solve()
         end = time.time()
         runtime = end - start
-        log.info('Simulation %s completed in %.2f seconds!', sim.ID[0:10], runtime)
+        log.info('Simulation %s completed in %.2f seconds!', sim.ID[0:10],
+                 runtime)
         sim.clean_sim()
     except Exception as e:
         print(traceback.format_exc())
         raise
     return runtime
+
 
 class LayerFlux(tb.IsDescription):
     layer = tb.StringCol(60, pos=0)
@@ -379,7 +340,6 @@ class SimulationManager:
         # point to the corresponding value
         t_sweeps = {}
         for path in thickness_paths:
-            print(path)
             # Skip max_depth when comparing because it depends on layer
             # thicknesses
             groups = group_against(confs_list, path,
@@ -390,11 +350,6 @@ class SimulationManager:
                     keep_id = groups[i][0].ID
                     for c in groups[i][1:]:
                         t_sweeps[c.ID] = keep_id
-        print(t_sweeps)
-        print(len(list(t_sweeps.keys())))
-        print(len(set(t_sweeps.keys())))
-        print(len(list(t_sweeps.values())))
-        print(len(set(t_sweeps.values())))
         self.t_sweeps = t_sweeps
         # for root, dirs, files in os.walk(base_dir):
         #     if os.path.basename(root) in short_ids and 'sim_conf.yml' in files:
@@ -443,14 +398,14 @@ class SimulationManager:
             self.log.info('%d out of %d simulations complete', counter, total)
 
     def run_parallel(self, to_run, *args, func=run_sim, **kwargs):
-        self.log.info('Total sims to execute: %i', len(self.sim_confs))
+        self.log.info('Total sims to execute: %i', len(to_run))
         num_procs = self.gconf['General']['num_cores']
-        if num_procs > len(self.sim_confs):
-            num_procs = len(self.sim_confs)
+        if num_procs > len(to_run):
+            num_procs = len(to_run)
         self.log.info('Executing sims in parallel using %i cores ...', num_procs)
         pool = mp.Pool(processes=num_procs)
-        total_sims = len(self.sim_confs)
-        remaining_sims = len(self.sim_confs)
+        total_sims = len(to_run)
+        remaining_sims = len(to_run)
         def callback(ind):
             callback.remaining_sims -= 1
             callback.log.info('%i out of %i simulations remaining'%(callback.remaining_sims,
@@ -462,8 +417,8 @@ class SimulationManager:
         results = {}
         self.log.debug('Entering try, except pool clause')
         try:
-            for ind, (conf, conf_path) in enumerate(self.sim_confs.values()):
-                res = pool.apply_async(func, (conf, conf_path, *args),
+            for ind, (conf, outdir) in enumerate(to_run):
+                res = pool.apply_async(func, (conf, outdir, *args),
                                        **kwargs,
                                        callback=callback)
                 results[ind] = res
@@ -518,7 +473,7 @@ class SimulationManager:
             pool.terminate()
             pool.join()
 
-    def run_dispy(self, func=run_sim_dispy):
+    def run_dispy(self, to_run, func=run_sim_dispy):
         """
         Run jobs in parallel using dispy
         """
@@ -529,9 +484,12 @@ class SimulationManager:
         try:
             nodes = self.gconf['General']['nodes']
             ip = self.gconf['General']['ip_addr']
-        except KeyError:
-            log.error("Need to specify 'nodes' and 'ip_addr' entries in "
-                      "General section")
+        except KeyError as e:
+            msg = "Need to specify 'nodes' and 'ip_addr' entries in " \
+                  "General section"
+            log.error(msg)
+            e.args = (msg,)
+            raise
         if ip == 'auto':
             pub_iface = get_public_iface()
             ip = get_public_ip(pub_iface)
@@ -556,8 +514,8 @@ class SimulationManager:
             time.sleep(1)
         cluster.print_status()
         jobs = {}
-        for i, (conf, conf_path) in enumerate(self.sim_confs.values()):
-            job = cluster.submit(conf)
+        for i, (conf, outdir) in enumerate(to_run):
+            job = cluster.submit(conf, outdir)
             job.id = i
             jobs[i] = job
             stat = DISPY_LOOKUP[job.status]
@@ -594,7 +552,8 @@ class SimulationManager:
 
         if self.t_sweeps:
             to_run_ids = set(self.t_sweeps.values())
-            to_run = [self.sim_confs[ID] for ID in to_run_ids]
+            to_run = [(self.sim_confs[ID][0],
+                       osp.dirname(self.sim_confs[ID][1])) for ID in to_run_ids]
         else:
             to_run = list(self.sim_confs.values())
         self.log.info('Total sims to execute: %i', len(to_run))
@@ -613,8 +572,6 @@ class SimulationManager:
             self.log.info('Linking thickness sweeps to solutions')
             to_run = []
             for dup_id, ran_id in self.t_sweeps.items():
-                print("dup_id = {}".format(dup_id))
-                print("ran_id = {}".format(ran_id))
                 sol_file = self.sim_confs[ran_id][0]['General/solution_file']
                 existing_dir = os.path.dirname(self.sim_confs[ran_id][1])
                 existing_sol = os.path.join(existing_dir, sol_file)
@@ -624,7 +581,8 @@ class SimulationManager:
                     os.link(existing_sol, dup_sol)
                 except FileExistsError:
                     pass
-                to_run.append(self.sim_confs[dup_id])
+                to_run.append((self.sim_confs[dup_id][0], dup_dir))
+            self.log.info('Running thickness sweeps')
             self.log.info('Total sims to execute: %i', len(to_run))
             runners[mode](to_run)
 
@@ -660,16 +618,13 @@ class SimulationManager:
 
 class Simulator:
 
-    def __init__(self, conf):
+    def __init__(self, conf, outdir):
         self.conf = conf
         numbasis = self.conf['Simulation']['numbasis']
         period = self.conf['Simulation']['array_period']
         self.ID = conf.ID
-        sim_dir = self.ID[0:10]
-        self.conf['General']['sim_dir'] = sim_dir
-        self.base = osp.realpath(osp.expandvars(self.conf['General']['base_dir']))
-        self.dir = osp.expandvars(sim_dir)
-        self.path = osp.join(self.base, self.dir)
+        self.path = osp.abspath(osp.normpath(osp.expandvars(outdir)))
+        self.base, self.dir = osp.split(self.path)
         self.s4 = S4.New(Lattice=((period, 0), (0, period)),
                          NumBasis=int(round(numbasis)))
         self.data = None
@@ -683,9 +638,6 @@ class Simulator:
         eventually use up all the available file descriptors on the system
         """
         self._clean_logger()
-        if self.conf['General']['save_as'] == 'hdf5':
-            self.hdf5.close()
-
 
     def _clean_logger(self):
         """
@@ -747,8 +699,10 @@ class Simulator:
         if not ftype:
             return {}
         elif ftype == 'hdf5':
-            self.open_hdf5()
-            return HDF5DataManager(self.conf, self.log)
+            group_path = '/sim_{}'.format(self.ID)
+            store_path = osp.join(self.path, 'sim.hdf5')
+            return HDF5DataManager(store_path, group_path=group_path,
+                                   logger=self.log)
         else:
             m = 'Invalid value {} in config at' \
                 ' General.save_as'.format(self.conf['General']['save_as'])
@@ -848,10 +802,6 @@ class Simulator:
         rgi = spi.RegularGridInterpolator(points, values, method=method,
                                           bounds_error=True)
         setattr(self, key, rgi)
-
-    def open_hdf5(self):
-        fpath = osp.join(self.path, 'sim.hdf5')
-        self.hdf5 = tb.open_file(fpath, 'a')
 
     def clean_sim(self):
         try:
@@ -1393,7 +1343,6 @@ class Simulator:
         sfile = self.conf['General']['solution_file']
         # sfile = 'solution.xml'
         fname = osp.join(self.path, sfile)
-        print(fname)
         if osp.isfile(fname):
             self.log.info("Loading from: %s", fname)
             log.info("Simulator %s loading solution from: %s", self.ID[0:10], fname)
@@ -1403,7 +1352,6 @@ class Simulator:
         else:
             self.log.warning("Solution file does not exist. Cannot load")
             log.warning("Solution file does not exist. Cannot load")
-            # print("Solution file does not exist. Cannot load")
 
     def save_state(self):
         """
@@ -1432,7 +1380,6 @@ class Simulator:
             result = self.s4.GetLayerVolumeIntegral(Layer=layer, Quantity='E')
             self.log.debug('Integral = %s', str(result))
             integrals[layer] = result
-        print(integrals)
         return integrals
 
     def save_data(self):
@@ -1442,13 +1389,12 @@ class Simulator:
         took to perform the write operation
         """
 
-        print(list(self.data.keys()))
         if not self.conf['General']['save_as']:
             return
         elif self.conf['General']['save_as'] == 'hdf5':
             start = time.time()
-            self.data.write_data(clear=True)
             self.save_time()
+            self.data.write_data(clear=True)
             end = time.time()
             self.log.info('Write time: %.2f seconds', end - start)
         else:
@@ -1465,15 +1411,8 @@ class Simulator:
         if not self.conf['General']['save_as']:
             pass
         elif self.conf['General']['save_as'] == 'hdf5':
-            self.log.debug('Saving conf to HDF5 file')
-            gname = 'sim_{}'.format(self.ID[0:10])
-            try:
-                node = self.hdf5.get_node('/'+gname)
-            except tb.NoSuchNodeError:
-                self.log.warning('You need to create the group for this '
-                'simulation before you can set attributes on it. Creating now')
-                node = self.hdf5.create_group('/', gname)
-            node._v_attrs['conf'] = self.conf.dump()
+            self.log.debug('Adding conf to self.data')
+            self.data['conf'] = self.conf.dump()
         else:
             raise ValueError('Invalid value {} in config at'
                              ' General.save_as'.format(self.conf['General']['save_as']))
@@ -1485,15 +1424,8 @@ class Simulator:
         if not self.conf['General']['save_as']:
             pass
         elif self.conf['General']['save_as'] == 'hdf5':
-            self.log.debug('Saving runtime to HDF5 file')
-            path = '/sim_{}'.format(self.ID[0:10])
-            try:
-                node = self.hdf5.get_node(path)
-            except tb.NoSuchNodeError:
-                self.log.warning('You need to create the group for this '
-                'simulation before you can set attributes on it. Creating now')
-                node = self.hdf5.create_group(path)
-            node._v_attrs['runtime'] = self.runtime
+            self.log.debug('Adding runtime to self.data')
+            self.data['runtime'] = self.runtime
         else:
             raise ValueError('Invalid value {} in config at'
                              ' General.save_as'.format(self.conf['General']['save_as']))

@@ -7,6 +7,7 @@ import logging
 import netifaces
 import traceback
 import copy
+import warnings
 import tempfile as tmp
 import numpy as np
 import tables as tb
@@ -607,9 +608,25 @@ def get_pytables_desc(data, skip_keys=[], keypath=''):
 
         if isinstance(value, dict):
             fields[key] = get_pytables_desc(value, keypath=newpath)
+        # elif isinstance(value, list):
+        #     # Make sure all elements in list have same type
+        #     first_type = type(value[0])
+        #     if not all(type(el) == first_type for el in value[1:]):
+        #         raise TypeError('Can only store homogenous lists in table')
+        #     value = np.array(value)
+        #     dtype = np.dtype('{}{}'.format(value.shape, value.dtype))
+        #     print("dtype = {}".format(dtype))
         else:
             value = np.array(value)
-            fields[key] = tb.Col.from_dtype(value.dtype)
+            dtype = np.dtype('{}{}'.format(value.shape, value.dtype))
+            # PyTables gets upset by numpy arrays containing unicode strings,
+            # but will raise an error if it encounters a unicode string it
+            # cannot safely cast to ascii anyway. We should never have any such
+            # strings
+            # see http://www.pytables.org/MIGRATING_TO_3.x.html
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                fields[key] = tb.Col.from_dtype(dtype)
     return fields
 
 
@@ -618,6 +635,9 @@ def _recurse_row(row, base, data):
         new = base + key
         if isinstance(value, dict):
             _recurse_row(row, new + '/', value)
+        # elif isinstance(value, list) and type(value[0]) == str:
+        #     value = [el.encode('utf-8') for el in value]
+        #     row[new] = np.array(value)
         else:
             row[new] = value
 
@@ -629,6 +649,9 @@ def add_row(tbl, data):
     for (key, value) in data.items():
         if isinstance(value, MutableMapping):
             _recurse_row(row, key + '/', value)
+        # elif isinstance(value, list) and type(value[0]) == str:
+        #     value = [el.encode('utf-8') for el in value]
+        #     row[key] = np.array(value)
         else:
             row[key] = value
     row.append()
@@ -712,10 +735,14 @@ def numpy_arr_to_dict(arr):
             ret[k] = float(v)
         elif isinstance(v, (np.bytes_, np.str_, np.str)):
             ret[k] = v.decode()
+        elif isinstance(v, np.ndarray) and isinstance(v[0], np.bytes_):
+            ret[k] = [el.decode() for el in v]
+        elif isinstance(v, np.ndarray):
+            ret[k] = list(v)
         else:
-            print('Missed type!!')
-            print(type(v))
-            print(v)
+            msg = "numpy_arr_to_dict did not handle value {} of " \
+                  "type {}".format(v, type(v))
+            warnings.warn(msg, RuntimeWarning)
             ret[k] = v
     return ret
 

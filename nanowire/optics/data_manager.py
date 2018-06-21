@@ -1,5 +1,6 @@
 import os
 import posixpath
+import logging
 import numpy as np
 import tables as tb
 from collections import MutableMapping
@@ -39,15 +40,15 @@ class DataManager(MutableMapping, metaclass=ABCMeta):
     slightly less memory efficient but not in a significant way.
     """
 
-    def __init__(self, conf, log=None):
+    def __init__(self, store_path, logger=None):
         self._data = {}
         self._avgs = {}
         self._updated = {}
-        self.conf = conf
-        if log is None:
-            self.log = print
+        if logger is None:
+            self.log = logging.getLogger(__name__)
         else:
-            self.log = log
+            self.log = logger
+        self.store_path = store_path
         self._dstore = None
         self._blacklist = set()
 
@@ -66,6 +67,13 @@ class DataManager(MutableMapping, metaclass=ABCMeta):
         assert(isinstance(key, str))
         self._blacklist.remove(key)
 
+    @abstractmethod
+    def open_dstore(self):
+        """
+        Open the data store located at the path self.store_path for reading and
+        writing. Subclasses must implement their own logic for opening their
+        particular data store
+        """
 
     @abstractmethod
     def write_data(self):
@@ -163,28 +171,34 @@ class HDF5DataManager(DataManager):
     """
     Data manager class for the HDF5 storage backend
     """
+    # DEFAULT_FILTER = tb.Filters(complevel=8, complib='zlib')
+    DEFAULT_FILTER = None
 
-    def __init__(self, conf, log):
+    def __init__(self, store_path, group_path='/', filt=None, logger=None):
         """
         :param :class:`~utils.config.Config`: Config object for the simulation
         that this DataManager will be managing data for
-        :param log: A logger object
+        :param logger: A logger object
         """
 
-        super(HDF5DataManager, self).__init__(conf, log)
-        base_dir = os.path.expandvars(self.conf['General']['base_dir'])
-        sim_dir = os.path.expandvars(self.conf['General']['sim_dir'])
-        path = os.path.join(base_dir, sim_dir, 'sim.hdf5')
-        # path = os.path.join(sim_dir, 'sim.hdf5')
-        self._dstore = tb.open_file(path, 'a')
-        ID = os.path.basename(self.conf['General']['sim_dir'])
-        self.gpath = '/sim_{}'.format(ID)
+        super(HDF5DataManager, self).__init__(store_path, logger=logger)
+        self.open_dstore()
+        self.gpath = group_path
+        self.filt = filt if filt is not None else self.DEFAULT_FILTER
         try:
             self.gobj = self._dstore.get_node(self.gpath, classname='Group')
         except tb.NoSuchNodeError:
-            self.gobj = self._dstore.create_group('/', self.gpath[1:])
+            self.gobj = self._dstore.create_group('/', self.gpath[1:],
+                                                  filters=self.filt)
         self._update_keys()
-        self._updated = {key:False for key in self._data.keys()}
+        self._updated = {key: False for key in self._data.keys()}
+        self.writable = {np.recarray: self.write_recarray,
+                         np.ndarray: self.write_ndarray,
+                         str: self.write_string,
+                         float: self.write_float}
+
+    def open_dstore(self):
+        self._dstore = tb.open_file(self.store_path, 'a')
 
     def _update_keys(self, clear=False):
         """
@@ -224,6 +238,86 @@ class HDF5DataManager(DataManager):
         else:
             self._data[key] = node.read()
 
+    def write_recarray(self, recarr, name):
+        """
+        Write a record array to the underlying HDF5 datastore
+
+        Write a record array to a PyTables Table leaf node under group
+        `self.gpath` with name `name`. If a Table node does not already exist
+        directly beneath `self.gpath` , it is created automatically. If a Table
+        node does already exist, it is removed and a new table is written in
+        its place.
+        """
+
+        self.log.info('Writing data for recarray %s', name)
+        num_rows = recarr.shape[0]
+        try:
+            # If the table exists, clear it out
+            self._dstore.remove_node(self.gpath, name=name)
+        except tb.NoSuchNodeError:
+            pass
+        table = self._dstore.create_table(self.gpath, name,
+                                          description=recarr.dtype,
+                                          expectedrows=num_rows,
+                                          filters=self.filt)
+        row = table.row
+        fields = recarr.dtype.names
+        for record in recarr:
+            for (i, el) in enumerate(record):
+                row[fields[i]] = el
+            row.append()
+        table.flush()
+
+    def write_ndarray(self, arr, name):
+        """
+        Write a record array to the underlying HDF5 datastore
+
+        Write a array to a PyTables CArray leaf node under group `self.gpath`
+        with name `name`. If a CArray node does not already exist directly
+        beneath `self.gpath`, it is created automatically. If a CArray node
+        does already exist and has the same shape as `arr`, its data is
+        overwritten with the data from `arr`. If a CArray exists but it's shape
+        is not compatiable with `arr`, it is removed and a new table is written
+        in its place.
+        """
+
+        self.log.info('Writing data for array %s', name)
+        try:
+            # If compatible array exists, try overwriting its data
+            existing_arr = self._dstore.get_node(self.gpath, name=name)
+            if existing_arr.shape == arr.shape:
+                existing_arr[...] = arr
+            # Otherwise remove it and write a new one
+            else:
+                self._dstore.remove_node(self.gpath, name=name)
+                self._dstore.create_carray(self.gpath, name, obj=arr,
+                                           filters=self.filt,
+                                           atom=tb.Atom.from_dtype(arr.dtype))
+        except tb.NoSuchNodeError:
+            self._dstore.create_carray(self.gpath, name, obj=arr,
+                                       filters=self.filt,
+                                       atom=tb.Atom.from_dtype(arr.dtype))
+
+    def write_string(self, s, key):
+        """
+        Save a single string to the HDF5 file
+
+        Saves a string `s` to an attribute of `self.gpath`
+        """
+
+        node = self._dstore.get_node(self.gpath)
+        node._v_attrs[key] = s
+
+    def write_float(self, f, key):
+        """
+        Save a single float to the HDF5 file
+
+        Saves a float `f` to an attribute of `self.gpath`
+        """
+
+        node = self._dstore.get_node(self.gpath)
+        node._v_attrs[key] = f
+
     def write_data(self, blacklist=('normE', 'normEsquared'), clear=False):
         """
         Writes all necessary data out to the HDF5 file
@@ -243,54 +337,18 @@ class HDF5DataManager(DataManager):
         self.log.info(keys)
         for key in keys:
             obj = self._data[key]
-            # Check for recarry first cuz it is a subclass of ndarray
-            if isinstance(obj, np.recarray):
-                self.log.info('Writing data for recarray %s', key)
-                num_rows = obj.shape[0]
-                try:
-                    # If the table exists, clear it out
-                    self._dstore.remove_node(self.gpath, name=key)
-                    table = self._dstore.create_table(self.gpath, key,
-                                                     description=obj.dtype,
-                                                     expectedrows=num_rows)
-                except tb.NoSuchNodeError:
-                    table = self._dstore.create_table(self.gpath, key,
-                                                     description=obj.dtype,
-                                                     expectedrows=num_rows)
-                row = table.row
-                fields = obj.dtype.names
-                for record in obj:
-                    for (i, el) in enumerate(record):
-                        row[fields[i]] = el
-                    row.append()
-                table.flush()
-            elif isinstance(obj, np.ndarray):
-                self.log.info('Writing data for array %s', key)
-                try:
-                    existing_arr = self._dstore.get_node(self.gpath, name=key)
-                    if existing_arr.shape == obj.shape:
-                        existing_arr[...] = obj
-                    else:
-                        self._dstore.remove_node(self.gpath, name=key)
-                        if self.conf['General']['compression']:
-                            filt = tb.Filters(complevel=8, complib='zlib')
-                            self._dstore.create_carray(self.gpath, key, obj=obj,
-                                                      filters=filt,
-                                                      atom=tb.Atom.from_dtype(obj.dtype))
-                        else:
-                            self._dstore.create_array(self.gpath, key, obj)
-                except tb.NoSuchNodeError:
-                    if self.conf['General']['compression']:
-                        filt = tb.Filters(complevel=8, complib='zlib')
-                        self._dstore.create_carray(self.gpath, key, obj=obj,
-                                                  filters=filt,
-                                                  atom=tb.Atom.from_dtype(obj.dtype))
-                    else:
-                        self._dstore.create_array(self.gpath, key, obj)
+            try:
+                self.writable[type(obj)](obj, key)
+            except KeyError as e:
+                msg = 'Unable to write type {} at key {}'.format(type(obj),
+                                                                 key)
+                e.args = (msg, )
+                raise
+            # Flush to disk after every write operation, HDF5 has no journaling
+            self._dstore.flush()
             if clear:
                 del obj
                 del self._data[key]
-        self._dstore.flush()
 
     def close(self):
         self._update_keys(clear=True)
@@ -305,7 +363,7 @@ class NPZDataManager(DataManager):
         :param log: A logger object
         """
 
-        super(NPZDataManager, self).__init__(conf, log)
+        super(NPZDataManager, self).__init__(conf, logger)
         self._update_keys()
         path = os.path.join(self.conf['General']['sim_dir'],
                             'field_data.npz')

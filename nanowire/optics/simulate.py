@@ -975,7 +975,6 @@ class Simulator:
         else:
             raise ValueError('Invalid polarization specification')
 
-
     def get_height(self):
         """Get the total height of the device"""
         return sum(layer.thicknes for layer in self.layers.values())
@@ -1027,11 +1026,6 @@ class Simulator:
             Hx, Hy, Hz = None, None, None
         for zcount, z in enumerate(zvals):
             if self.conf["General"]["compute_h"]:
-                # E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(self.xsamps-1,
-                #                                                 self.ysamps-1),
-                #                                Format='Array')
-                # E_arr = np.array(E)
-                # H_arr = np.array(H)
                 E_arr, H_arr = self.s4.GetFieldsOnGridNumpy(z=z,
                                                             NumSamples=(self.ysamps-1,
                                                                         self.xsamps-1))
@@ -1049,10 +1043,6 @@ class Simulator:
                 Hz[zcount, -1, -1] = H_arr[0, 0, 2]
             else:
                 start = time.time()
-                # E = self.s4.GetFieldsOnGrid(z=z, NumSamples=(self.xsamps-1,
-                #                                              self.ysamps-1),
-                #                             Format='Array')[0]
-                # E_arr = np.array(E)
                 E_arr = self.s4.GetFieldsOnGridNumpy(z=z,
                                                      NumSamples=(self.ysamps-1,
                                                                  self.xsamps-1))[0]

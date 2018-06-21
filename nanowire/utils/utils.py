@@ -10,7 +10,6 @@ import copy
 import tempfile as tmp
 import numpy as np
 import tables as tb
-from multiprocessing import Pool
 from line_profiler import LineProfiler
 from contextlib import contextmanager
 from itertools import accumulate, repeat, chain, product

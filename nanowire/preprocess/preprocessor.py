@@ -6,7 +6,12 @@ import itertools
 import tables as tb
 import logging
 from collections import MutableMapping
-from ..utils.utils import get_pytables_desc, add_row
+from nanowire.utils.utils import (
+    get_pytables_desc,
+    add_row,
+    ureg,
+    Q_,
+)
 from .config import Config, find_lists
 
 logger = logging.getLogger(__name__)
@@ -22,7 +27,8 @@ def fn_pint_quantity(*args):
     floating point value of the quantity, and whose second item is a string
     representing the units
     """
-    raise NotImplementedError('Still need to add pint Quantity functionality')
+    quant = Q_(*args)
+    return quant
 
 
 class Preprocessor:
@@ -123,11 +129,11 @@ class Preprocessor:
         skip_keys = skip_keys if skip_keys is not None else []
         # Generate table description
         # flat_conf = self.confs[0].flatten(sep='__')
-        desc_dict = {'ID': self.confs[0].ID}
+        desc_dict = {'ID': self.confs[0].ID, 'yaml': self.confs[0].dump()}
         # desc_dict.update(flat_conf)
         desc_dict.update(self.confs[0])
         # desc = get_pytables_desc(desc_dict, skip_keys=skip_keys)
-        desc = get_pytables_desc(desc_dict)
+        desc, meta = get_pytables_desc(desc_dict)
         desc['ID']._v_pos = 0
         # Open in append mode!
         hdf = tb.open_file(db_path, mode='a')
@@ -142,7 +148,7 @@ class Preprocessor:
             existing_ids = table.read(field='ID')
         # conf_row = table.row
         for conf in self.confs:
-            write_dict = {'ID': conf.ID}
+            write_dict = {'ID': conf.ID, 'yaml': conf.dump()}
             write_dict.update(conf)
             if conf.ID.encode('utf-8') in existing_ids:
                 self.log.info('ID %s already in table', conf.ID)

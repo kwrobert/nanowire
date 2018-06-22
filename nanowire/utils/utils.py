@@ -8,13 +8,86 @@ import netifaces
 import traceback
 import copy
 import warnings
+import pint
 import tempfile as tmp
 import numpy as np
 import tables as tb
+from tables.file import _checkfilters
+from tables.parameters import EXPECTED_ROWS_TABLE
 from line_profiler import LineProfiler
 from contextlib import contextmanager
 from itertools import accumulate, repeat, chain, product
 from collections import Iterable, OrderedDict, MutableMapping
+
+ureg = pint.UnitRegistry()
+Q_ = ureg.Quantity
+
+
+class UnitTable(tb.Table):
+    """
+    A PyTables table that has an attribute for storing unit metadata. Any
+    column (may be nested) with units will automatically be deserialized to a
+    pint Quantity object
+    """
+    _c_classid = 'UnitTable'
+
+    # def __init__(self, parentNode, name, description=None,
+    #              title="", filters=None,
+    #              expectedrows=EXPECTED_ROWS_TABLE,
+    #              chunkshape=None, byteorder=None, _log=True, units=None):
+    def __init__(self, *args, units=None, **kwargs):
+        # super(UnitTable, self).__init__(parentNode, name,
+        #                                 description=description, title=title,
+        #                                 filters=filters,
+        #                                 expectedrows=expectedrows,
+        #                                 chunkshape=chunkshape, byteorder=byteorder,
+        #                                 _log=_log)
+        print('UnitTable init')
+        super(UnitTable, self).__init__(*args, **kwargs)
+        print('After super')
+        units = units if units is not None else {}
+        if units:
+            self.attrs['units'] = units
+        print('UnitTable attrs: ', self.attrs)
+        print('UnitTable units: ', self.attrs['units'])
+
+    def read(self, *args, **kwargs):
+        data = tb.Table.read(self, *args, **kwargs)
+        units = self.attrs['units']
+        print("UnitTable data: ", data)
+        print("UnitTable units: ", units)
+        print(type(data))
+        for row in data:
+            print(row)
+            print(type(row))
+            print(row.dtype.descr)
+            for field in row.dtype.descr:
+                for k, v in field:
+                    print(k)
+                    print(v)
+                # print(type(i))
+                # print(i)
+            # print(row.dtype.names)e.
+            # for k, v in zip(row.dtype.names, row):
+            #     print('k: ', k)
+            #     print('v: ', v)
+        return data
+
+def create_units_table(self, where, name, title="",
+                       filters=None, expectedrows=10000,
+                       chunkshape=None, byteorder=None,
+                       createparents=False, obj=None, description=None, units=None):
+    parentNode = self._get_or_create_path(where, createparents)
+
+    _checkfilters(filters)
+    return UnitTable(parentNode, name,
+                     title=title, filters=filters,
+                     expectedrows=expectedrows,
+                     description=description,
+                     chunkshape=chunkshape, byteorder=byteorder, units=units)
+
+# def get_unit_table(*args,
+tb.File.create_units_table = create_units_table
 
 
 def do_profile(follow=[], out=''):
@@ -359,14 +432,12 @@ def cmp_dicts(d1, d2, skip_keys=[]):
             if this_path in skip_keys:
                 continue
             if k1 not in d2:
-                # print('{} not in d2'.format(k1))
                 return False
         for k2 in d2.keys():
             this_path = posixpath.join(keypath, k1)
             if this_path in skip_keys:
                 continue
             if k2 not in d1:
-                # print('{} not in d1'.format(k2))
                 return False
         for k1, v1 in d1.items():
             v2 = d2[k1]
@@ -375,12 +446,10 @@ def cmp_dicts(d1, d2, skip_keys=[]):
                 continue
             if isinstance(v1, MutableMapping) and isinstance(v2, MutableMapping):
                 ret = _cmp_dicts(v1, v2, skip_keys=skip_keys, keypath=this_path)
-                # print("ret = {}".format(ret))
                 if not ret:
                     return False
             else:
                 if v1 != v2:
-                    # print('{} != {}'.format(v1, v2))
                     return False
         return True
     return _cmp_dicts(d1, d2, skip_keys=skip_keys)
@@ -596,6 +665,7 @@ def get_pytables_desc(data, skip_keys=[], keypath=''):
     # Normalize all the paths in skip_keys
     skip_keys = [posixpath.normpath(p.strip('/')) for p in skip_keys]
     fields = {}
+    meta = {}
     for (key, value) in data.items():
         newpath = posixpath.join(keypath, key)
         if newpath in skip_keys:
@@ -607,7 +677,7 @@ def get_pytables_desc(data, skip_keys=[], keypath=''):
             value = bool(value)
 
         if isinstance(value, dict):
-            fields[key] = get_pytables_desc(value, keypath=newpath)
+            fields[key], meta[key] = get_pytables_desc(value, keypath=newpath)
         # elif isinstance(value, list):
         #     # Make sure all elements in list have same type
         #     first_type = type(value[0])
@@ -615,7 +685,10 @@ def get_pytables_desc(data, skip_keys=[], keypath=''):
         #         raise TypeError('Can only store homogenous lists in table')
         #     value = np.array(value)
         #     dtype = np.dtype('{}{}'.format(value.shape, value.dtype))
-        #     print("dtype = {}".format(dtype))
+        elif isinstance(value, pint.quantity._Quantity):
+            arr = np.array(value.magnitude)
+            fields[key] = tb.Col.from_dtype(arr.dtype)
+            meta[key] = {'units': str(value.units)}
         else:
             value = np.array(value)
             dtype = np.dtype('{}{}'.format(value.shape, value.dtype))
@@ -627,7 +700,7 @@ def get_pytables_desc(data, skip_keys=[], keypath=''):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 fields[key] = tb.Col.from_dtype(dtype)
-    return fields
+    return fields, meta
 
 
 def _recurse_row(row, base, data):
@@ -638,6 +711,8 @@ def _recurse_row(row, base, data):
         # elif isinstance(value, list) and type(value[0]) == str:
         #     value = [el.encode('utf-8') for el in value]
         #     row[new] = np.array(value)
+        elif isinstance(value, pint.quantity._Quantity):
+            row[new] = value.magnitude
         else:
             row[new] = value
 
@@ -652,10 +727,13 @@ def add_row(tbl, data):
         # elif isinstance(value, list) and type(value[0]) == str:
         #     value = [el.encode('utf-8') for el in value]
         #     row[key] = np.array(value)
+        elif isinstance(value, pint.quantity._Quantity):
+            row[key] = value.magnitude
         else:
             row[key] = value
     row.append()
     tbl.flush()
+
 
 def view_fields(a, names):
     """

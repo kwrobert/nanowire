@@ -10,9 +10,11 @@ try:
 except ImportError:
     from yaml import Loader, Dumper
 import json
+import pint
 from nanowire.utils.utils import (
     remove_fields,
     numpy_arr_to_dict,
+    Q_,
 )
 
 
@@ -220,6 +222,7 @@ class Config(MutableMapping):
         Internal, recursive flattening implementation
         """
         flattened = flattened if flattened is not None else {}
+        skip_branch = skip_branch if skip_branch is not None else []
         if keypath:
             branch = branch if branch is not None else self._d[keypath]
         else:
@@ -316,5 +319,20 @@ def represent_odict(dumper, data):
     return dumper.represent_dict(data)
 
 
+def represent_pint_quantity(dumper, data):
+    qty = data
+    d = {'magnitude': qty.magnitude,
+         'units': str(qty.units),
+         'base_units': str((1.0*qty.units).to_base_units())}
+    return dumper.represent_mapping('!pintq', d)
+
+
+def construct_pint_quantity(loader, node):
+    d = loader.construct_mapping(node)
+    return Q_(d['magnitude'], d['units'])
+
+
 yaml.add_representer(OrderedDict, represent_odict)
 yaml.add_representer(Config, Config._to_yaml)
+yaml.add_multi_representer(pint.quantity._Quantity, represent_pint_quantity)
+yaml.add_constructor('!pintq', construct_pint_quantity)

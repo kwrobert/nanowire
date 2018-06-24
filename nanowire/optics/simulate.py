@@ -31,10 +31,10 @@ from lxml import etree
 from lxml.builder import E
 # get our custom config object and the logger function
 # from . import postprocess as pp
-from nanowire.optics.data_manager import HDF5DataManager
+from nanowire.utils.data_manager import HDF5DataManager
+from nanowire.utils.logging import IdFilter
 from nanowire.utils.utils import (
     make_hash,
-    IdFilter,
     get_combos,
     find_inds,
     merge_and_sort,
@@ -43,13 +43,18 @@ from nanowire.utils.utils import (
     get_public_iface,
     sorted_dict,
     find_keypaths,
-    group_against,
+    ureg, 
+    Q_
 )
 from nanowire.optics.utils.utils import (
     get_incident_amplitude,
     get_nk,
 )
-from nanowire.preprocess import Config
+from nanowire.utils.config import (
+    Config,
+    load_confs,
+    group_against,
+)
 from nanowire.optics.utils.geometry import get_layers
 
 DISPY_LOOKUP = {dispy.DispyJob.Abandoned: 'Abandoned',
@@ -116,7 +121,6 @@ def update_sim(conf, samples, q=None):
 
     try:
         log = logging.getLogger(__name__)
-        start = time.time()
         conf['General']['z_samples'] = samples
         sim = Simulator(copy.deepcopy(conf))
         sim.setup()
@@ -262,8 +266,9 @@ class SimulationManager:
         self.sim_confs = {}
         self.t_sweeps = {}
 
-    def load_confs(self, db, base_dir='', query='', table_path='/',
-                   table_name='simulations'):
+    # def load_confs(self, db, base_dir='', query='', table_path='/',
+    #                table_name='simulations'):
+    def load_confs(self, *args, **kwargs):
         """
         Load configs from disk
 
@@ -295,71 +300,10 @@ class SimulationManager:
         list
             A list of :py:class:`nanowire.preprocess.config.Config` objects
         """
-
-        # Find the data files and instantiate Config objects
-        if not base_dir:
-            base_dir = osp.dirname(db)
-        self.log.info(base_dir)
-        with tb.open_file(db, 'r') as hdf:
-            table = hdf.get_node(table_path, name=table_name,
-                                 classname='Table')
-            confs = {}
-            if query:
-                condvars = {k.replace('/', '__'): v
-                            for k, v in table.colinstances.items()}
-                for row in table.read_where(query, condvars=condvars):
-                    short_id = row['ID'].decode()[0:10]
-                    conf_path = osp.join(base_dir, short_id, 'sim_conf.yml')
-                    self.log.info('Loading config: %s', conf_path)
-                    conf = Config.fromYAML(row['yaml'])
-                    if row['ID'].decode() != conf.ID:
-                        raise ValueError('ID in database and ID of loaded '
-                                         'config do not match')
-                    confs[conf.ID] = (conf, conf_path)
-            else:
-                for row in table.read():
-                    short_id = row['ID'].decode()[0:10]
-                    conf_path = osp.join(base_dir, short_id, 'sim_conf.yml')
-                    self.log.info('Loading config: %s', conf_path)
-                    conf = Config.fromYAML(row['yaml'])
-                    if row['ID'].decode() != conf.ID:
-                        raise ValueError('ID in database and ID of loaded '
-                                         'config do not match')
-                    confs[conf.ID] = (conf, conf_path)
-        confs_list = [tup[0] for tup in confs.values()]
-        thickness_paths = find_keypaths(confs_list[0], 'thickness')
-        # We need to handle the case of thickness sweeps to take advantage of
-        # a core efficiency of RCWA, which is that thickness sweeps should come
-        # for free. t_sweeps is a dict whose keys and values are both
-        # simulation IDs. The keys are ID's of simulations who have a different
-        # thickness from the corresponding value, but otherwise have identical
-        # parameters. The values in the dict will be the simulations we
-        # actually run, and the keys are simulations whose solution will just
-        # point to the corresponding value
-        t_sweeps = {}
-        for path in thickness_paths:
-            # Skip max_depth when comparing because it depends on layer
-            # thicknesses
-            groups = group_against(confs_list, path,
-                                   skip_keys=['Simulation/max_depth'])
-            for i, b in enumerate([len(group) > 1 for group in groups]):
-                if b:
-                    self.log.info('Found thickness sweep over %s', path)
-                    keep_id = groups[i][0].ID
-                    for c in groups[i][1:]:
-                        t_sweeps[c.ID] = keep_id
+        confs, t_sweeps = load_confs(*args, **kwargs)
         self.t_sweeps = t_sweeps
-        # for root, dirs, files in os.walk(base_dir):
-        #     if os.path.basename(root) in short_ids and 'sim_conf.yml' in files:
-        #         conf_path = osp.join(root, 'sim_conf.yml')
-        #         self.log.info('Loading config: %s', conf_path)
-        #         conf_obj = Config.fromFile(conf_path)
-        #         confs.append((conf_path, conf_obj))
         self.sim_confs = confs
-        if not confs:
-            self.log.error('Unable to find any configs')
-            raise RuntimeError('Unable to find any configs')
-        return confs
+        return confs, t_sweeps
 
     def filter_sims(self, filter_dict):
         """
@@ -736,7 +680,7 @@ class Simulator:
             self.Z = np.asarray(self.conf['General']['z_samples'])
         else:
             self.zsamps = self.conf['General']['z_samples']
-            max_depth = self.conf['Simulation']['max_depth']
+            max_depth = self.conf['General']['max_depth']
             if max_depth:
                 self.log.debug('Computing up to depth of {} '
                                'microns'.format(max_depth))
@@ -925,7 +869,7 @@ class Simulator:
 
     def get_height(self):
         """Get the total height of the device"""
-        return sum(layer.thicknes for layer in self.layers.values())
+        return sum(layer.thickness for layer in self.layers.values())
 
     def set_lattice(self, period):
         """Updates the S4 simulation object with a new array period"""
@@ -946,6 +890,8 @@ class Simulator:
             self.s4.SetLayerThickness(Layer=layer, Thickness=thickness)
 
     # @do_profile(out='$nano/tests/profile_writing/line_profiler.txt', follow=[])
+    # @ureg.wraps(('volt/micrometer', 'volt/micrometer', 'volt/micrometer'),
+    #             None)
     def compute_fields(self, zvals=None):
         """
         Constructs and returns a full 3D numpy array for each vector component
@@ -1014,6 +960,8 @@ class Simulator:
         self.log.debug('Finished computing fields!')
         return Ex, Ey, Ez, Hx, Hy, Hz
 
+    # @ureg.wraps(('volt/micrometer', 'volt/micrometer', 'volt/micrometer'),
+    #             None)
     def compute_fields_by_point(self):
         self.log.debug('Computing fields ...')
         Ex = np.zeros((self.zsamps, self.xsamps, self.ysamps),
@@ -1044,6 +992,8 @@ class Simulator:
                         Hz[zcount, i, j] = H[2]
         return Ex, Ey, Ez, Hx, Hy, Hz
 
+    # @ureg.wraps(('volt/micrometer', 'volt/micrometer', 'volt/micrometer'),
+    #             None)
     def compute_fields_at_point(self, x, y, z):
         """
         Compute the electric field at a specific point within the device and
@@ -1057,6 +1007,8 @@ class Simulator:
             H = (None, None, None)
         return E[0], E[1], E[2], H[0], H[1], H[2]
 
+    # @ureg.wraps(('volt/micrometer', 'volt/micrometer', 'volt/micrometer'),
+    #             None)
     def compute_fields_by_layer(self, sample_dict):
         """
         Compute fields within each layer such that a z sample falls exactly on
@@ -1093,6 +1045,8 @@ class Simulator:
         return results
 
     # @do_profile(follow=[])
+    # @ureg.wraps(('volt/micrometer', 'volt/micrometer', 'volt/micrometer'),
+    #             None)
     def compute_fields_on_plane(self, z, xs, ys):
         """
         Compute the electric field on an x-y plane at a given z value with a

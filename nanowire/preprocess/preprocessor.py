@@ -1,5 +1,4 @@
 import os
-import pprint
 import conff
 import posixpath
 import itertools
@@ -11,8 +10,9 @@ from nanowire.utils.utils import (
     add_row,
     ureg,
     Q_,
+    find_lists
 )
-from .config import Config, find_lists
+from nanowire.utils.config import Config
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())

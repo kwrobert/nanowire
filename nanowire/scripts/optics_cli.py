@@ -78,25 +78,21 @@ def run(config, output_dir):
     """
 
     import nanowire.optics.simulate as simul
-    import nanowire.preprocess as prep
+    from nanowire.utils.config import Config
 
-    conf = prep.Config.fromFile(config)
+    conf = Config.fromFile(config)
     if output_dir is None:
         output_dir = os.path.dirname(config)
     simul.run_sim(conf, output_dir)
     return None
 
 
-h0 = "Base directory containing all configs. If not specified, defaults to " \
-     "the directory of the input config"
+h0 = "Base directory that all simulations will dump their output data to. " \
+     "If not specified, defaults to the directory of the input database"
 h1 = "Only run simulations whose parameters match the provided query. The " \
      "query may contained double-underscore separated paths to entries in " \
      "the simulation config. For example\n" \
      "-f '(Simulation__numbasis == 200) & (Simulation__frequency*2 < 5e14)'"
-h2 = "Update the electric field arrays with new z samples without " \
-     "overwriting the old data. Can only upate the sampling in z " \
-     "because there is no way to update in x-y without destroying " \
-     "the regularity of the grid"
 h3 = "Path to the parent group of the table inside the HDF5 file used for " \
      "storing configurations"""
 h4 = "Name of the table at the end of table_path for storing configurations"
@@ -115,9 +111,11 @@ h4 = "Name of the table at the end of table_path for storing configurations"
 @click.option('-t', '--table_path', default='/', help=h3, show_default=True)
 @click.option('-n', '--table_name', default='simulations', help=h4,
               show_default=True)
-@click.option('-v', '--log_level', help="Set verbosity of logging",
+@click.option('-v', '--log_level',
               type=click.Choice(['info', 'debug', 'warning', 'critical', 'error']),
-              default='info')
+              default='info',
+              help="Set verbosity of logging")
+
 def run_all(config, db, base_dir, params, query, update, table_path,
             table_name, log_level):
     """
@@ -134,6 +132,78 @@ def run_all(config, db, base_dir, params, query, update, table_path,
     """
 
     import nanowire.optics.simulate as simul
+    import nanowire.preprocess as prep
+
+    processor = prep.Preprocessor(config)
+    parsed_dicts = processor.generate_configs(params=params)
+    if len(parsed_dicts) != 1:
+        raise ValueError('Must have only 1 set of unique parameters for the '
+                         'manager configuration')
+    conf = parsed_dicts[0]
+    manager = simul.SimulationManager(conf, log_level=log_level.upper())
+    manager.load_confs(db, base_dir=base_dir, query=query,
+                       table_path=table_path, table_name=table_name)
+    if update:
+        manager.run(func=simul.update_sim, load=True)
+    else:
+        manager.run()
+
+@optics.command()
+@click.argument('config', type=exist_read_path)
+@click.argument('db', type=exist_read_path)
+@click.option('-b', '--base_dir',
+              callback=lambda ctx, p, v: os.path.dirname(ctx.params['db']) if not v else v,
+              type=exist_read_dir, help=h0)
+@click.option('-p', '--params', default=None, type=exist_read_path,
+              help="Optional params for the config file parser")
+@click.option('-q', '--query', type=str, help=h1)
+@click.option('-t', '--table_path', default='/', help=h3, show_default=True)
+@click.option('-n', '--table_name', default='simulations', help=h4,
+              show_default=True)
+@click.option('-nc', '--no_crunch', is_flag=True, default=False,
+              help="Do not perform crunching operations. Useful when data has "
+                   "already been crunched but new plots need to be generated")
+@click.option('-ngc', '--no_gcrunch', is_flag=True, default=False,
+              help="Do not perform global crunching operations. Useful when "
+                   "data has already been crunched but new plots need to be "
+                   "generated")
+@click.option('-np', '--no_plot', is_flag=True, default=False,
+              help="Do not perform plotting operations. Useful when you only "
+                   "want to crunch your data without plotting")
+@click.option('-ngp', '--no_gplot', is_flag=True, default=False,
+              help="Do not perform global plotting operations. Useful when "
+                   "you only want to crunch your data without plotting")
+@click.option('--print', is_flag=True, default=False,
+              help="Print IDs of simulations to be processed, without running "
+                   "anything")
+@click.option('-gb', '--group_by',
+              help="The parameter you would like to group simulations by, "
+                   "specified as a dot separated path to the key in the "
+                   "config as: path.to.key.value")
+@click.option('-ga', '--group_against',
+              help="The parameter you would like to group against, specified "
+                   "as a dot separated path to the key in the config as: "
+                   "path.to.key.value")
+@click.option('-v', '--log_level', help="Set verbosity of logging",
+              type=click.Choice(['info', 'debug', 'warning', 'critical', 'error']),
+              default='info')
+def postprocess(config, db, base_dir, params, query, update, table_path,
+                table_name, log_level):
+    """
+    Run all the simulations located beneath BASE_DIR.
+
+    The directory tree beneath BASE_DIR is traversed recursively from the top
+    down and all the config files beneath it are collected. A simulation is run
+    for each config file found, and the output of each simulation is stored in
+    the same directory as the corresponding config file.
+
+    Can optionally configure how the manager runs via a config file, command
+    line parameters, or a combination of the two. The config file will be
+    treated as a template and can thus contain any special templating syntax
+    """
+
+    import nanowire.optics.simulate as simul
+    import nanowire.optics.postprocess as post
     import nanowire.preprocess as prep
 
     processor = prep.Preprocessor(config)

@@ -1,11 +1,12 @@
 import os
 import posixpath
 import logging
+import pint
 import numpy as np
 import tables as tb
 from collections import MutableMapping
 from abc import ABCMeta, abstractmethod
-from ..utils.utils import open_atomic
+from nanowire.utils.utils import open_atomic
 
 
 class TransmissionData(tb.IsDescription):
@@ -195,7 +196,8 @@ class HDF5DataManager(DataManager):
         self.writable = {np.recarray: self.write_recarray,
                          np.ndarray: self.write_ndarray,
                          str: self.write_string,
-                         float: self.write_float}
+                         float: self.write_float,
+                         pint.quantity._Quantity: self.write_pint_quantity}
 
     def open_dstore(self):
         self._dstore = tb.open_file(self.store_path, 'a')
@@ -220,23 +222,50 @@ class HDF5DataManager(DataManager):
         # deprecation warning, and array_equal works on dicts and lists
         return np.array_equal(self._data[key], value)
 
+    def _get_writer(self, obj):
+        for klass, writer in self.writable.items():
+            if isinstance(obj, klass):
+                return writer
+        else:
+            msg = 'No writer available for class {}'.format(obj.__class__)
+            raise ValueError(msg)
+
     def _load_data(self, key):
         """
         Implements logic for loading data when the user asks for it by
-        accessing the revelant key. This is only called from __getitem__
+        accessing the relevant key. This is only called from __getitem__
         """
 
-        nodepath = os.path.join(self.gpath, key)
+        nodepath = posixpath.join(self.gpath, key)
         try:
             node = self._dstore.get_node(nodepath)
+            if isinstance(node, tb.Table):
+                data = node.read().view(np.recarray)
+                # self._data[key] =
+            else:
+                data = node.read()
+                # self._data[key] = node.read()
+            try:
+                units = node.attrs['units']
+            except KeyError:
+                units = None
+            if units is not None:
+                self._data[key] = pint.Quantity(data, units)
+            else:
+                self._data[key] = data
         except tb.NoSuchNodeError:
-            self.log.error('The node you requested does not exist in the'
-                           ' HDF5 file')
+            pass
+        # Check the attributes of the group
+        try:
+            self.log.info('The node you requested does not exist in the '
+                          'HDF5 file, checking group attributes')
+            group = self._dstore.get_node(self.gpath)
+            self._data[key] = group._v_attrs[key]
+        except KeyError as e:
+            msg = 'The nodes or attributes exist with name {}'.format(key)
+            self.log.error(msg)
+            e.args = e.args + (msg,)
             raise
-        if isinstance(node, tb.Table):
-            self._data[key] = node.read().view(np.recarray)
-        else:
-            self._data[key] = node.read()
 
     def write_recarray(self, recarr, name):
         """
@@ -267,10 +296,11 @@ class HDF5DataManager(DataManager):
                 row[fields[i]] = el
             row.append()
         table.flush()
+        return table
 
     def write_ndarray(self, arr, name):
         """
-        Write a record array to the underlying HDF5 datastore
+        Write a ndarray to the underlying HDF5 datastore
 
         Write a array to a PyTables CArray leaf node under group `self.gpath`
         with name `name`. If a CArray node does not already exist directly
@@ -284,19 +314,21 @@ class HDF5DataManager(DataManager):
         self.log.info('Writing data for array %s', name)
         try:
             # If compatible array exists, try overwriting its data
-            existing_arr = self._dstore.get_node(self.gpath, name=name)
-            if existing_arr.shape == arr.shape:
-                existing_arr[...] = arr
+            node = self._dstore.get_node(self.gpath, name=name)
+            if node.shape == arr.shape:
+                print('arr', type(arr))
+                node[...] = arr
+                return node
             # Otherwise remove it and write a new one
-            else:
-                self._dstore.remove_node(self.gpath, name=name)
-                self._dstore.create_carray(self.gpath, name, obj=arr,
-                                           filters=self.filt,
-                                           atom=tb.Atom.from_dtype(arr.dtype))
+            self._dstore.remove_node(self.gpath, name=name)
+            node = self._dstore.create_carray(self.gpath, name, obj=arr,
+                                              filters=self.filt,
+                                              atom=tb.Atom.from_dtype(arr.dtype))
         except tb.NoSuchNodeError:
-            self._dstore.create_carray(self.gpath, name, obj=arr,
-                                       filters=self.filt,
-                                       atom=tb.Atom.from_dtype(arr.dtype))
+            node = self._dstore.create_carray(self.gpath, name, obj=arr,
+                                              filters=self.filt,
+                                              atom=tb.Atom.from_dtype(arr.dtype))
+        return node
 
     def write_string(self, s, key):
         """
@@ -307,6 +339,7 @@ class HDF5DataManager(DataManager):
 
         node = self._dstore.get_node(self.gpath)
         node._v_attrs[key] = s
+        return node
 
     def write_float(self, f, key):
         """
@@ -317,6 +350,27 @@ class HDF5DataManager(DataManager):
 
         node = self._dstore.get_node(self.gpath)
         node._v_attrs[key] = f
+        return node
+
+    def write_pint_quantity(self, q, key):
+        """
+        Write a pint Quantity object to the HDF5 file. A Quantity object can
+        wrap literally *any* python type, so we have to check for the type of
+        magnitude and call the appropriate writer here
+        """
+        wrapped_type = q.magnitude.__class__
+        # We write arrays out as usual, then just set an attribute on the node
+        # that identifies its units
+        if wrapped_type in (np.ndarray, np.recarray):
+            writer = self._get_writer(q.magnitude)
+            node = writer(q.magnitude, key)
+            # Only leaves have the .attrs attribute
+            node.attrs['units'] = str(q.units)
+        else:
+            # PyTables can save arbitrary python objects as attributes and
+            # reload them transparently, as long as they are pickleable
+            node = self._dstore.get_node(self.gpath)
+            node._v_attrs[key] = q
 
     def write_data(self, blacklist=('normE', 'normEsquared'), clear=False):
         """
@@ -337,13 +391,8 @@ class HDF5DataManager(DataManager):
         self.log.info(keys)
         for key in keys:
             obj = self._data[key]
-            try:
-                self.writable[type(obj)](obj, key)
-            except KeyError as e:
-                msg = 'Unable to write type {} at key {}'.format(type(obj),
-                                                                 key)
-                e.args = (msg, )
-                raise
+            writer = self._get_writer(obj)
+            writer(obj, key)
             # Flush to disk after every write operation, HDF5 has no journaling
             self._dstore.flush()
             if clear:

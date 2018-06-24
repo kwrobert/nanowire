@@ -68,7 +68,7 @@ def get_layers(sim):
     start = 0
     layers = OrderedDict()
     materials = sim.conf['Materials']
-    max_depth = sim.conf[('Simulation', 'max_depth')]
+    max_depth = sim.conf[('General', 'max_depth')]
     for layer, ldata in ordered_layers.items():
         # Dont add the layer if we don't have field data for it because its
         # beyond max_depth

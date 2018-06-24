@@ -168,137 +168,6 @@ def open_atomic(filepath, npz=True):
             os.rename(tmppath, filepath)
 
 
-class LogExceptions:
-    def __init__(self, callable):
-        self.__callable = callable
-
-    def __call__(self, *args, **kwargs):
-        try:
-            result = self.__callable(*args, **kwargs)
-        except Exception as e:
-            # Here we add some debugging help.
-            log = logging.getLogger(__name__)
-            log.error(traceback.format_exc())
-            # Re-raise the original exception so the Pool worker can clean up.
-            # This kills the parent process if it calls .get or .wait on the
-            # AsyncResult object returned by apply_async
-            # raise
-        # It was fine, give a normal answer
-        return result
-
-
-# class LoggingPool(Pool):
-#     def apply_async(self, func, args=(), kwds={}, callback=None):
-#         return Pool.apply_async(self, LogExceptions(func), args, kwds,
-#                                 callback)
-
-
-class StreamToLogger:
-    """
-    Fake file-like stream object that redirects writes to a logger instance.
-    """
-    def __init__(self, logger, log_level=logging.INFO):
-        self.logger = logger
-        self.log_level = log_level
-        self.linebuf = ''
-
-    def write(self, buf):
-        for line in buf.rstrip().splitlines():
-            self.logger.log(self.log_level, line.rstrip())
-
-    def flush(self):
-        # create a flush method so things can be flushed when
-        # the system wants to. Not sure if simply 'printing'
-        # sys.stderr is the correct way to do it, but it seemed
-        # to work properly for me.
-        self.level(sys.stderr)
-
-
-class IdFilter(logging.Filter):
-    """
-    A filter to either only pass log records with a matching ID, or reject all
-    log records with an ID attribute. This is configurable via a kwarg to the
-    init method
-    """
-
-    def __init__(self, ID=None, name="", reject=False):
-        super(IdFilter, self).__init__(name=name)
-        self.ID = ID
-        if reject:
-            self.filter = self.reject_filter
-        else:
-            self.filter = self.pass_filter
-
-    def pass_filter(self, record):
-        if not hasattr(record, 'ID'):
-            return 0
-        if record.ID == self.ID:
-            return 1
-        else:
-            return 0
-
-    def reject_filter(self, record):
-        if hasattr(record, 'ID'):
-            return 0
-        else:
-            return 1
-
-
-def configure_logger(level='info', name=None, console=False, logfile=None,
-                     propagate=True):
-    """
-    Creates a logger providing some arguments to make it more configurable.
-
-    :param str name:
-        Name of logger to be created. Defaults to the root logger
-    :param str level:
-        The log level of the logger, defaults to INFO. One of: ['debug', 'info',
-        'warning', 'error', 'critical']
-    :param bool console:
-        Add a stream handler to send messages to the console. Generally
-        only necessary for the root logger.
-    :param str logfile:
-        Path to a file. If specified, will create a simple file handler and send
-        messages to the specified file. The parent dirs to the location will
-        be created automatically if they don't already exist.
-    """
-
-    # Get numeric level safely
-    numeric_level = getattr(logging, level.upper(), None)
-    if not isinstance(numeric_level, int):
-        raise ValueError('Invalid log level: %s' % level)
-    # Set formatting
-    formatter = logging.Formatter('%(asctime)s [%(module)s:%(name)s:%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
-    # Create logger
-    if name:
-        logger = logging.getLogger(name)
-    else:
-        logger = logging.getLogger()
-    if not propagate:
-        logger.propagate = False
-    logger.setLevel(numeric_level)
-    if logfile:
-        log_dir, logfile = os.path.split(os.path.expandvars(logfile))
-        # Set up file handler
-        try:
-            os.makedirs(log_dir)
-        except OSError:
-            # Log dir already exists
-            pass
-        output_file = os.path.join(log_dir, logfile)
-        fhandler = logging.FileHandler(output_file)
-        fhandler.setFormatter(formatter)
-        logger.addHandler(fhandler)
-    # Create console handler
-    if console:
-        ch = logging.StreamHandler()
-        ch.setLevel(numeric_level)
-        ch.setFormatter(formatter)
-        logger.addHandler(ch)
-
-    return logger
-
-
 def get_combos(conf, keysets):
     """Given a config object and an iterable of the parameters you wish to find
     unique combinations of, return two lists. The first list contains the
@@ -455,6 +324,27 @@ def cmp_dicts(d1, d2, skip_keys=[]):
                     return False
         return True
     return _cmp_dicts(d1, d2, skip_keys=skip_keys)
+
+
+def find_lists(o, keypath=[], list_locs=None, lists=None):
+    """
+    Find all lists in a dictionary recursively
+    """
+
+    list_locs = list_locs if list_locs is not None else []
+    lists = lists if lists is not None else []
+    if isinstance(o, dict):
+        for key in o.keys():
+            loc = keypath + [key]
+            val = o[key]
+            if isinstance(val, list):
+                list_locs.append(loc)
+                lists.append(val)
+            elif isinstance(val, dict):
+                find_lists(val, keypath=loc, list_locs=list_locs, lists=lists)
+            else:
+                continue
+    return list_locs, lists
 
 
 def find_keypaths(d, key):
@@ -827,126 +717,6 @@ def numpy_arr_to_dict(arr):
     return ret
 
 
-def group_against(confs, key, sort_key=None, skip_keys=None):
-    """
-    Group configs against particular parameter.
-
-    Group a list of config objects against a particular parameter. Within each
-    group, the parameter specified by `key` will vary, and all other parameters
-    will remain fixed. Useful for examining the affect of a single parameter on
-    simulation outputs, and for generating line plots with the parameter
-    specified by `key` on the x-axis.
-
-    Parameters
-    ----------
-    confs : list
-        A list of :py:class:`nanowire.preprocess.config.Config` objects
-    key : str
-        A key specifying which parameter simulations will be grouped against.
-        Individual simulations within each group will be sorted in increasing
-        order of this parameter, and all other parameters will remain constant
-        within the group. Key can be a slash-separated string pointing to
-        nested items in the config.
-    sort_key : str, optional
-        An optional key used to sort the order of the inner lists within the
-        returned outer list of groups. Works because all parameters within each
-        internal group are constant (excluding the parameter specified by
-        `key`). The outer list of group lists will be sorted in increasing
-        order of the specified sort_key.
-    skip_keys : list
-        A list of keys to skip when comparing two Configs.
-
-    Returns
-    -------
-    list
-        A list of lists. Each inner list is a group, sorted in increasing order
-        of the parameter `key`. All other parameters in each group are
-        constant. The outer list may optionally be sorted in increasing order
-        of an additonal `sort_key`
-
-    Notes
-    -----
-    The config options in the input list `confs` are not copied, and references
-    to the original Config objects are stored in the returned data structure
-    """
-
-    # We need only need a shallow copy of the list containing all the Config
-    # objects. We don't want to modify the orig list but we wish to share
-    # the sim objects the two lists contain
-    skip_keys = skip_keys if skip_keys is not None else []
-    skip_keys.append(key)
-    sim_confs = copy.copy(confs)
-    sim_groups = [[sim_confs.pop()]]
-    while sim_confs:
-        conf = sim_confs.pop()
-        # Loop through each group, checking if this sim belongs in the
-        # group
-        match = False
-        for group in sim_groups:
-            conf2 = group[0]
-            params_same = cmp_dicts(conf, conf2, skip_keys=skip_keys)
-            if params_same:
-                group.append(conf)
-                match = True
-                break
-        # If we didnt find a matching group, we need to create a new group
-        # for this simulation
-        if not match:
-            sim_groups.append([conf])
-    for group in sim_groups:
-        # Sort the individual sims within a group in increasing order of
-        # the parameter we are grouping against a
-        group.sort(key=lambda aconf: aconf[key])
-    # Sort the groups in increasing order of the provided sort key
-    if sort_key:
-        sim_groups.sort(key=lambda agroup: agroup[0][sort_key])
-    return sim_groups
-
-
-def dump_configs(hdf_path, table_path='/', table_name='simulations',
-                 outdir=''):
-    """
-    Dump all the Configs in an HDF5 table to YAML files
-
-    Parameters
-    ----------
-
-    hdf_path : str
-        Path to the HDF5 file containing the database
-    table_path : str, optional
-        Path to the group containing the database table. Default: '/'
-    table_name : str, optional
-        Name of the database table. Default: 'simulations'
-    outdir : str, optional
-        Directory to dump the config files into. Defaults to the same directory
-        as the HDF5 file. If you pass in a path that does not exist, it is
-        created.
-
-    Returns
-    -------
-
-    list
-        List of absolute paths to the dumped files
-    """
-
-    if not os.path.isfile(hdf_path):
-        raise ValueError('Arg {} is not a regular file'.format(hdf_path))
-    outdir = outdir if outdir else os.path.dirname(hdf_path)
-    if not os.path.isdir(outdir):
-        os.makedirs(outdir)
-    hdf = tb.open_file(hdf_path, 'r')
-    table = hdf.get_node(table_path, name=table_name, classname='Table')
-    paths = []
-    for row in table.iterrows():
-        stream = row['yaml'].decode()
-        ID = row['ID'].decode()
-        fname = '{}.yml'.format(ID)
-        outpath = os.path.join(outdir, fname)
-        with open(outpath, 'w') as f:
-            f.write(stream)
-        paths.append(outpath)
-    hdf.close()
-    return paths
 
 
 def get_processes_using_file(path):

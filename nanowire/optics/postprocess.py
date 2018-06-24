@@ -1,4 +1,5 @@
 import os
+import os.path as osp
 import glob
 import sys
 import time
@@ -18,27 +19,26 @@ import scipy.constants as consts
 import scipy.integrate as intg
 import numpy as np
 import naturalneighbor as nn
-np.set_printoptions(precision=3, threshold=100000)
 from mpl_toolkits.mplot3d import Axes3D
 from itertools import repeat
-from collections import OrderedDict
 from scipy import interpolate
-import scipy.constants as consts
-from .utils.config import Config
-from .utils.utils import (
-    IdFilter,
-    cmp_dicts,
-    make_hash,
-    get_nk,
-    get_incident_power,
-    get_incident_amplitude,
+from sympy import Circle
+from nanowire.utils.config import Config, load_confs
+from nanowire.utils.utils import (
     cartesian_product,
     arithmetic_arange
 )
-from sympy import Point, Circle, Ellipse, Triangle, Polygon, RegularPolygon
-from .simulate import Simulator
-from .data_manager import DataManager, HDF5DataManager, NPZDataManager
-from .utils.geometry import (
+from nanowire.utils.logging import (
+    IdFilter,
+)
+from nanowire.optics.utils.utils import (
+    get_nk,
+    get_incident_power,
+    get_incident_amplitude,
+)
+from nanowire.optics.simulate import Simulator
+from nanowire.utils.data_manager import DataManager, HDF5DataManager
+from nanowire.utils.geometry import (
     Layer,
     get_mask_by_shape,
     get_mask_by_material,
@@ -57,14 +57,14 @@ formatter = logging.Formatter('%(asctime)s [%(name)s:%(levelname)s]'
 # Create logger
 logger = logging.getLogger(__name__)
 logger.setLevel(info)
-log_dir, logfile = os.path.split(os.path.expandvars(logfile))
+log_dir, logfile = osp.split(osp.expandvars(logfile))
 # Set up file handler
 try:
     os.makedirs(log_dir)
 except OSError:
     # Log dir already exists
     pass
-output_file = os.path.join(log_dir, logfile)
+output_file = osp.join(log_dir, logfile)
 fhandler = logging.FileHandler(output_file)
 fhandler.setFormatter(formatter)
 fhandler.setLevel(debug)
@@ -102,7 +102,7 @@ class Simulation:
     attribute. Many of the methods are for performing calculations on the data.
     """
 
-    def __init__(self, conf=None, simulator=None):
+    def __init__(self, outdir, conf=None, simulator=None):
         """
         :param :class:`~utils.config.Config`: Config object for this simulation
         """
@@ -114,12 +114,11 @@ class Simulation:
             self.conf = conf
         else:
             self.conf = copy.deepcopy(simulator.conf)
-        self.id = self.conf['General']['sim_dir'][-10:]
-        base_dir = os.path.expandvars(self.conf['General']['base_dir'])
-        sim_dir = os.path.expandvars(self.conf['General']['sim_dir'])
-        self.dir = os.path.join(base_dir, sim_dir)
-        self.fhandler = logging.FileHandler(os.path.join(self.dir, 'postprocess.log'))
-        self.fhandler.addFilter(IdFilter(ID=self.id))
+        self.ID = self.conf['General']['sim_dir'][-10:]
+        self.path = osp.abspath(osp.normpath(osp.expandvars(outdir)))
+        self.base, self.dir = osp.split(self.path)
+        self.fhandler = logging.FileHandler(osp.join(self.dir, 'postprocess.log'))
+        self.fhandler.addFilter(IdFilter(ID=self.ID))
         formatter = logging.Formatter('%(asctime)s [%(name)s:%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
         self.fhandler.setFormatter(formatter)
         log = logging.getLogger(__name__)
@@ -127,7 +126,7 @@ class Simulation:
         # Store the logger adapter to the module level logger as an attribute.
         # We use this to log in any methods, and the sim_id of this instance
         # will get stored in the log record
-        self.log = logging.LoggerAdapter(log, {'ID': self.id})
+        self.log = logging.LoggerAdapter(log, {'ID': self.ID})
         self.log.debug('Logger initialized')
         if not self.conf['General']['save_as']:
             self.data = {}
@@ -173,10 +172,8 @@ class Simulation:
         depending on the file type specified in the config
         """
 
-        ftype = self.conf['General']['save_as']
-        if ftype == 'npz':
-            return NPZDataManager(self.conf, self.log)
-        elif ftype == 'hdf5':
+        ftype = self.conf['General']['save_as'].lower()
+        if ftype == 'hdf5':
             return HDF5DataManager(self.conf, self.log)
         else:
             raise ValueError('Invalid file type in config')
@@ -787,7 +784,7 @@ class Simulation:
             counter += 1
         self.log.info("Integration Order: %s, Layer absorption arr: %s",
                       str(order), str(absorb_arr))
-        fout = os.path.join(self.dir, 'abs_per_layer.dat')
+        fout = osp.join(self.dir, 'abs_per_layer.dat')
         with open(fout, 'w') as f:
             absorb_arr.tofile(f, sep=', ')
         self.data['abs_per_layer'] = absorb_arr
@@ -921,12 +918,12 @@ class Simulation:
         val = absorb * wvlgth * sun_pow
         # val = absorb * wvlgth
         # test = absorb * sun_pow * wvlgth_nm * wv_fact * delta_wv
-        # self.log.info('Sim %s Jsc Integrand: %f', self.id, test)
+        # self.log.info('Sim %s Jsc Integrand: %f', self.ID, test)
         # Use Trapezoid rule to perform the integration. Note all the
         # necessary factors of the wavelength have already been included
         # above
         Jsc = wv_fact * val
-        outf = os.path.join(self.dir, 'jsc_contrib.dat')
+        outf = osp.join(self.dir, 'jsc_contrib.dat')
         with open(outf, 'w') as out:
             out.write('%f\n' % Jsc)
         self.log.info('Jsc contrib = %f', Jsc)
@@ -947,7 +944,7 @@ class Simulation:
         self.log.info('Sun power = %f', sun_pow)
         self.log.info('Integral = %f', y_integral)
         Jsc = 1000*(consts.e/(self.period*1e-4)**2)*y_integral
-        outf = os.path.join(self.dir, 'jsc_integrated_contrib.dat')
+        outf = osp.join(self.dir, 'jsc_integrated_contrib.dat')
         with open(outf, 'w') as out:
             out.write('%f\n' % Jsc)
         self.log.info('Jsc_integrated contrib = %f', Jsc)
@@ -963,8 +960,8 @@ class Simulation:
         raise NotImplementedError('There are some bugs in S4 and other reasons'
                                   ' that this function doesnt work yet')
         base = self.conf['General']['sim_dir']
-        path = os.path.join(base, 'integrated_absorption.dat')
-        inpath = os.path.join(base, 'energy_densities.dat')
+        path = osp.join(base, 'integrated_absorption.dat')
+        inpath = osp.join(base, 'energy_densities.dat')
         freq = self.conf['Simulation']['params']['frequency']
         # TODO: Assuming incident amplitude and therefore incident power is
         # just 1 for now
@@ -1034,7 +1031,7 @@ class Simulation:
             #              bbox=dict(boxstyle='round', fc='w'))
             plt.xlabel('Re(q) [radians/micron]')
             plt.ylabel('Im(q) [1/microns]')
-            plot_path = os.path.join(self.dir, '{}_qvals.png'.format(lname))
+            plot_path = osp.join(self.dir, '{}_qvals.png'.format(lname))
             plt.grid(True)
             plt.savefig(plot_path)
             plt.close()
@@ -1089,7 +1086,7 @@ class Simulation:
                 ax = self._draw_layer_circle(layer, shape, material, plane, pval, ax_hand)
             else:
                 self.log.warning('Drawing of shape {} not '
-                                 'supported'.format(data['type']))
+                                 'supported'.format(shape))
         return ax
 
     def draw_geometry_2d(self, plane, pval, ax_hand, skip_list=[]):
@@ -1187,11 +1184,11 @@ class Simulation:
         self.log.info('DATA SHAPE: %s' % str(cs.shape))
         show = self.conf['General']['show_plots']
         p = False
-        sim_dir = os.path.expandvars(self.conf['General']['sim_dir'])
+        sim_dir = osp.expandvars(self.conf['General']['sim_dir'])
         if plane == 'yz' or plane == 'zy':
             labels = ('y [um]', 'z [um]', quantity, title)
             if self.conf['General']['save_plots']:
-                p = os.path.join(sim_dir,
+                p = osp.join(sim_dir,
                                  '%s_plane_2d_yz_pval%s.png' % (quantity,
                                                                str(pval)))
             self.heatmap2d(y, z, cs, labels, plane, pval,
@@ -1199,7 +1196,7 @@ class Simulation:
         elif plane == 'xz' or plane == 'zx':
             labels = ('x [um]', 'z [um]', quantity, title)
             if self.conf['General']['save_plots']:
-                p = os.path.join(sim_dir,
+                p = osp.join(sim_dir,
                                  '%s_plane_2d_xz_pval%s.png' % (quantity,
                                                                str(pval)))
             self.heatmap2d(x, z, cs, labels, plane, pval,
@@ -1207,7 +1204,7 @@ class Simulation:
         elif plane == 'xy' or plane == 'yx':
             labels = ('y [um]', 'x [um]', quantity, title)
             if self.conf['General']['save_plots']:
-                p = os.path.join(sim_dir,
+                p = osp.join(sim_dir,
                                  '%s_plane_2d_xy_pval%s.png' % (quantity,
                                                                str(pval)))
             self.heatmap2d(x, y, cs, labels, plane, pval,
@@ -1228,10 +1225,10 @@ class Simulation:
         ax.set_xlabel(labels[0])
         ax.set_ylabel(labels[1])
         ax.set_zlabel(labels[2])
-        fig.suptitle(os.path.basename(self.conf['General']['sim_dir']))
+        fig.suptitle(osp.basename(self.conf['General']['sim_dir']))
         if self.conf['General']['save_plots']:
             name = labels[-1] + '_' + ptype + '.png'
-            path = os.path.join(self.conf['General']['sim_dir'], name)
+            path = osp.join(self.conf['General']['sim_dir'], name)
             fig.savefig(path)
         if self.conf['General']['show_plots']:
             plt.show()
@@ -1349,8 +1346,8 @@ class Simulation:
         ax.legend()
         if self.conf['General']['save_plots']:
             name = labels[2] + '_' + ptype + '.png'
-            sim_dir = os.path.expandvars(self.conf['General']['sim_dir'])
-            path = os.path.join(sim_dir, name)
+            sim_dir = osp.expandvars(self.conf['General']['sim_dir'])
+            path = osp.join(sim_dir, name)
             fig.savefig(path)
         if self.conf['General']['show_plots']:
             plt.show()
@@ -1491,7 +1488,7 @@ class SimulationGroup:
             excluded = ''
         # base = self.sims[0].conf['General']['base_dir']
         base = self.sims[0].conf['General']['results_dir']
-        errpath = os.path.join(base, 'globalerror_%s%s.dat' % (field, excluded))
+        errpath = osp.join(base, 'globalerror_%s%s.dat' % (field, excluded))
         with open(errpath, 'w') as errfile:
             self.log.info('Computing global error for sweep %s', base)
             # Set reference sim
@@ -1537,7 +1534,7 @@ class SimulationGroup:
             end = None
             excluded = ''
         base = self.sims[0].conf['General']['results_dir']
-        errpath = os.path.join(base, 'adjacenterror_%s%s.dat' % (field, excluded))
+        errpath = osp.join(base, 'adjacenterror_%s%s.dat' % (field, excluded))
         with open(errpath, 'w') as errfile:
             self.log.info('Computing adjacent error for sweep %s', base)
             # For all other sims in the groups, compare to best estimate
@@ -1594,7 +1591,7 @@ class SimulationGroup:
             fname = 'scalar_reduce_avg_%s' % quantity
         else:
             fname = 'scalar_reduce_%s' % quantity
-            path = os.path.join(base, fname)
+            path = osp.join(base, fname)
         ftype = self.sims[0].conf['General']['save_as']
         if ftype == 'npz':
             np.save(path, group_comb)
@@ -1656,7 +1653,7 @@ class SimulationGroup:
         #wv_fact = .1
         #Jsc = (Jsc*wv_fact)/power
         frac_absorb = integrated_absorbtion / power
-        outf = os.path.join(base, 'fractional_absorbtion.dat')
+        outf = osp.join(base, 'fractional_absorbtion.dat')
         with open(outf, 'w') as out:
             out.write('%f\n' % frac_absorb)
         self.log.info('Fractional Absorbtion = %f' % frac_absorb)
@@ -1707,7 +1704,7 @@ class SimulationGroup:
                              'grouped against frequency')
 
 
-        base = os.path.expandvars(self.sims[0].conf['General']['results_dir'])
+        base = osp.expandvars(self.sims[0].conf['General']['results_dir'])
         period = self.sims[0].conf['Simulation']['params']['array_period']
         self.log.info('Computing photocurrent density for group at %s', base)
         jph_vals = np.zeros(self.num_sims)
@@ -1742,7 +1739,7 @@ class SimulationGroup:
             sim.clear_data()
         # factor of 1/10 to convert A*m^-2 to mA*cm^-2
         Jph = .1 * consts.e * np.sum(jph_vals)
-        outf = os.path.join(base, 'jph_{}.dat'.format(method))
+        outf = osp.join(base, 'jph_{}.dat'.format(method))
         with open(outf, 'w') as out:
             out.write('%f\n' % Jph)
         self.log.info('Jph = %f', Jph)
@@ -1777,7 +1774,7 @@ class SimulationGroup:
         fname = 'scalar_reduce_genRate.npy'
         base = self.sims[0].conf['General']['results_dir']
         self.log.info('Computing integrated Jsc for group at %s', base)
-        path = os.path.join(base, fname)
+        path = osp.join(base, fname)
         try:
             genRate = np.load(path)
         except FileNotFoundError:
@@ -1795,7 +1792,7 @@ class SimulationGroup:
         # y_integral = intg.simps(x_integral, x=y_vals, axis=0)
         # Convert period to cm and current to mA
         Jsc = 1000*(consts.e/(self.sims[0].period*1e-4)**2)*y_integral
-        outf = os.path.join(base, 'jsc_integrated.dat')
+        outf = osp.join(base, 'jsc_integrated.dat')
         with open(outf, 'w') as out:
             out.write('%f\n' % Jsc)
         self.log.info('Jsc_integrated = %f', Jsc)
@@ -1842,7 +1839,7 @@ class SimulationGroup:
         wght_ref = intg.trapz(ref_vals, x=wvlgths * 1e9) / power
         wght_abs = intg.trapz(abs_vals, x=wvlgths * 1e9) / power
         wght_trans = intg.trapz(trans_vals, x=wvlgths) / power
-        out = os.path.join(base, 'weighted_transmission_data.dat')
+        out = osp.join(base, 'weighted_transmission_data.dat')
         with open(out, 'w') as outf:
             outf.write('# Reflection, Transmission, Absorbtion\n')
             outf.write('%f,%f,%f' % (wght_ref, wght_trans, wght_abs))
@@ -1920,7 +1917,7 @@ class SimulationGroup:
                     fig, ax = plt.subplots()
                 else:
                     ax = input_ax
-                pfile = os.path.join(results_dir,
+                pfile = osp.join(results_dir,
                                      '{}_{}.png'.format(layer, name))
                 print(np.amin(results[ind]))
                 ax.plot(xvals, results[ind], marker, label=leg_label)
@@ -1943,11 +1940,11 @@ class SimulationGroup:
         self.log.info('Plotting convergence')
         base = self.sims[0].conf['General']['base_dir']
         if err_type == 'local':
-            fglob = os.path.join(base, 'localerror_%s*.dat' % quantity)
+            fglob = osp.join(base, 'localerror_%s*.dat' % quantity)
         elif err_type == 'global':
-            fglob = os.path.join(base, 'globalerror_%s*.dat' % quantity)
+            fglob = osp.join(base, 'globalerror_%s*.dat' % quantity)
         elif err_type == 'adjacent':
-            fglob = os.path.join(base, 'adjacenterror_%s*.dat' % quantity)
+            fglob = osp.join(base, 'adjacenterror_%s*.dat' % quantity)
         else:
             self.log.error('Attempting to plot an unsupported error type')
             raise ValueError
@@ -1967,15 +1964,15 @@ class SimulationGroup:
             plt.yscale(scale)
             # plt.xticks(x,labels,rotation='vertical')
             plt.tight_layout()
-            plt.title(os.path.basename(base))
+            plt.title(osp.basename(base))
             if self.gconf['General']['save_plots']:
                 if '_excluded' in path:
                     excluded = '_excluded'
                 else:
                     excluded = ''
                 name = '%s_%sconvergence_%s%s.png' % (
-                    os.path.basename(base), err_type, quantity, excluded)
-                path = os.path.join(base, name)
+                    osp.basename(base), err_type, quantity, excluded)
+                path = osp.join(base, name)
                 fig.savefig(path)
             if self.gconf['General']['show_plots']:
                 plt.show()
@@ -1985,21 +1982,21 @@ class SimulationGroup:
         """Plot the result of a particular scalar reduction for each group"""
 
         sim = self.sims[0]
-        base = os.path.expandvars(sim.conf['General']['results_dir'])
+        base = osp.expandvars(sim.conf['General']['results_dir'])
         self.log.info('Plotting scalar reduction of %s for quantity %s' % (base, quantity))
         cm = plt.get_cmap('jet')
-        max_depth = sim.conf['Simulation']['max_depth']
+        max_depth = sim.conf['General']['max_depth']
         period = sim.conf['Simulation']['params']['array_period']
         x = np.arange(0, period, sim.dx)
         y = np.arange(0, period, sim.dy)
         z = np.arange(0, max_depth + sim.dz, sim.dz)
         ftype = sim.conf['General']['save_as']
         if ftype == 'npz':
-            globstr = os.path.join(base, 'scalar_reduce*_%s.npy' % quantity)
+            globstr = osp.join(base, 'scalar_reduce*_%s.npy' % quantity)
             files = glob.glob(globstr)
         elif ftype == 'hdf5':
             self.log.warning('FIX LOAD IN GLOBAL SCALAR REDUCE')
-            globstr = os.path.join(base, 'scalar_reduce*_%s.npy' % quantity)
+            globstr = osp.join(base, 'scalar_reduce*_%s.npy' % quantity)
             files = glob.glob(globstr)
         else:
             raise ValueError('Incorrect file type in config')
@@ -2018,7 +2015,7 @@ class SimulationGroup:
                 labels = ('y [um]', 'z [um]', quantity, title)
                 if sim.conf['General']['save_plots']:
                     fname = 'scalar_reduce_%s_plane_2d_yz.png' % quantity
-                    p = os.path.join(base, fname)
+                    p = osp.join(base, fname)
                 show = sim.conf['General']['show_plots']
                 self.sims[0].heatmap2d(y, z, cs, labels, plane, pval,
                                save_path=p, show=show, draw=draw, fixed=fixed)
@@ -2026,7 +2023,7 @@ class SimulationGroup:
                 labels = ('x [um]', 'z [um]', quantity, title)
                 if sim.conf['General']['save_plots']:
                     fname = 'scalar_reduce_%s_plane_2d_xz.png' % quantity
-                    p = os.path.join(base, fname)
+                    p = osp.join(base, fname)
                 show = sim.conf['General']['show_plots']
                 self.sims[0].heatmap2d(sim, x, z, cs, labels, plane, pval,
                                save_path=p, show=show, draw=draw, fixed=fixed)
@@ -2034,7 +2031,7 @@ class SimulationGroup:
                 labels = ('y [um]', 'x [um]', quantity, title)
                 if sim.conf['General']['save_plots']:
                     fname = 'scalar_reduce_%s_plane_2d_xy.png' % quantity
-                    p = os.path.join(base, fname)
+                    p = osp.join(base, fname)
                 self.sims[0].heatmap2d(sim, x, y, cs, labels, plane, pval,
                                save_path=p, show=show, draw=draw, fixed=fixed)
 
@@ -2074,7 +2071,7 @@ class SimulationGroup:
         if transmission:
             plt.plot(freqs, trans_l, '-o', label='Transmission')
         plt.legend(loc='best')
-        figp = os.path.join(base, 'transmission_plots_port%s.png'%port)
+        figp = osp.join(base, 'transmission_plots_port%s.png'%port)
         plt.xlabel('Wavelength (nm)')
         plt.ylim((0, 1.0))
         plt.savefig(figp)
@@ -2109,7 +2106,7 @@ class SimulationGroup:
                 #              bbox=dict(boxstyle='round', fc='w'))
             plt.xlabel('Re(q) [radians/micron]')
             plt.ylabel('Im(q) [1/microns]')
-            plot_path = os.path.join(base, '{}_qvals.png'.format(lname))
+            plot_path = osp.join(base, '{}_qvals.png'.format(lname))
             plt.grid(True)
             plt.legend(loc='best')
             plt.savefig(plot_path)
@@ -2296,7 +2293,6 @@ def execute_plan(conf, plan, grouped_against=None, grouped_by=None):
         raise
 
 
-
 class Processor(object):
     """
     Generic class for automating the processing of Simulations and
@@ -2305,8 +2301,8 @@ class Processor(object):
 
     def __init__(self, path=None, conf=None, sims=[], sim_groups=[], failed_sims=[]):
         if path is not None:
-            if os.path.isfile(path):
-                self.gconf = Config(os.path.abspath(path))
+            if osp.isfile(path):
+                self.gconf = Config(osp.abspath(path))
             else:
                 raise ValueError("Path {} to conf file doesn't "
                                  " exist".format(path))
@@ -2325,37 +2321,42 @@ class Processor(object):
         self.grouped_against = None
         self.grouped_by = None
 
-    def collect_confs(self):
+    def load_confs(self, *args, **kwargs):
         """
-        Collect all the simulations beneath the base of the directory tree
-        """
+        Load configs from disk
 
-        sim_confs = []
-        failed_sims = []
-        solfile = self.gconf['General']['solution_file']
-        # Find the data files and instantiate Simulation objects
-        base = os.path.expandvars(self.gconf['General']['base_dir'])
-        self.log.info(base)
-        for root, dirs, files in os.walk(base):
-            conf_path = os.path.join(root, 'sim_conf.yml')
-            if 'sim_conf.yml' in files and solfile in files:
-                self.log.info('Gather sim at %s', root)
-                # sim_obj = Simulation(Config(conf_path))
-                conf = Config(conf_path)
-                # sim_obj.conf.expand_vars()
-                sim_confs.append(conf)
-            elif 'sim_conf.yml' in files:
-                # sim_obj = Simulation(Config(conf_path))
-                conf = Config(conf_path)
-                self.log.error('Sim %s is missing its data file',
-                               conf['General']['sim_dir'])
-                failed_sims.append(conf)
-        self.sim_confs = sim_confs
-        self.failed_sims = failed_sims
-        if not sim_confs:
-            self.log.error('Unable to find any successful simulations')
-            raise RuntimeError('Unable to find any successful simulations')
-        return sim_confs, failed_sims
+        Collect all the simulations contained in the HDF5 database file located
+        at filesystem path `db` satisfying the query `query`.
+
+        Parameters
+        ----------
+        db : str
+            A path to an HDF5 file containing the database of simulation
+            configs
+        base_dir : str, optional
+            The base directory of the directory tree that all simulations will
+            dump their output data into. If not specified, defaults to the
+            directory of the database file.
+        query : str, optional
+            A query string conforming to PyTables table.where syntax specifying
+            which configs should be loaded from the HDF5 database. If not
+            specified, all configs in the database are loaded
+        table_path : str, optional
+            String specifying path inside the HDF5 database to the group
+            containing the HDF5 simulations table. Default: '/'
+        table_path : str, optional
+            String specifying the name of the HDF5 simulations table.
+            Default: 'simulations'
+
+        Returns
+        -------
+        list
+            A list of :py:class:`nanowire.preprocess.config.Config` objects
+        """
+        confs, t_sweeps = load_confs(*args, **kwargs)
+        self.t_sweeps = t_sweeps
+        self.sim_confs = confs
+        return confs, t_sweeps
 
     def make_sims(self):
         """
@@ -2393,185 +2394,6 @@ class Processor(object):
             self.sim_groups = groups
         assert(len(self.sim_confs) >= 1)
         return self.sim_confs, self.sim_groups
-
-    def group_against(self, key, variable_params, sort_key=None):
-        """
-        Group simulations by against particular parameter. Within each
-        group, the parameter specified by `key` will vary, and all other
-        parameters will remain fixed. Populates the sim_groups attribute and
-        also returns a list of lists.
-
-        :param key: A key specifying which parameter simulations will be
-        grouped against. Individual simulations within each group will be
-        sorted in increasing order of this parameter, and all other parameters
-        will remain constant within the group
-        :type key: str or tuple
-        :param sort_key: An optional key used to sort the returned list of
-        groups. The list of groups will be sorted in increasing order of the
-        specified sort_key
-        """
-
-        self.log.info('Grouping sims against: %s', str(key))
-        # We need only need a shallow copy of the list containing all the sim
-        # objects. We don't want to modify the orig list but we wish to share
-        # the sim objects the two lists contain
-        sim_confs = copy.copy(self.sim_confs)
-        sim_groups = [[sim_confs.pop()]]
-        # While there are still sims that havent been assigned to a group
-        while sim_confs:
-            # Get the comparison dict for this sim
-            conf = sim_confs.pop()
-            val1 = conf[key]
-            # print('Group against value: {}'.format(val1))
-            # We want the specified key to vary, so we remove it from the
-            # comparison dict
-            del conf[key]
-            cmp1 = {'Simulation': conf['Simulation'],
-                    'Layers': conf['Layers'],
-                    'Solver': conf['Solver']}
-            try:
-                del cmp1['Solver']['BasisFieldDumpPrefix']
-            except KeyError:
-                pass
-            match = False
-            # Loop through each group, checking if this sim belongs in the
-            # group
-            for group in sim_groups:
-                conf2 = group[0]
-                val2 = conf2[key]
-                del conf2[key]
-                cmp2 = {'Simulation': group[0]['Simulation'],
-                        'Layers': group[0]['Layers'],
-                        'Solver': group[0]['Solver']}
-                try:
-                    del cmp2['Solver']['BasisFieldDumpPrefix']
-                except KeyError:
-                    pass
-                params_same = cmp_dicts(cmp1, cmp2)
-                if params_same:
-                    match = True
-                    # We need to restore the param we removed from the
-                    # configuration earlier
-                    conf[key] = val1
-                    group.append(conf)
-                group[0][key] = val2
-            # If we didnt find a matching group, we need to create a new group
-            # for this simulation
-            if not match:
-                conf[key] = val1
-                sim_groups.append([conf])
-        # Get the params that will define the path in the results dir for each
-        # group that will be stored
-        result_pars = [var for var in variable_params if var != key]
-        for group in sim_groups:
-            # Sort the individual sims within a group in increasing order of
-            # the parameter we are grouping against a
-            group.sort(key=lambda aconf: aconf[key])
-            path = '{}/grouped_against_{}'.format(group[0]['General']['base_dir'],
-                                                  key[-1])
-            path = os.path.expandvars(path)
-            # If the only variable param is the one we grouped against, make
-            # the top dir
-            if not result_pars:
-                try:
-                    os.makedirs(path)
-                except OSError:
-                    pass
-            # Otherwise make the top dir and all the subdirs
-            else:
-                for par in result_pars:
-                    # All sims in the group will have the same values for
-                    # result_pars so we can just use the first sim in the group
-                    path = os.path.join(path, '{}_{}/'.format(par[-1],
-                                                                  group[0][par]))
-                    self.log.info('RESULTS DIR: %s', path)
-                    try:
-                        os.makedirs(path)
-                    except OSError:
-                        pass
-            # Need this so the results_dir parameter gets written to conf file
-            for conf in group:
-                conf['General']['results_dir'] = path
-                # outpath = os.path.join(conf['General']['sim_dir'],
-                #                        'sim_conf.yml')
-                # outpath = os.path.expandvars(outpath)
-                # conf.write(outpath)
-        # Sort the groups in increasing order of the provided sort key
-        if sort_key:
-            sim_groups.sort(key=lambda agroup: agroup[0][sort_key])
-        # sim_groups = [SimulationGroup(sims) for sims in sim_groups]
-        self.sim_groups = sim_groups
-        self.grouped_against = key
-        return sim_groups
-
-    def group_by(self, key, sort_key=None, repopulate=True):
-        """
-        Groups simulations by the parameter associated with `key` in the
-        config. Within each group, the parameter associated with `key` will
-        remain fixed, and all other parameters may vary.
-
-        .. note::
-        This function repopulates the sim_groups attribute by default. If you
-        do not want this behavior, set the `repopulate` kwarg to False
-
-
-        :param key: The key for the parameter you wish to group by. Must be an
-                    iterable of strings.
-        :type key: iterable
-        :param sort_key: An optional key by which to sort the parameters within
-                         each group. For example, group by parameter A but sort
-                         each group in increasing order of parameter B. If a
-                         callable object is provided, that callable will be
-                         applied to each individual simulation in the group to
-                         generate the sort key. If an iterable is provided, it
-                         will be interpreted as a key in the config and the
-                         parameter associated with that key will be used.
-        :type sort_key: iterable, callable
-        :returns: A singly nested list of lists. Each inner list contains a
-                  group of simulations.
-        :rtype: list
-        """
-
-        self.log.info('Grouping sims by: %s', str(key))
-        # This works by storing the different values of the specifed parameter
-        # as keys, and a list of sims whose value matches the key as the value
-        pdict = {}
-        for conf in self.sim_confs:
-            if conf[key] in pdict:
-                pdict[conf[key]].append(conf)
-            else:
-                pdict[conf[key]] = [conf]
-        # Now all the sims with matching values for the provided key are just
-        # the lists located at each key. We sort the groups in increasing order
-        # of the provided key
-        groups = sorted(pdict.values(), key=lambda group: group[0][key])
-        # If specified, sort the sims within each group in increasing order of
-        # the provided sorting key
-        if sort_key:
-            if callable(sort_key):
-                for group in groups:
-                    group.sort(key=sort_key)
-            else:
-                for group in groups:
-                    group.sort(key=lambda sim: conf[sort_key])
-        # groups = [SimulationGroup(sims) for sims in groups]
-        if repopulate:
-            self.sim_groups = groups
-        self.grouped_by = key
-        return groups
-
-    # def replace(self):
-    #     for i, sim in enumerate(self.sims):
-    #         path = os.path.join(sim.conf['General']['sim_dir'], 'sim_conf.yml')
-    #         self.sims[i] = path
-
-    #     for i, group in enumerate(self.sim_groups):
-    #         new_group = []
-    #         for sim in group.sims:
-    #             new_group.append(os.path.join(sim.conf['General']['sim_dir'],
-    #                                           'sim_conf.yml'))
-
-    #         self.sim_groups[i] = new_group
 
     def call_func(self, quantity, obj, args):
         """

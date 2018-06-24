@@ -8,6 +8,8 @@ import netifaces
 import traceback
 import copy
 import warnings
+import time
+import psutil
 import pint
 import tempfile as tmp
 import numpy as np
@@ -899,3 +901,120 @@ def group_against(confs, key, sort_key=None, skip_keys=None):
     if sort_key:
         sim_groups.sort(key=lambda agroup: agroup[0][sort_key])
     return sim_groups
+
+
+def dump_configs(hdf_path, table_path='/', table_name='simulations',
+                 outdir=''):
+    """
+    Dump all the Configs in an HDF5 table to YAML files
+
+    Parameters
+    ----------
+
+    hdf_path : str
+        Path to the HDF5 file containing the database
+    table_path : str, optional
+        Path to the group containing the database table. Default: '/'
+    table_name : str, optional
+        Name of the database table. Default: 'simulations'
+    outdir : str, optional
+        Directory to dump the config files into. Defaults to the same directory
+        as the HDF5 file. If you pass in a path that does not exist, it is
+        created.
+
+    Returns
+    -------
+
+    list
+        List of absolute paths to the dumped files
+    """
+
+    if not os.path.isfile(hdf_path):
+        raise ValueError('Arg {} is not a regular file'.format(hdf_path))
+    outdir = outdir if outdir else os.path.dirname(hdf_path)
+    if not os.path.isdir(outdir):
+        os.makedirs(outdir)
+    hdf = tb.open_file(hdf_path, 'r')
+    table = hdf.get_node(table_path, name=table_name, classname='Table')
+    paths = []
+    for row in table.iterrows():
+        stream = row['yaml'].decode()
+        ID = row['ID'].decode()
+        fname = '{}.yml'.format(ID)
+        outpath = os.path.join(outdir, fname)
+        with open(outpath, 'w') as f:
+            f.write(stream)
+        paths.append(outpath)
+    hdf.close()
+    return paths
+
+
+def get_processes_using_file(path):
+    """
+    Get the process using the file at `path`, if any.
+
+    path : str
+        Path to an existing file.
+
+    Notes
+    -----
+
+    The information provided by this function is time sensitive. It is possible
+    that, by the time the function returns with a list of processes, some of
+    those processes might have already been terminated and therefore no longer
+    hold an open file descriptor for the file located at `path`. Or, even
+    worse, some new process with the same PID has taken it's place.
+
+    Returns
+    -------
+
+    :py:class:`psutil.Process` or None
+        Returns a :py:class:`psutil.Process` if a process exists and has an
+        open file handle to `path`, otherwise returns None.
+    """
+    procs = []
+    for p in psutil.process_iter(attrs=['name', 'open_files']):
+        try:
+            for f in p.info['open_files'] or []:
+                same = os.path.samefile(path, f.path)
+                if same:
+                    msg = 'Proc {} has file {}'.format(p.name(), path)
+                    print(msg)
+                    procs.append(p)
+                    # return p
+        # This catches a race condition where a process ends
+        # before we can examine its files
+        except psutil.NoSuchProcess as err:
+            print("*** Examined process terminated")
+    return procs
+
+
+def wait_until_released(path):
+    """
+    Wait until there are no processes with a open file descriptor for the file
+    at `path`
+
+    path : str
+        Path to an existing file.
+
+    Notes
+    -----
+
+    This could potentially run forever if there is some other process that
+    refuses to release the file
+    """
+    file_is_open = True
+    print('Waiting on path {}'.format(path))
+    while file_is_open:
+        file_is_open = False
+        for p in psutil.process_iter(attrs=['name', 'open_files']):
+            open_paths = [f.path for f in p.info['open_files'] or []]
+            if path in open_paths:
+                print('Path {} open'.format(path))
+                file_is_open = True
+                break
+                # same = os.path.samefile(path, f.path)
+                # if same:
+                #     file_open = True
+        time.sleep(3)
+    print('Path {} released!'.format(path))

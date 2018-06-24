@@ -311,8 +311,7 @@ class SimulationManager:
                     short_id = row['ID'].decode()[0:10]
                     conf_path = osp.join(base_dir, short_id, 'sim_conf.yml')
                     self.log.info('Loading config: %s', conf_path)
-                    conf = Config.from_array(row, skip_fields=['ID'],
-                                             skip_keys=['General'])
+                    conf = Config.fromYAML(row['yaml'])
                     if row['ID'].decode() != conf.ID:
                         raise ValueError('ID in database and ID of loaded '
                                          'config do not match')
@@ -322,8 +321,7 @@ class SimulationManager:
                     short_id = row['ID'].decode()[0:10]
                     conf_path = osp.join(base_dir, short_id, 'sim_conf.yml')
                     self.log.info('Loading config: %s', conf_path)
-                    conf = Config.from_array(row, skip_fields=['ID'],
-                                             skip_keys=['General'])
+                    conf = Config.fromYAML(row['yaml'])
                     if row['ID'].decode() != conf.ID:
                         raise ValueError('ID in database and ID of loaded '
                                          'config do not match')

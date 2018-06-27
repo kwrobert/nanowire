@@ -14,8 +14,7 @@ import pint
 import tempfile as tmp
 import numpy as np
 import tables as tb
-from tables.file import _checkfilters
-from tables.parameters import EXPECTED_ROWS_TABLE
+from functools import wraps
 from line_profiler import LineProfiler
 from contextlib import contextmanager
 from itertools import accumulate, repeat, chain, product
@@ -23,74 +22,6 @@ from collections import Iterable, OrderedDict, MutableMapping
 
 ureg = pint.UnitRegistry()
 Q_ = ureg.Quantity
-
-
-class UnitTable(tb.Table):
-    """
-    A PyTables table that has an attribute for storing unit metadata. Any
-    column (may be nested) with units will automatically be deserialized to a
-    pint Quantity object
-    """
-    _c_classid = 'UnitTable'
-
-    # def __init__(self, parentNode, name, description=None,
-    #              title="", filters=None,
-    #              expectedrows=EXPECTED_ROWS_TABLE,
-    #              chunkshape=None, byteorder=None, _log=True, units=None):
-    def __init__(self, *args, units=None, **kwargs):
-        # super(UnitTable, self).__init__(parentNode, name,
-        #                                 description=description, title=title,
-        #                                 filters=filters,
-        #                                 expectedrows=expectedrows,
-        #                                 chunkshape=chunkshape, byteorder=byteorder,
-        #                                 _log=_log)
-        print('UnitTable init')
-        super(UnitTable, self).__init__(*args, **kwargs)
-        print('After super')
-        units = units if units is not None else {}
-        if units:
-            self.attrs['units'] = units
-        print('UnitTable attrs: ', self.attrs)
-        print('UnitTable units: ', self.attrs['units'])
-
-    def read(self, *args, **kwargs):
-        data = tb.Table.read(self, *args, **kwargs)
-        units = self.attrs['units']
-        print("UnitTable data: ", data)
-        print("UnitTable units: ", units)
-        print(type(data))
-        for row in data:
-            print(row)
-            print(type(row))
-            print(row.dtype.descr)
-            for field in row.dtype.descr:
-                for k, v in field:
-                    print(k)
-                    print(v)
-                # print(type(i))
-                # print(i)
-            # print(row.dtype.names)e.
-            # for k, v in zip(row.dtype.names, row):
-            #     print('k: ', k)
-            #     print('v: ', v)
-        return data
-
-def create_units_table(self, where, name, title="",
-                       filters=None, expectedrows=10000,
-                       chunkshape=None, byteorder=None,
-                       createparents=False, obj=None, description=None, units=None):
-    parentNode = self._get_or_create_path(where, createparents)
-
-    _checkfilters(filters)
-    return UnitTable(parentNode, name,
-                     title=title, filters=filters,
-                     expectedrows=expectedrows,
-                     description=description,
-                     chunkshape=chunkshape, byteorder=byteorder, units=units)
-
-# def get_unit_table(*args,
-tb.File.create_units_table = create_units_table
-
 
 def do_profile(follow=[], out=''):
     def inner(func):
@@ -378,6 +309,60 @@ def find_keypaths(d, key):
     return _find_paths(d, key)
 
 
+def flatten(d, skip_branch=None, sep='/'):
+    """
+    Returned a flattened copy of the nested data structure.
+
+    The keys will be the full path to the item's location in the nested
+    data structure separated using the optional sep kwarg, and the value
+    will be the value at that location
+
+    Parameters
+    ----------
+    sep : str, default '/'
+        The separating character used for all paths
+    skip_branch : list, optional
+        A list of `sep` separated paths to branches in the config that you
+        would like to skip when flattening. This can be leaves in the
+        Config or entire branches
+
+    Returns
+    -------
+    dict
+        A dict whose keys are `sep` separated strings representing the full
+        path to the value in the originally nested dictionary. The values
+        are the same as those from the original dictionary.
+
+    Examples
+    --------
+    >>> d = {'a': {'b': 1, 'c': 2})
+    >>> flatten(d)
+    {'a/b': 1, 'a/c': 2}
+    >>> flatten(d, sep='_')
+    {'a_b': 1, 'a_c': 2}
+    >>> flatten(d, sep='_', skip_branch='a_c')
+    {'a_b': 1}
+    """
+    def _flatten(d, flattened=None, keypath='', skip_branch=None, sep='/'):
+        """
+        Internal, recursive flattening implementation
+        """
+        flattened = flattened if flattened is not None else {}
+        skip_branch = skip_branch if skip_branch is not None else []
+        for key, val in d.items():
+            newpath = sep.join([keypath, key]).strip(sep)
+            if keypath in skip_branch:
+                continue
+            if isinstance(val, dict):
+                _flatten(val, flattened=flattened,
+                         keypath=newpath, skip_branch=skip_branch,
+                         sep=sep)
+            else:
+                flattened[newpath] = val
+        return flattened
+    return _flatten(d, skip_branch=skip_branch, sep=sep)
+
+
 def find_inds(a, b, unique=False):
     """
     Get the indices where we can find the elements of the array a in the array
@@ -458,11 +443,11 @@ def ipv4():
     try:
         # to not take into account loopback addresses (no interest here)
         addresses = []
-        for interface in interfaces():
-            config = ifaddresses(interface)
+        for interface in netifaces.interfaces():
+            config = netifaces.ifaddresses(interface)
              #AF_INET is not always present
-            if AF_INET in config.keys():
-                for link in config[AF_INET]:
+            if netifaces.AF_INET in config.keys():
+                for link in config[netifaces.AF_INET]:
                 # loopback holds a 'peer' instead of a 'broadcast' address
                     if 'addr' in link.keys() and 'peer' not in link.keys():
                         addresses.append(link['addr'])

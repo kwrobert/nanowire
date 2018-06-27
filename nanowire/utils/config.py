@@ -74,7 +74,13 @@ class Config(MutableMapping):
         """
 
         parts = self._get_parts(k)
-        return self.getfromseq(parts)
+        if 'array_period' in k:
+            print('Getting array period')
+        val = self.getfromseq(parts)
+        if 'array_period' in k:
+            print('array period: ', val)
+            print('array period type: ', type(val.magnitude))
+        return val
 
     def __setitem__(self, k, v):
         """
@@ -84,7 +90,16 @@ class Config(MutableMapping):
         """
 
         parts = self._get_parts(k)
+        if 'array_period' in k:
+            print('Setting array period')
+            print('array period before: ', v)
+            print('array period type before: ', type(v.magnitude))
         self.setfromseq(parts, v)
+        if 'array_period' in k:
+            print('array period after: ',
+                  self['Simulation/array_period'].magnitude)
+            print('array period type after: ',
+                  type(self['Simulation/array_period'].magnitude))
         self._update_id()
 
     def __delitem__(self, k):
@@ -199,7 +214,7 @@ class Config(MutableMapping):
         >>> c.flatten(sep='_', skip_branch='a_c')
         {'a_b': 1}
         """
-        self._flatten(skip_branch=skip_branch, sep=sep)
+        return self._flatten(skip_branch=skip_branch, sep=sep)
 
     def _flatten(self, branch=None, flattened=None, keypath='',
                  skip_branch=None, sep='/'):
@@ -288,6 +303,8 @@ class Config(MutableMapping):
         Dumps this config object to its YAML representation given a path to a
         file
         """
+        print('array period in write: ', self['Simulation/array_period'])
+        print('array period type in write: ', type(self['Simulation/array_period'].magnitude))
         if isinstance(f, str):
             f = os.path.expandvars(f)
             f = open(f, 'w')
@@ -306,9 +323,12 @@ def represent_odict(dumper, data):
 
 def represent_pint_quantity(dumper, data):
     qty = data
+    print('Input qty: {}'.format(qty))
+    print(type(qty.magnitude))
     d = {'magnitude': qty.magnitude,
          'units': str(qty.units),
          'base_units': str((1.0*qty.units).to_base_units())}
+    print('pint dict repr: {}'.format(d))
     return dumper.represent_mapping('!pintq', d)
 
 

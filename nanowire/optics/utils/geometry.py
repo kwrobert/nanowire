@@ -65,10 +65,11 @@ def get_layers(sim):
     """
 
     ordered_layers = sorted_dict(sim.conf['Layers'])
-    start = 0
+    base_unit = sim.conf['General/base_unit']
+    start = 0*base_unit
     layers = OrderedDict()
     materials = sim.conf['Materials']
-    max_depth = sim.conf[('General', 'max_depth')]
+    max_depth = sim.conf['General/max_depth']
     for layer, ldata in ordered_layers.items():
         # Dont add the layer if we don't have field data for it because its
         # beyond max_depth
@@ -127,8 +128,9 @@ class Layer:
         for name, data in sorted_shapes.items():
             shape = data['type'].lower()
             if shape == 'circle':
-                center = Point(data['center']['x'], data['center']['y'])
-                radius = data['radius']
+                center = Point(data['center']['x'].magnitude,
+                               data['center']['y'].magnitude)
+                radius = data['radius'].magnitude
                 material = data['material']
                 if material not in self.materials:
                     self.materials[material] = materials[material]

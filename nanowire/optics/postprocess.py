@@ -679,7 +679,7 @@ class Simulation:
         """
 
         fluxes = self.data['fluxes']
-        base_unit = self.conf['Simulation']['base_unit']
+        base_unit = self.conf['General']['base_unit']
         Zo = consts.physical_constants['characteristic impedance of vacuum'][0]
         # try:
         #     Esq = self.data['normEsquared']
@@ -718,7 +718,7 @@ class Simulation:
             #     continue
             n_mat, k_mat = layer_obj.get_nk_matrix(freq, self.X, self.Y)
             keys = ['{}_{}'.format(layer_name, f) for f in ("Ex", "Ey", "Ez")]
-            fields = {k[-2:]:self.data[k] for k in keys}
+            fields = {k[-2:]: self.data[k] for k in keys}
             Esq = np.abs(fields['Ex'])**2 + np.abs(fields['Ey'])**2 + np.abs(fields['Ez'])**2
             # z = np.linspace(layer_obj.start, layer_obj.end, Esq.shape[0])
             if isinstance(sdict[layer_name], int):

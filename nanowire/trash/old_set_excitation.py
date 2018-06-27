@@ -9,7 +9,7 @@ def set_excitation(self):
     """Sets the exciting plane wave for the simulation"""
     f_phys = self.conf['Simulation']['frequency']
     self.log.debug('Physical Frequency = %E' % f_phys)
-    c_conv = constants.c / self.conf['Simulation']['base_unit']
+    c_conv = constants.c / self.conf['General']['base_unit']
     f_conv = f_phys / c_conv
     self.s4.SetFrequency(f_conv)
     E_mag = get_incident_amplitude(self)

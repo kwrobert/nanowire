@@ -43,7 +43,7 @@ from nanowire.utils.utils import (
     get_public_iface,
     sorted_dict,
     find_keypaths,
-    ureg, 
+    ureg,
     Q_
 )
 from nanowire.optics.utils.utils import (
@@ -108,8 +108,6 @@ def handle_exception(exc_type, exc_value, exc_traceback):
 
     logger.critical("Uncaught exception", exc_info=(exc_type, exc_value,
                                                     exc_traceback))
-
-
 sys.excepthook = handle_exception
 
 
@@ -143,19 +141,28 @@ def update_sim(conf, samples, q=None):
 def run_sim(conf, output_dir):
     """
     Runs a single simulation given a Config object representing the
-    configuration for the simulation and a string pointing to a directory the
-    simulation should write its output data to.
+    configuration for the simulation or a YAML representation of said Config
+    object and a string pointing to a directory the simulation should write its
+    output data to.
 
-    .. note:: It is important that the Config object has the correct structure
+    Notes
+    -----
+    It is important that the Config object has the correct structure
     for the simulation to run properly
 
-    :param conf: A Config object representing the configuration for this
-    particular simulation
-    :type conf: nanowire.preprocess.config.Config
-    :param output_dir: Directory the simulation will write its data to
-    :type output_dir: str
+    Parameters
+    ----------
+    conf : :py:class:nanowire.utils.config.Config or str
+        A Config object representing the configuration for this particular
+        simulation or a string containing a valid YAML representation of a
+        Config object. This string will be parsed immediately upon function
+        entry
+    output_dir : str
+        Directory the simulation will write its data to
     """
 
+    if isinstance(conf, str):
+        conf = Config.fromYAML(conf)
     log = logging.getLogger(__name__)
     try:
         start = time.time()
@@ -252,14 +259,19 @@ class SimulationManager:
     using a variety of different execution backends
     """
 
-    def __init__(self, gconf, base_dir='', log_level='INFO'):
-        self.gconf = gconf
-        lfile = osp.join(self.gconf['General']['base_dir'],
-                             'logs/sim_manager.log')
-        try:
-            log_level = self.gconf['General']['log_level']
-        except KeyError:
-            pass
+    def __init__(self, nodes=None, ip=None,
+                 base_dir='', num_cores=None, log_level='INFO'):
+        self.runners = {'serial': self.run_serial,
+                        'parallel': self.run_parallel,
+                        'dispy': self.run_dispy}
+        self.nodes = nodes
+        self.ip_addr = ip
+        if num_cores is None:
+            self.num_cores = mp.cpu_count()
+        else:
+            self.num_cores = num_cores
+        self.log_level = log_level
+        lfile = osp.join(base_dir, 'logs/sim_manager.log')
         # self.log = configure_logger(level=log_level, console=True,
         #                             logfile=lfile, name=__name__)
         self.log = logging.getLogger(__name__)
@@ -312,24 +324,24 @@ class SimulationManager:
         """
         raise NotImplementedError
 
-
     def run_serial(self, to_run, func=run_sim, args=(), kwargs={}):
         """
         Apply the provided function `func` to all the loaded Config objects
         serially.  args and kwargs are passed on to the provided function
         unmodified using the usual *args and **kwargs argument expansion.
 
-        :param func: A Python callable that consumes a Config object as its
-        first positional argument, and any number of positional arguments and
-        keywords arguments thereafter. So, signature must be:
-            func(conf, *args, **kwargs)
-        :type func: callable
-        :param args: A tuple of extra arguments to be passed to the provided
-        callable
-        :type args: tuple
-        :param kwargs: A tuple of extra keyword arguments to be passed to the
-        provided callable
-        :type kwargs: dict
+        Parameters
+        ----------
+        func : callable
+            A Python callable that consumes a Config object as its first
+            positional argument, and any number of positional arguments and
+            keywords arguments thereafter. So, signature must be:
+                func(conf, *args, **kwargs)
+        args : tuple
+            A tuple of extra arguments to be passed to the provided callable
+        kwargs : dict
+            A dict of extra keyword arguments to be passed to the provided
+            callable
         """
         self.log.info('Executing sims serially')
         counter = 0
@@ -341,7 +353,7 @@ class SimulationManager:
 
     def run_parallel(self, to_run, *args, func=run_sim, **kwargs):
         self.log.info('Total sims to execute: %i', len(to_run))
-        num_procs = self.gconf['General']['num_cores']
+        num_procs = self.num_cores
         if num_procs > len(to_run):
             num_procs = len(to_run)
         self.log.info('Executing sims in parallel using %i cores ...', num_procs)
@@ -360,7 +372,7 @@ class SimulationManager:
         self.log.debug('Entering try, except pool clause')
         try:
             for ind, (conf, outdir) in enumerate(to_run):
-                res = pool.apply_async(func, (conf, outdir, *args),
+                res = pool.apply_async(func, (conf.dump(), outdir, *args),
                                        **kwargs,
                                        callback=callback)
                 results[ind] = res
@@ -424,8 +436,8 @@ class SimulationManager:
         log.info('Executing jobs using dispy cluster')
         # log.info("Beginning dispy submit procedure")
         try:
-            nodes = self.gconf['General']['nodes']
-            ip = self.gconf['General']['ip_addr']
+            nodes = self.nodes
+            ip = self.ip_addr
         except KeyError as e:
             msg = "Need to specify 'nodes' and 'ip_addr' entries in " \
                   "General section"
@@ -483,7 +495,7 @@ class SimulationManager:
                 del jobs[job_id]
         return None
 
-    def run(self, *args, func=run_sim, **kwargs):
+    def run(self, mode, *args, func=run_sim, **kwargs):
         """
         Run the loaded configurations in parallel by applying the provided func
         (default run_sim) to each dict using the Python multiprocessing library
@@ -499,16 +511,17 @@ class SimulationManager:
         else:
             to_run = list(self.sim_confs.values())
         self.log.info('Total sims to execute: %i', len(to_run))
-        runners = {'serial': self.run_serial, 'parallel': self.run_parallel,
-                   'dispy': self.run_dispy}
-        mode = self.gconf['General']['execution']
         # if self.gconf['General']['execution'] == 'serial':
         #     self.run_serial(to_run, func=func)
         # elif self.gconf['General']['execution'] == 'parallel':
         #     self.run_parallel(to_run, func=func)
         # elif self.gconf['General']['execution'] == 'dispy':
         #     self.run_dispy(to_run)
-        runners[mode](to_run)
+        if mode not in self.runners:
+            msg = "Invalid execution mode {}. Must be one of " \
+                  "{}".format(mode, list(self.runners.keys()))
+            raise ValueError(msg)
+        self.runners[mode](to_run)
         self.log.info('Finished executing jobs!')
         if self.t_sweeps:
             self.log.info('Linking thickness sweeps to solutions')
@@ -526,36 +539,7 @@ class SimulationManager:
                 to_run.append((self.sim_confs[dup_id][0], dup_dir))
             self.log.info('Running thickness sweeps')
             self.log.info('Total sims to execute: %i', len(to_run))
-            runners[mode](to_run)
-
-
-    # def run(self, *args, filter_dict={}, load=False, func=run_sim, **kwargs):
-    #     """
-    #     The main run methods that decides what kind of simulation to run based
-    #     on the provided config objects
-    #     """
-
-    #     if not self.gconf.optimized:
-    #         # Get all the sims
-    #         if load:
-    #             self.load_confs()
-    #         else:
-    #             self.make_confs()
-
-    #         if filter_dict:
-    #             for k, vals in filter_dict.items():
-    #                 par = [ks for ks in k.split('.')]
-    #                 vals = list(map(type(self.sim_confs[0][par]), vals))
-    #                 self.sim_confs = [c for c in self.sim_confs if c[par] in vals]
-    #         self.log.info("Executing job campaign")
-    #         self.execute_jobs(func=func, *args, **kwargs)
-    #     elif self.gconf.optimized:
-    #         self.run_optimization()
-    #     else:
-    #         self.log.error('Unsupported configuration for a simulation run. Not a '
-    #                        'single sim, sweep, or optimization. Make sure your sweeps are '
-    #                        'configured correctly, and if you are running an optimization '
-    #                        'make sure you do not have any sorting parameters specified')
+            self.runners[mode](to_run)
 
 
 class Simulator:
@@ -564,14 +548,17 @@ class Simulator:
         self.conf = conf
         numbasis = self.conf['Simulation']['numbasis']
         period = self.conf['Simulation']['array_period']
+        print('__init__: {}'.format(type(period.magnitude)))
         self.ID = conf.ID
         self.path = osp.abspath(osp.normpath(osp.expandvars(outdir)))
         self.base, self.dir = osp.split(self.path)
-        self.s4 = S4.New(Lattice=((period, 0), (0, period)),
+        self.s4 = S4.New(Lattice=((period.magnitude, 0), (0, period.magnitude)),
                          NumBasis=int(round(numbasis)))
         self.data = None
         self.runtime = 0
+        self.lgth_unit = self.conf['General']['base_unit']
         self.period = period
+        print('self.period: {}'.format(type(period.magnitude)))
 
     def __del__(self):
         """
@@ -674,25 +661,30 @@ class Simulator:
                     args = [layer.start, layer.end, *samps_dict[lname]]
                     z_vals = arithmetic_arange(*args)
                 zcoords.append(z_vals)
-            self.Z = np.concatenate(zcoords)
+            self.Z = Q_(np.concatenate(zcoords), self.lgth_unit)
         elif type(self.conf['General']['z_samples']) == list:
             self.zsamps = len(self.conf['General']['z_samples'])
-            self.Z = np.asarray(self.conf['General']['z_samples'])
+            self.Z = Q_(np.asarray(self.conf['General']['z_samples']),
+                        self.lgth_unit)
         else:
             self.zsamps = self.conf['General']['z_samples']
             max_depth = self.conf['General']['max_depth']
             if max_depth:
                 self.log.debug('Computing up to depth of {} '
                                'microns'.format(max_depth))
-                self.Z = np.linspace(0, max_depth, self.zsamps)
+                self.Z = Q_(np.linspace(0, max_depth.magnitude, self.zsamps),
+                            max_depth.units)
             else:
                 self.log.debug('Computing for entire device')
                 height = self.get_height()
-                self.Z = np.linspace(0, height, self.zsamps)
-        self.X = np.linspace(0, self.period, self.xsamps)
-        self.Y = np.linspace(0, self.period, self.ysamps)
-        self.dx = self.X[1] - self.X[0]
-        self.dy = self.Y[1] - self.Y[0]
+                self.Z = Q_(np.linspace(0, height, self.zsamps),
+                            self.lgth_unit)
+        self.X = Q_(np.linspace(0, self.period.magnitude, self.xsamps),
+                    self.lgth_unit)
+        self.Y = Q_(np.linspace(0, self.period.magnitude, self.ysamps),
+                    self.lgth_unit)
+        self.dx = Q_(self.X[1] - self.X[0], self.lgth_unit)
+        self.dy = Q_(self.Y[1] - self.Y[0], self.lgth_unit)
         self.data.update({"xcoords": self.X, "ycoords": self.Y,
                           "zcoords": self.Z})
 
@@ -719,7 +711,8 @@ class Simulator:
             self.log.debug('Building layer: %s' % layer_name)
             base_mat = layer.base_material
             layer_t = layer.thickness
-            self.s4.AddLayer(Name=layer_name, Thickness=layer_t,
+            print('layer_t type: {}'.format(type(layer_t)))
+            self.s4.AddLayer(Name=layer_name, Thickness=layer_t.magnitude,
                              Material=base_mat)
             self.log.debug('Building geometry in layer: {}'.format(layer_name))
             for shape_name, (shape, shape_mat) in layer.shapes.items():
@@ -740,7 +733,7 @@ class Simulator:
         """
 
         values = self.data[key]
-        points = (self.Z, self.X, self.Y)
+        points = (self.Z.magnitude, self.X.magnitude, self.Y.magnitude)
         rgi = spi.RegularGridInterpolator(points, values, method=method,
                                           bounds_error=True)
         setattr(self, key, rgi)
@@ -778,14 +771,12 @@ class Simulator:
         This is necessary because the interface to S4 (i.e the object stored at
         self.s4) requires the lattice vectors of the unit cell to be provided
         to the constructor of that object.
-
-        .. note:: You will need to call self.setup() after calling this
-        function
         """
         self.conf['Simulation']['array_period'] = period
         numbasis = self.conf['Simulation']['numbasis']
         self.s4 = S4.New(Lattice=((period, 0), (0, period)),
                          NumBasis=int(round(numbasis)))
+        self.period = Q_(period, self.lgth_unit)
         self.setup()
 
     def _get_epsilon(self, path):
@@ -822,10 +813,14 @@ class Simulator:
     def set_excitation(self):
         """Sets the exciting plane wave for the simulation"""
         f_phys = self.conf['Simulation']['frequency']
-        self.log.debug('Physical Frequency = %E' % f_phys)
-        c_conv = constants.c / self.conf['Simulation']['base_unit']
+        self.log.debug('Physical Frequency = {}' % f_phys)
+        base_unit = self.conf['General']['base_unit']
+        print('base unit: {}'.format(base_unit))
+        c_conv = ureg.speed_of_light / base_unit
         f_conv = f_phys / c_conv
-        self.s4.SetFrequency(f_conv)
+        print('F_conv: {}'.format(f_conv))
+        print('F_conv base_units: {}'.format(f_conv.to_base_units()))
+        self.s4.SetFrequency(f_conv.to_base_units().magnitude)
         polar = self.conf['Simulation']['polar_angle']
         azimuth = self.conf['Simulation']['azimuthal_angle']
         # To define circularly polarized light from the point of view of the
@@ -869,7 +864,8 @@ class Simulator:
 
     def get_height(self):
         """Get the total height of the device"""
-        return sum(layer.thickness for layer in self.layers.values())
+        h = sum(layer.thickness for layer in self.layers.values())
+        return Q_(h, self.lgth_unit)
 
     def set_lattice(self, period):
         """Updates the S4 simulation object with a new array period"""
@@ -890,8 +886,8 @@ class Simulator:
             self.s4.SetLayerThickness(Layer=layer, Thickness=thickness)
 
     # @do_profile(out='$nano/tests/profile_writing/line_profiler.txt', follow=[])
-    # @ureg.wraps(('volt/micrometer', 'volt/micrometer', 'volt/micrometer'),
-    #             None)
+    @ureg.wraps(('volt/micrometer', 'volt/micrometer', 'volt/micrometer'),
+                None)
     def compute_fields(self, zvals=None):
         """
         Constructs and returns a full 3D numpy array for each vector component
@@ -900,7 +896,7 @@ class Simulator:
         """
 
         if zvals is None:
-            zvals = self.Z
+            zvals = self.Z.magnitude
 
         self.log.debug('Computing fields ...')
         Ex = np.zeros((len(zvals), self.xsamps, self.ysamps),
@@ -960,8 +956,8 @@ class Simulator:
         self.log.debug('Finished computing fields!')
         return Ex, Ey, Ez, Hx, Hy, Hz
 
-    # @ureg.wraps(('volt/micrometer', 'volt/micrometer', 'volt/micrometer'),
-    #             None)
+    @ureg.wraps(('volt/micrometer', 'volt/micrometer', 'volt/micrometer'),
+                None)
     def compute_fields_by_point(self):
         self.log.debug('Computing fields ...')
         Ex = np.zeros((self.zsamps, self.xsamps, self.ysamps),
@@ -992,8 +988,8 @@ class Simulator:
                         Hz[zcount, i, j] = H[2]
         return Ex, Ey, Ez, Hx, Hy, Hz
 
-    # @ureg.wraps(('volt/micrometer', 'volt/micrometer', 'volt/micrometer'),
-    #             None)
+    @ureg.wraps(('volt/micrometer', 'volt/micrometer', 'volt/micrometer'),
+                None)
     def compute_fields_at_point(self, x, y, z):
         """
         Compute the electric field at a specific point within the device and
@@ -1007,8 +1003,8 @@ class Simulator:
             H = (None, None, None)
         return E[0], E[1], E[2], H[0], H[1], H[2]
 
-    # @ureg.wraps(('volt/micrometer', 'volt/micrometer', 'volt/micrometer'),
-    #             None)
+    @ureg.wraps(('volt/micrometer', 'volt/micrometer', 'volt/micrometer'),
+                None)
     def compute_fields_by_layer(self, sample_dict):
         """
         Compute fields within each layer such that a z sample falls exactly on
@@ -1045,8 +1041,8 @@ class Simulator:
         return results
 
     # @do_profile(follow=[])
-    # @ureg.wraps(('volt/micrometer', 'volt/micrometer', 'volt/micrometer'),
-    #             None)
+    @ureg.wraps(('volt/micrometer', 'volt/micrometer', 'volt/micrometer'),
+                None)
     def compute_fields_on_plane(self, z, xs, ys):
         """
         Compute the electric field on an x-y plane at a given z value with a
@@ -1191,19 +1187,21 @@ class Simulator:
         """
         self.log.debug('Computing fluxes ...')
         rows = len(list(self.conf['Layers'].keys()))*2
-        dt = [('layer', 'S25'), ('forward', np.complex128), ('backward', np.complex128)]
+        # O is object type, for storing Pint quantities
+        dt = [('layer', 'S25'), ('forward', 'O'), ('backward', 'O')]
         flux_arr = np.recarray((rows,), dtype=dt)
+        unit = ureg.volt / self.lgth_unit
         counter = 0
         for layer, ldata in self.conf['Layers'].items():
             self.log.debug('Computing fluxes through layer: %s' % layer)
             # This gets flux at top of layer
             forw, back = self.s4.GetPowerFlux(Layer=layer)
-            flux_arr[counter] = (layer, forw, back)
+            flux_arr[counter] = (layer, Q_(forw, unit), Q_(back, unit))
             # This gets flux at the bottom
-            offset = ldata['thickness']
+            offset = ldata['thickness'].magnitude
             forw, back = self.s4.GetPowerFlux(Layer=layer, zOffset=offset)
             key = layer + '_bottom'
-            flux_arr[counter+1] = (key, forw, back)
+            flux_arr[counter+1] = (key, Q_(forw, unit), Q_(back, unit))
             counter += 2
         self.log.debug('Finished computing fluxes!')
         return flux_arr
@@ -1357,8 +1355,10 @@ class Simulator:
         """
         Saves the simulation config object to a file
         """
+        import pprint
         path = osp.join(self.path, 'sim_conf.yml')
         self.log.debug('Saving conf to YAML file: %s', path)
+        print(type(self.conf['Simulation/array_period'].magnitude))
         self.conf.write(path)
         if not self.conf['General']['save_as']:
             pass

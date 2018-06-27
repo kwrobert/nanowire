@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import scipy.integrate as intg
+from nanowire.utils.utils import ureg
 from scipy import interpolate
 from scipy import constants
 
@@ -21,6 +22,7 @@ def setup_sim(sim):
     return sim
 
 
+@ureg.wraps((None, None), (None, ureg.hertz))
 def get_nk(path, freq):
     """
     Returns n and k, the real and imaginary components of the index of

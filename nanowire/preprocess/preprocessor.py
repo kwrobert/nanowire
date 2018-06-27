@@ -4,6 +4,9 @@ import posixpath
 import itertools
 import tables as tb
 import logging
+import ast
+import operator as op
+import pint
 from collections import MutableMapping
 from nanowire.utils.utils import (
     get_pytables_desc,
@@ -17,6 +20,19 @@ from nanowire.utils.config import Config
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
+DEFAULT_OPERATORS = {ast.Add: op.add, ast.Sub: op.sub, ast.Mult: op.mul,
+                     ast.Div: op.truediv, ast.FloorDiv: op.floordiv,
+                     ast.Pow: op.pow, ast.Mod: op.mod,
+                     ast.Eq: op.eq, ast.NotEq: op.ne,
+                     ast.Gt: op.gt, ast.Lt: op.lt,
+                     ast.GtE: op.ge, ast.LtE: op.le,
+                     ast.Not: op.not_,
+                     ast.USub: op.neg, ast.UAdd: op.pos,
+                     ast.In: lambda x, y: op.contains(y, x),
+                     ast.NotIn: lambda x, y: not op.contains(y, x),
+                     ast.Is: lambda x, y: x is y,
+                     ast.IsNot: lambda x, y: x is not y,
+                     }
 
 def fn_pint_quantity(*args):
     """
@@ -29,6 +45,14 @@ def fn_pint_quantity(*args):
     """
     quant = Q_(*args)
     return quant
+
+def fn_pint_magnitude(q):
+    """
+    Return the magnitude of a pint Quantity
+    """
+    if not isinstance(q, pint.quantity._Quantity):
+        raise ValueError("Argument of F.mag must be a pint Quantity")
+    return q.magnitude
 
 
 class Preprocessor:
@@ -64,7 +88,10 @@ class Preprocessor:
         combinations, put the list you wish to keep as a list directly in the
         template passed to the constructor of Preprocessor. This function
         """
-        parser = conff.Parser(fns={'Q': fn_pint_quantity})
+        ops = {'simpleeval': {'operators': DEFAULT_OPERATORS}}
+        parser = conff.Parser(fns={'Q': fn_pint_quantity,
+                                   'mag': fn_pint_magnitude},
+                              params=ops, cache_graph=True)
         if params is None:
             in_pars = {}
         elif type(params) == str:
@@ -78,6 +105,9 @@ class Preprocessor:
             raise ValueError('params must be a path to a regular file or '
                              'a dict')
         locs, lists = find_lists(in_pars)
+        parser = conff.Parser(fns={'Q': fn_pint_quantity,
+                                   'mag': fn_pint_magnitude},
+                              params=ops, cache_graph=True)
         if locs:
             paths = [posixpath.join(*l) for l in locs]
             combos = list(itertools.product(*lists))

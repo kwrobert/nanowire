@@ -99,54 +99,50 @@ h4 = "Name of the table at the end of table_path for storing configurations"
 
 
 @optics.command()
-@click.argument('config', type=exist_read_path)
 @click.argument('db', type=exist_read_path)
+@click.argument('exec_mode',
+                type=click.Choice(['serial', 'parallel', 'dispy']))
 @click.option('-b', '--base_dir',
               callback=lambda ctx, p, v: os.path.dirname(ctx.params['db']) if not v else v,
               type=exist_read_dir, help=h0)
 @click.option('-p', '--params', default=None, type=exist_read_path,
               help="Optional params for the config file parser")
-@click.option('-q', '--query', type=str, help=h1)
+@click.option('-q', '--query', type=click.STRING, help=h1)
 @click.option('-u', '--update', default=False, is_flag=True, help=h2)
 @click.option('-t', '--table_path', default='/', help=h3, show_default=True)
-@click.option('-n', '--table_name', default='simulations', help=h4,
+@click.option('-m', '--table_name', default='simulations', help=h4,
               show_default=True)
+@click.option('-n', '--nodes', type=click.STRING, multiple=True,
+              help="Nodes to run on. Specify multiple times for multiple nodes")
+@click.option('-i', '--ip_addr', type=click.STRING,
+              help="IP of local host for use with dispy")
+@click.option('-j', '--num_cores', type=click.INT,
+              help="Number of cores to use if running in parallel")
 @click.option('-v', '--log_level',
               type=click.Choice(['info', 'debug', 'warning', 'critical', 'error']),
               default='info',
               help="Set verbosity of logging")
 
-def run_all(config, db, base_dir, params, query, update, table_path,
-            table_name, log_level):
+def run_all(db, exec_mode, base_dir, params, query, update, table_path,
+            table_name, nodes, ip_addr, num_cores, log_level):
     """
-    Run all the simulations located beneath BASE_DIR.
+    Run all simulations matching QUERY located in the HDF5 DB
 
-    The directory tree beneath BASE_DIR is traversed recursively from the top
-    down and all the config files beneath it are collected. A simulation is run
-    for each config file found, and the output of each simulation is stored in
-    the same directory as the corresponding config file.
-
-    Can optionally configure how the manager runs via a config file, command
-    line parameters, or a combination of the two. The config file will be
-    treated as a template and can thus contain any special templating syntax
+    Collects all simulations inside the HDF5 database DB matching query string
+    QUERY and runs them using the specified MODE.
     """
 
     import nanowire.optics.simulate as simul
     import nanowire.preprocess as prep
 
-    processor = prep.Preprocessor(config)
-    parsed_dicts = processor.generate_configs(params=params)
-    if len(parsed_dicts) != 1:
-        raise ValueError('Must have only 1 set of unique parameters for the '
-                         'manager configuration')
-    conf = parsed_dicts[0]
-    manager = simul.SimulationManager(conf, log_level=log_level.upper())
+    manager = simul.SimulationManager(nodes=nodes, ip=ip_addr,
+                                      num_cores=num_cores, log_level=log_level.upper())
     manager.load_confs(db, base_dir=base_dir, query=query,
                        table_path=table_path, table_name=table_name)
     if update:
-        manager.run(func=simul.update_sim, load=True)
+        manager.run(exec_mode, func=simul.update_sim, load=True)
     else:
-        manager.run()
+        manager.run(exec_mode)
 
 @optics.command()
 @click.argument('config', type=exist_read_path)

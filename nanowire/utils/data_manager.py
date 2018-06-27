@@ -716,6 +716,9 @@ class HDF5DataManager(DataManager):
         # We write arrays out as usual, then just set an attribute on the node
         # that identifies its units
         if isinstance(mag, np.ndarray):
+            if mag.dtype.fields is not None:
+                raise ValueError('Should not have structured arrays inside '
+                                 'pint quantities')
             node = self.write_numpy_array(q.magnitude, key)
             # Only leaves have the .attrs attribute
             node.attrs['units'] = str(q.units)

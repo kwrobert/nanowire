@@ -23,6 +23,7 @@ from nanowire.utils.utils import (
 )
 from nanowire.utils.logging import add_logger
 
+log = logging.getLogger(__name__)
 
 def get_env_variable(match):
     """Given re module match object, return environment variable matching the
@@ -74,12 +75,7 @@ class Config(MutableMapping):
         """
 
         parts = self._get_parts(k)
-        if 'array_period' in k:
-            print('Getting array period')
         val = self.getfromseq(parts)
-        if 'array_period' in k:
-            print('array period: ', val)
-            print('array period type: ', type(val.magnitude))
         return val
 
     def __setitem__(self, k, v):
@@ -90,16 +86,7 @@ class Config(MutableMapping):
         """
 
         parts = self._get_parts(k)
-        if 'array_period' in k:
-            print('Setting array period')
-            print('array period before: ', v)
-            print('array period type before: ', type(v.magnitude))
         self.setfromseq(parts, v)
-        if 'array_period' in k:
-            print('array period after: ',
-                  self['Simulation/array_period'].magnitude)
-            print('array period type after: ',
-                  type(self['Simulation/array_period'].magnitude))
         self._update_id()
 
     def __delitem__(self, k):
@@ -303,8 +290,6 @@ class Config(MutableMapping):
         Dumps this config object to its YAML representation given a path to a
         file
         """
-        print('array period in write: ', self['Simulation/array_period'])
-        print('array period type in write: ', type(self['Simulation/array_period'].magnitude))
         if isinstance(f, str):
             f = os.path.expandvars(f)
             f = open(f, 'w')
@@ -323,12 +308,9 @@ def represent_odict(dumper, data):
 
 def represent_pint_quantity(dumper, data):
     qty = data
-    print('Input qty: {}'.format(qty))
-    print(type(qty.magnitude))
     d = {'magnitude': qty.magnitude,
          'units': str(qty.units),
          'base_units': str((1.0*qty.units).to_base_units())}
-    print('pint dict repr: {}'.format(d))
     return dumper.represent_mapping('!pintq', d)
 
 
@@ -382,7 +364,7 @@ def group_against(confs, key, sort_key=None, skip_keys=None):
 
     Notes
     -----
-    The config options in the input list `confs` are not copied, and references
+    The config objects in the input list `confs` are not copied, and references
     to the original Config objects are stored in the returned data structure
     """
 
@@ -425,7 +407,6 @@ def group_by(confs, key, sort_key=None):
     config. Within each group, the parameter associated with `key` will
     remain fixed, and all other parameters may vary.
 
-
     Parameters
     ----------
     conf : list, tuple
@@ -434,12 +415,12 @@ def group_by(confs, key, sort_key=None):
     key : str
         The key for the parameter you wish to group by. Must be an
         forward-slash separate path-like string.
-    sort_key : str, optional
+    sort_key : callable, str, optional
         An optional key by which to sort the parameters within each group. For
         example, group by parameter A but sort each group in increasing order
         of parameter B. If a callable object is provided, that callable will be
         applied to each individual simulation in the group to generate the sort
-        key. If an iterable is provided, it will be interpreted as a key in the
+        key. If an string is provided, it will be interpreted as a key in the
         config and the parameter associated with that key will be used.
 
     Returns
@@ -472,7 +453,7 @@ def group_by(confs, key, sort_key=None):
                 group.sort(key=lambda sim: conf[sort_key])
     return groups
 
-@add_logger(logging.getLogger(__name__))
+# @add_logger(logging.getLogger(__name__))
 def load_confs(db, base_dir='', query='', table_path='/',
                table_name='simulations'):
     """
@@ -483,9 +464,9 @@ def load_confs(db, base_dir='', query='', table_path='/',
 
     Parameters
     ----------
-    db : str
-        A path to an HDF5 file containing the database of simulation
-        configs
+    db : str, :py:class:`tb.file.File`
+        Either a string path to an HDF5 file containing the database of
+        simulation configs, or a PyTables file handle
     base_dir : str, optional
         The base directory of the directory tree that all simulations will
         dump their output data into. If not specified, defaults to the
@@ -503,39 +484,54 @@ def load_confs(db, base_dir='', query='', table_path='/',
 
     Returns
     -------
-    list
+    confs : list
         A list of :py:class:`nanowire.preprocess.config.Config` objects
+    t_sweeps : dict
+        A dict describing which simulations are thickness sweeps. The key:value
+        pairs are pairs of simulation IDs. The keys are sim IDs whose solution
+        files are hard links to the solution of the simulation ID value
+    db : :py:class:`tb.file.File`
+        An open PyTables file handle. If you passed in an open file handle,
+        this is the same file handle you passed in
     """
 
-    # Find the data files and instantiate Config objects
     if not base_dir:
         base_dir = os.path.dirname(db)
-    with tb.open_file(db, 'r') as hdf:
-        table = hdf.get_node(table_path, name=table_name,
-                             classname='Table')
-        confs = {}
-        if query:
-            condvars = {k.replace('/', '__'): v
-                        for k, v in table.colinstances.items()}
-            for row in table.read_where(query, condvars=condvars):
-                short_id = row['ID'].decode()[0:10]
-                conf_path = os.path.join(base_dir, short_id, 'sim_conf.yml')
-                log.info('Loading config: %s', conf_path)
-                conf = Config.fromYAML(row['yaml'])
-                if row['ID'].decode() != conf.ID:
-                    raise ValueError('ID in database and ID of loaded '
-                                     'config do not match')
-                confs[conf.ID] = (conf, conf_path)
-        else:
-            for row in table.read():
-                short_id = row['ID'].decode()[0:10]
-                conf_path = os.path.join(base_dir, short_id, 'sim_conf.yml')
-                log.info('Loading config: %s', conf_path)
-                conf = Config.fromYAML(row['yaml'])
-                if row['ID'].decode() != conf.ID:
-                    raise ValueError('ID in database and ID of loaded '
-                                     'config do not match')
-                confs[conf.ID] = (conf, conf_path)
+    # Open HDF5 database if its path or as PyTables file
+    if isinstance(db, str):
+        if not os.path.isfile(db):
+            raise ValueError('Database {} is not a file'.format(db))
+        db = tb.open_file(db, 'r')
+    elif isinstance(db, tb.file.File):
+        if not db.isopen:
+            db = tb.open_file(db.filename, 'r')
+    else:
+        raise ValueError('Invalid HDF5 database argument: {}'.format(db))
+    table = db.get_node(table_path, name=table_name,
+                        classname='Table')
+    confs = {}
+    if query:
+        condvars = {k.replace('/', '__'): v
+                    for k, v in table.colinstances.items()}
+        for row in table.read_where(query, condvars=condvars):
+            short_id = row['ID'].decode()[0:10]
+            conf_path = os.path.join(base_dir, short_id, 'sim_conf.yml')
+            log.info('Loading config: %s', conf_path)
+            conf = Config.fromYAML(row['yaml'])
+            if row['ID'].decode() != conf.ID:
+                raise ValueError('ID in database and ID of loaded '
+                                 'config do not match')
+            confs[conf.ID] = (conf, conf_path)
+    else:
+        for row in table.read():
+            short_id = row['ID'].decode()[0:10]
+            conf_path = os.path.join(base_dir, short_id, 'sim_conf.yml')
+            log.info('Loading config: %s', conf_path)
+            conf = Config.fromYAML(row['yaml'])
+            if row['ID'].decode() != conf.ID:
+                raise ValueError('ID in database and ID of loaded '
+                                 'config do not match')
+            confs[conf.ID] = (conf, conf_path)
     confs_list = [tup[0] for tup in confs.values()]
     thickness_paths = find_keypaths(confs_list[0], 'thickness')
     # We need to handle the case of thickness sweeps to take advantage of
@@ -567,22 +563,23 @@ def load_confs(db, base_dir='', query='', table_path='/',
     #         conf_obj = Config.fromFile(conf_path)
     #         confs.append((conf_path, conf_obj))
     # self.sim_confs = confs
-    if not confs:
-        log.error('Unable to find any configs')
-        raise RuntimeError('Unable to find any configs')
-    return confs, t_sweeps
+    # if not confs:
+    #     log.error('Unable to find any configs')
+    #     raise RuntimeError('Unable to find any configs')
+    return confs, t_sweeps, db
 
 
-def dump_configs(hdf_path, table_path='/', table_name='simulations',
+def dump_configs(db, table_path='/', table_name='simulations',
                  outdir=''):
     """
-    Dump all the Configs in an HDF5 table to YAML files
+    Dump all the Configs in an HDF5 database to YAML files
 
     Parameters
     ----------
 
-    hdf_path : str
-        Path to the HDF5 file containing the database
+    db : str, :py:class:`tb.file.File`
+        Either a string path to an HDF5 file containing the database of
+        simulation configs, or a PyTables file handle
     table_path : str, optional
         Path to the group containing the database table. Default: '/'
     table_name : str, optional
@@ -595,17 +592,29 @@ def dump_configs(hdf_path, table_path='/', table_name='simulations',
     Returns
     -------
 
-    list
+    paths : list
         List of absolute paths to the dumped files
+    db : :py:class:`tb.file.File`
+        An open PyTables file handle. If you passed in an open file handle,
+        this is the same file handle you passed in
     """
 
-    if not os.path.isfile(hdf_path):
-        raise ValueError('Arg {} is not a regular file'.format(hdf_path))
-    outdir = outdir if outdir else os.path.dirname(hdf_path)
+    if not os.path.isfile(db):
+        raise ValueError('Arg {} is not a regular file'.format(db))
+    outdir = outdir if outdir else os.path.dirname(db)
     if not os.path.isdir(outdir):
         os.makedirs(outdir)
-    hdf = tb.open_file(hdf_path, 'r')
-    table = hdf.get_node(table_path, name=table_name, classname='Table')
+    # Open HDF5 database if its path or as PyTables file
+    if isinstance(db, str):
+        if not os.path.isfile(db):
+            raise ValueError('Database {} is not a file'.format(db))
+        db = tb.open_file(db, 'r')
+    elif isinstance(db, tb.file.File):
+        if not db.isopen:
+            db = tb.open_file(db.filename, 'r')
+    else:
+        raise ValueError('Invalid HDF5 database argument: {}'.format(db))
+    table = db.get_node(table_path, name=table_name, classname='Table')
     paths = []
     for row in table.iterrows():
         stream = row['yaml'].decode()
@@ -615,5 +624,4 @@ def dump_configs(hdf_path, table_path='/', table_name='simulations',
         with open(outpath, 'w') as f:
             f.write(stream)
         paths.append(outpath)
-    hdf.close()
-    return paths
+    return paths, db

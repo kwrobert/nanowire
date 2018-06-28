@@ -31,10 +31,10 @@ h4 = "A list of keys within the configs to skip when generating the config ID"
 @click.argument('template', type=exist_read_path)
 @click.argument('db', type=cli_path)
 @click.option('-p', '--params', default=None, type=exist_read_path, help=h1)
-@click.option('-t', '--table_path', default='/', help=h2, show_default=True)
-@click.option('-n', '--table_name', default='simulations', help=h3,
+@click.option('-t', '--table-path', default='/', help=h2, show_default=True)
+@click.option('-n', '--table-name', default='simulations', help=h3,
               show_default=True)
-@click.option('-s', '--skip_keys', default=['General', 'Materials'], help=h4,
+@click.option('-s', '--skip-keys', default=['General', 'Materials'], help=h4,
               show_default=True)
 def preprocess(template, db, params, table_path, table_name, skip_keys):
     """
@@ -55,7 +55,7 @@ def preprocess(template, db, params, table_path, table_name, skip_keys):
     click.echo('Writing configs to disk ...')
     pp.write_configs()
     click.echo('Writing configs to database ...')
-    pp.add_to_database(db_path=db, tb_path=table_path, tb_name=table_name,
+    pp.add_to_database(db, tb_path=table_path, tb_name=table_name,
                        skip_keys=skip_keys)
     click.secho('Preprocessing complete!', fg='green')
 
@@ -66,7 +66,7 @@ h1 = "The directory to store all the simulation outputs in. Defaults to " \
 
 @optics.command()
 @click.argument('config', type=exist_read_path)
-@click.option('-o', '--output_dir', type=exist_read_dir, default=None, help=h1)
+@click.option('-o', '--output-dir', type=exist_read_dir, default=None, help=h1)
 def run(config, output_dir):
     """
     Run a single simulation.
@@ -102,23 +102,23 @@ h4 = "Name of the table at the end of table_path for storing configurations"
 @click.argument('db', type=exist_read_path)
 @click.argument('exec_mode',
                 type=click.Choice(['serial', 'parallel', 'dispy']))
-@click.option('-b', '--base_dir',
+@click.option('-b', '--base-dir',
               callback=lambda ctx, p, v: os.path.dirname(ctx.params['db']) if not v else v,
               type=exist_read_dir, help=h0)
 @click.option('-p', '--params', default=None, type=exist_read_path,
               help="Optional params for the config file parser")
 @click.option('-q', '--query', type=click.STRING, help=h1)
 @click.option('-u', '--update', default=False, is_flag=True, help=h2)
-@click.option('-t', '--table_path', default='/', help=h3, show_default=True)
-@click.option('-m', '--table_name', default='simulations', help=h4,
+@click.option('-t', '--table-path', default='/', help=h3, show_default=True)
+@click.option('-m', '--table-name', default='simulations', help=h4,
               show_default=True)
 @click.option('-n', '--nodes', type=click.STRING, multiple=True,
               help="Nodes to run on. Specify multiple times for multiple nodes")
-@click.option('-i', '--ip_addr', type=click.STRING,
+@click.option('-i', '--ip-addr', type=click.STRING,
               help="IP of local host for use with dispy")
-@click.option('-j', '--num_cores', type=click.INT,
+@click.option('-j', '--num-cores', type=click.INT,
               help="Number of cores to use if running in parallel")
-@click.option('-v', '--log_level',
+@click.option('-v', '--log-level',
               type=click.Choice(['info', 'debug', 'warning', 'critical', 'error']),
               default='info',
               help="Set verbosity of logging")
@@ -133,85 +133,85 @@ def run_all(db, exec_mode, base_dir, params, query, update, table_path,
     """
 
     import nanowire.optics.simulate as simul
-    import nanowire.preprocess as prep
 
-    manager = simul.SimulationManager(nodes=nodes, ip=ip_addr,
-                                      num_cores=num_cores, log_level=log_level.upper())
-    manager.load_confs(db, base_dir=base_dir, query=query,
-                       table_path=table_path, table_name=table_name)
+    manager = simul.SimulationManager(db, nodes=nodes, ip=ip_addr,
+                                      num_cores=num_cores,
+                                      log_level=log_level.upper())
+    manager.load_confs(base_dir=base_dir, query=query, table_path=table_path,
+                       table_name=table_name)
     if update:
         manager.run(exec_mode, func=simul.update_sim, load=True)
     else:
         manager.run(exec_mode)
 
 @optics.command()
-@click.argument('config', type=exist_read_path)
 @click.argument('db', type=exist_read_path)
-@click.option('-b', '--base_dir',
+@click.argument('config', type=exist_read_path)
+@click.option('-b', '--base-dir',
               callback=lambda ctx, p, v: os.path.dirname(ctx.params['db']) if not v else v,
               type=exist_read_dir, help=h0)
 @click.option('-p', '--params', default=None, type=exist_read_path,
               help="Optional params for the config file parser")
 @click.option('-q', '--query', type=str, help=h1)
-@click.option('-t', '--table_path', default='/', help=h3, show_default=True)
-@click.option('-n', '--table_name', default='simulations', help=h4,
+@click.option('-t', '--table-path', default='/', help=h3, show_default=True)
+@click.option('-n', '--table-name', default='simulations', help=h4,
               show_default=True)
-@click.option('-nc', '--no_crunch', is_flag=True, default=False,
-              help="Do not perform crunching operations. Useful when data has "
-                   "already been crunched but new plots need to be generated")
-@click.option('-ngc', '--no_gcrunch', is_flag=True, default=False,
-              help="Do not perform global crunching operations. Useful when "
+@click.option('--crunch/--no-crunch', default=True,
+              help="Peform/do not perform crunching operations. Useful when "
                    "data has already been crunched but new plots need to be "
                    "generated")
-@click.option('-np', '--no_plot', is_flag=True, default=False,
-              help="Do not perform plotting operations. Useful when you only "
-                   "want to crunch your data without plotting")
-@click.option('-ngp', '--no_gplot', is_flag=True, default=False,
-              help="Do not perform global plotting operations. Useful when "
+@click.option('--gcrunch/--no-gcrunch', default=True,
+              help="Peform/do not perform group crunching operations. Useful "
+                   "when data has already been crunched but new plots need to "
+                   "be generated")
+@click.option('--plot/--no-plot', default=True,
+              help="Peform/do not perform plotting operations. Useful when "
                    "you only want to crunch your data without plotting")
-@click.option('--print', is_flag=True, default=False,
+@click.option('--gplot/--no-gplot', default=True,
+              help="Peform/do not perform global plotting operations. Useful "
+                   "when you only want to crunch your data without plotting")
+@click.option('-gb', '--group-by', type=click.STRING,
+              help="The parameter you would like to group simulations by, "
+                   "specified as a forward slash separated path to the key "
+                   "in the config as: path/to/key/value")
+@click.option('-ga', '--group-against', type=click.STRING,
+              help="The parameter you would like to group simulations "
+                   "against, specified as a forward slash separated path to "
+                   "the key in the config as: path/to/key/value")
+@click.option('-j', '--num-cores', type=click.INT, default=0,
+              help="Number of cores to use if running in parallel")
+@click.option('--print-ids', is_flag=True, default=False,
               help="Print IDs of simulations to be processed, without running "
                    "anything")
-@click.option('-gb', '--group_by',
-              help="The parameter you would like to group simulations by, "
-                   "specified as a dot separated path to the key in the "
-                   "config as: path.to.key.value")
-@click.option('-ga', '--group_against',
-              help="The parameter you would like to group against, specified "
-                   "as a dot separated path to the key in the config as: "
-                   "path.to.key.value")
-@click.option('-v', '--log_level', help="Set verbosity of logging",
+@click.option('-v', '--log-level', help="Set verbosity of logging",
               type=click.Choice(['info', 'debug', 'warning', 'critical', 'error']),
               default='info')
-def postprocess(config, db, base_dir, params, query, update, table_path,
-                table_name, log_level):
+def postprocess(db, config, base_dir, params, query, table_path, table_name,
+                crunch, gcrunch, plot, gplot, group_by, group_against,
+                print_ids, num_cores, log_level):
     """
-    Run all the simulations located beneath BASE_DIR.
+    Run all simulations matching QUERY located in the HDF5 DB
 
-    The directory tree beneath BASE_DIR is traversed recursively from the top
-    down and all the config files beneath it are collected. A simulation is run
-    for each config file found, and the output of each simulation is stored in
-    the same directory as the corresponding config file.
-
-    Can optionally configure how the manager runs via a config file, command
-    line parameters, or a combination of the two. The config file will be
-    treated as a template and can thus contain any special templating syntax
+    Collects all simulations inside the HDF5 database DB matching query string
+    QUERY and postprocesses them according to the plan specified in CONFIG.
     """
 
-    import nanowire.optics.simulate as simul
     import nanowire.optics.postprocess as post
     import nanowire.preprocess as prep
 
     processor = prep.Preprocessor(config)
-    parsed_dicts = processor.generate_configs(params=params)
+    parsed_dicts = processor.generate_configs(skip_keys=[], params=params)
     if len(parsed_dicts) != 1:
         raise ValueError('Must have only 1 set of unique parameters for the '
                          'manager configuration')
     conf = parsed_dicts[0]
-    manager = simul.SimulationManager(conf, log_level=log_level.upper())
-    manager.load_confs(db, base_dir=base_dir, query=query,
-                       table_path=table_path, table_name=table_name)
-    if update:
-        manager.run(func=simul.update_sim, load=True)
+    proc = post.Processor(db, conf, base_dir=base_dir, num_cores=num_cores)
+    proc.load_confs(base_dir=base_dir, query=query,
+                    table_path=table_path, table_name=table_name)
+    if print_ids:
+        for conf in proc.sim_confs:
+            print(conf.ID)
+        return
     else:
-        manager.run()
+        proc.process(crunch=crunch, gcrunch=gcrunch, plot=plot, gplot=gplot,
+                     grouped_against=group_against, grouped_by=group_by)

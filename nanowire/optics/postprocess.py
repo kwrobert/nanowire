@@ -5,6 +5,7 @@ import sys
 import time
 import copy
 import logging
+import tables as tb
 import multiprocessing as mp
 import matplotlib
 try:
@@ -18,27 +19,33 @@ import matplotlib.patches as mpatches
 import scipy.constants as consts
 import scipy.integrate as intg
 import numpy as np
-import naturalneighbor as nn
+# import naturalneighbor as nn
 from mpl_toolkits.mplot3d import Axes3D
 from itertools import repeat
 from scipy import interpolate
 from sympy import Circle
-from nanowire.utils.config import Config, load_confs
-from nanowire.utils.utils import (
-    cartesian_product,
-    arithmetic_arange
-)
-from nanowire.utils.logging import (
-    IdFilter,
-)
+from nanowire.optics.simulate import Simulator
 from nanowire.optics.utils.utils import (
     get_nk,
     get_incident_power,
     get_incident_amplitude,
 )
-from nanowire.optics.simulate import Simulator
+from nanowire.utils.config import (
+    Config,
+    load_confs,
+    group_against as _group_against,
+    group_by as _group_by,
+)
+from nanowire.utils.utils import (
+    cartesian_product,
+    arithmetic_arange,
+    open_pytables_file,
+)
+from nanowire.utils.logging import (
+    IdFilter,
+)
 from nanowire.utils.data_manager import DataManager, HDF5DataManager
-from nanowire.utils.geometry import (
+from nanowire.optics.utils.geometry import (
     Layer,
     get_mask_by_shape,
     get_mask_by_material,
@@ -2293,31 +2300,38 @@ def execute_plan(conf, plan, grouped_against=None, grouped_by=None):
         raise
 
 
-class Processor(object):
+class Processor:
     """
     Generic class for automating the processing of Simulations and
     SimulationGroups
     """
 
-    def __init__(self, path=None, conf=None, sims=[], sim_groups=[], failed_sims=[]):
-        if path is not None:
-            if osp.isfile(path):
-                self.gconf = Config(osp.abspath(path))
-            else:
+    def __init__(self, db, conf, base_dir='', num_cores=0, sims=None,
+                 sim_groups=None):
+        sims = sims if sims is not None else []
+        sim_groups = sim_groups if sim_groups is not None else []
+
+        if not osp.isfile(db):
+            raise ValueError("Path {} to conf file doesn't "
+                             "exist".format(db))
+        self.db = open_pytables_file(db, 'r')
+        if isinstance(conf, str):
+            if not osp.isfile(conf):
                 raise ValueError("Path {} to conf file doesn't "
-                                 " exist".format(path))
-        elif conf is not None:
+                                 "exist".format(conf))
+            self.gconf = Config.fromFile(osp.abspath(conf))
+        elif isinstance(conf, Config):
             self.gconf = conf
         else:
-            raise ValueError("Must pass in either path of conf kwargs")
-        # self.gconf.expand_vars()
+            msg = "Must pass in either path to a config file or a Config " \
+                  "object"
+            raise ValueError(msg)
+        self.base_dir = base_dir if base_dir else osp.dirname(db)
         self.log = logging.getLogger(__name__)
         self.log.debug("Processor base init")
+        self.num_cores = num_cores
         self.sims = sims
         self.sim_groups = sim_groups
-        # A place to store any failed sims (i.e sims that are missing their
-        # data file)
-        self.failed_sims = failed_sims
         self.grouped_against = None
         self.grouped_by = None
 
@@ -2330,9 +2344,6 @@ class Processor(object):
 
         Parameters
         ----------
-        db : str
-            A path to an HDF5 file containing the database of simulation
-            configs
         base_dir : str, optional
             The base directory of the directory tree that all simulations will
             dump their output data into. If not specified, defaults to the
@@ -2353,7 +2364,7 @@ class Processor(object):
         list
             A list of :py:class:`nanowire.preprocess.config.Config` objects
         """
-        confs, t_sweeps = load_confs(*args, **kwargs)
+        confs, t_sweeps, db = load_confs(self.db, *args, **kwargs)
         self.t_sweeps = t_sweeps
         self.sim_confs = confs
         return confs, t_sweeps
@@ -2365,11 +2376,87 @@ class Processor(object):
         """
         self.sims = [Simulation(conf=c) for c in self.sim_confs]
 
-    def get_param_vals(self, parseq):
+    def group_against(self, key, **kwargs):
+        """
+        Group configs against particular parameter.
+
+        Group a list of config objects against a particular parameter. Within
+        each group, the parameter specified by `key` will vary, and all other
+        parameters will remain fixed. Useful for examining the affect of a
+        single parameter on simulation outputs, and for generating line plots
+        with the parameter specified by `key` on the x-axis.
+
+        Parameters
+        ----------
+        key : str
+            A key specifying which parameter simulations will be grouped
+            against.  Individual simulations within each group will be sorted
+            in increasing order of this parameter, and all other parameters
+            will remain constant within the group. Key can be a slash-separated
+            string pointing to nested items in the config.  sort_key : str,
+            optional An optional key used to sort the order of the inner lists
+            within the returned outer list of groups. Works because all
+            parameters within each internal group are constant (excluding the
+            parameter specified by `key`). The outer list of group lists will
+            be sorted in increasing order of the specified sort_key.
+        skip_keys : list
+            A list of keys to skip when comparing two Configs.
+
+        Returns
+        -------
+        list
+            A list of lists. Each inner list is a group, sorted in increasing
+            order of the parameter `key`. All other parameters in each group
+            are constant. The outer list may optionally be sorted in increasing
+            order of an additonal `sort_key`
+
+        Notes
+        -----
+        The config objects in the input list `confs` are not copied, and
+        references to the original Config objects are stored in the returned
+        data structure
+        """
+
+        self.sim_groups = _group_against(self.sim_confs)
+        self.grouped_against = key
+
+    def group_by(self, key, **kwargs):
+        """
+        Groups simulations by the parameter associated with `key` in the
+        config. Within each group, the parameter associated with `key` will
+        remain fixed, and all other parameters may vary.
+
+        Parameters
+        ----------
+        conf : list, tuple
+            A list or tuple of :py:class:`nanowire.preprocess.config.Config`
+            objects
+        key : str
+            The key for the parameter you wish to group by. Must be an
+            forward-slash separate path-like string.
+        sort_key : str, optional
+            An optional key by which to sort the parameters within each group.
+            For example, group by parameter A but sort each group in increasing
+            order of parameter B. If a callable object is provided, that
+            callable will be applied to each individual simulation in the group
+            to generate the sort key. If a string is provided, it will be
+            interpreted as a key in the config and the parameter associated
+            with that key will be used.
+
+        Returns
+        -------
+        list
+            A singly nested list of lists. Each inner list contains a group of
+            simulations.
+        """
+        self.sim_groups = _group_by(self.sim_confs, key, **kwargs)
+        self.grouped_by = key
+
+    def param_vals(self, parseq):
         """
         Return all possible values of the provided parameter for this sweep
         """
-
+        raise NotImplementedError("Just use that database!")
         vals = []
         for conf in self.sim_confs:
             val = conf[parseq]
@@ -2377,80 +2464,57 @@ class Processor(object):
                 vals.append(val)
         return vals
 
-    def filter_by_param(self, pars):
-        """Accepts a dict where the keys are parameter names and the values are
-        a list of possible values for that parameter. Any simulation whose
-        parameter does not match any of the provided values is removed from the
-        sims and sim_groups attribute"""
-
-        assert(type(pars) == dict)
-        for par, vals in pars.items():
-            vals = [type(self.sim_confs[0][par])(v) for v in vals]
-            self.sim_confs = [conf for conf in self.sim_confs if conf[par] in vals]
-            groups = []
-            for group in self.sim_groups:
-                filt_group = [conf for conf in group if conf[par] in vals]
-                groups.append(filt_group)
-            self.sim_groups = groups
-        assert(len(self.sim_confs) >= 1)
-        return self.sim_confs, self.sim_groups
-
-    def call_func(self, quantity, obj, args):
+    def _serial_process(self, plan, grouped_by=None, grouped_against=None):
         """
-        Calls an instance method of an object with args
         """
+        self.log.info('Beginning serial processing ...')
+        if 'crunch' in plan or 'plot' in plan:
+            for conf in self.sim_confs:
+                execute_plan(conf, plan, grouped_against=grouped_against,
+                             grouped_by=grouped_by)
+        else:
+            self.log.info('No actions to execute!')
 
-        try:
-            result = getattr(obj, quantity)(*args)
-        except KeyError:
-            self.log.error("Unable to call the following function: %s",
-                           quantity, exc_info=True, stack_info=True)
-            raise
-        return result
+    def _parallel_process(self, plan, grouped_by=None, grouped_against=None):
+        """
+        """
+        if 'crunch' in plan or 'plot' in plan:
+            self.log.info('Beginning parallel processing using %s cores ...',
+                          str(self.num_cores))
+            args_list = list(zip(self.sim_confs, repeat(plan),
+                                 repeat(grouped_against),
+                                 repeat(grouped_by)))
+            with mp.Pool(processes=self.num_cores) as pool:
+                pool.starmap(execute_plan, args_list)
+            pool.join()
+        else:
+            self.log.info('No actions to execute!')
 
     def process(self, crunch=True, plot=True, gcrunch=True, gplot=True,
                 grouped_against=None, grouped_by=None):
-        # Create pool if processing in parallel
-        if self.gconf['General']['post_parallel']:
-            num_procs = self.gconf['General']['num_cores']
-            pool = mp.Pool(processes=num_procs)
         # First process all the sims
-        self.log.info('Beginning processing for all sims ...')
+        self.log.info('Processing individual simulations')
         plan = copy.deepcopy(self.gconf['Postprocessing']['Single'])
         if not crunch:
             del plan['crunch']
         if not plot:
             del plan['plot']
-        if 'crunch' in plan or 'plot' in plan:
-            if not self.gconf['General']['post_parallel']:
-                for conf in self.sim_confs:
-                    execute_plan(conf, plan, grouped_against=grouped_against,
-                                 grouped_by=grouped_by)
-            else:
-                self.log.info('Plotting sims in parallel using %s cores ...',
-                              str(num_procs))
-                args_list = list(zip(self.sim_confs, repeat(plan),
-                                     repeat(grouped_against),
-                                     repeat(grouped_by)))
-                pool.starmap(execute_plan, args_list)
+        if self.num_cores:
+            self._parallel_process(plan, grouped_by=grouped_by,
+                                   grouped_against=grouped_against)
+        else:
+            self._serial_process(plan, grouped_by=grouped_by,
+                                 grouped_against=grouped_against)
         # Process groups
+        self.log.info('Processing simulation groups')
         plan = copy.deepcopy(self.gconf['Postprocessing']['Group'])
         if not gcrunch:
             del plan['crunch']
         if not gplot:
             del plan['plot']
-        if 'crunch' in plan or 'plot' in plan:
-            if not self.gconf['General']['post_parallel']:
-                for group in self.sim_groups:
-                    execute_plan(group, plan, grouped_against=grouped_against,
-                                 grouped_by=grouped_by)
-            else:
-                self.log.info('Plotting sims in parallel using %s cores ...',
-                              str(num_procs))
-                args_list = list(zip(self.sim_groups, repeat(plan),
-                                     repeat(grouped_against),
-                                     repeat(grouped_by)))
-                pool.starmap(execute_plan, args_list)
-        if self.gconf['General']['post_parallel']:
-            pool.close()
-            pool.join()
+        if self.num_cores:
+            self._parallel_process(plan, grouped_by=grouped_by,
+                                   grouped_against=grouped_against)
+        else:
+            self._serial_process(plan, grouped_by=grouped_by,
+                                 grouped_against=grouped_against)

@@ -13,26 +13,14 @@ from nanowire.utils.utils import (
     add_row,
     ureg,
     Q_,
-    find_lists
+    find_lists,
+    open_pytables_file
 )
 from nanowire.utils.config import Config
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
-DEFAULT_OPERATORS = {ast.Add: op.add, ast.Sub: op.sub, ast.Mult: op.mul,
-                     ast.Div: op.truediv, ast.FloorDiv: op.floordiv,
-                     ast.Pow: op.pow, ast.Mod: op.mod,
-                     ast.Eq: op.eq, ast.NotEq: op.ne,
-                     ast.Gt: op.gt, ast.Lt: op.lt,
-                     ast.GtE: op.ge, ast.LtE: op.le,
-                     ast.Not: op.not_,
-                     ast.USub: op.neg, ast.UAdd: op.pos,
-                     ast.In: lambda x, y: op.contains(y, x),
-                     ast.NotIn: lambda x, y: not op.contains(y, x),
-                     ast.Is: lambda x, y: x is y,
-                     ast.IsNot: lambda x, y: x is not y,
-                     }
 
 def fn_pint_quantity(*args):
     """
@@ -61,6 +49,24 @@ class Preprocessor:
     and generates all the simulation configuration files, placing them in
     subdirectories named by the Simulation ID
     """
+    # These are the operators used by the expression evaluator inside Parser
+    # object. This replaces the safe_add, safe_mult, and safe_pow operators
+    # with the unsafe python equivalents. This is fine because our config files
+    # should only ever come from a trusted source, and hopefully we can trust
+    # users to no accidentally compute a massive power or something
+    DEFAULT_OPERATORS = {ast.Add: op.add, ast.Sub: op.sub, ast.Mult: op.mul,
+                         ast.Div: op.truediv, ast.FloorDiv: op.floordiv,
+                         ast.Pow: op.pow, ast.Mod: op.mod,
+                         ast.Eq: op.eq, ast.NotEq: op.ne,
+                         ast.Gt: op.gt, ast.Lt: op.lt,
+                         ast.GtE: op.ge, ast.LtE: op.le,
+                         ast.Not: op.not_,
+                         ast.USub: op.neg, ast.UAdd: op.pos,
+                         ast.In: lambda x, y: op.contains(y, x),
+                         ast.NotIn: lambda x, y: not op.contains(y, x),
+                         ast.Is: lambda x, y: x is y,
+                         ast.IsNot: lambda x, y: x is not y,
+                         }
 
     def __init__(self, template):
         self.log = logging.getLogger(__name__)
@@ -88,7 +94,7 @@ class Preprocessor:
         combinations, put the list you wish to keep as a list directly in the
         template passed to the constructor of Preprocessor. This function
         """
-        ops = {'simpleeval': {'operators': DEFAULT_OPERATORS}}
+        ops = {'simpleeval': {'operators': self.DEFAULT_OPERATORS}}
         parser = conff.Parser(fns={'Q': fn_pint_quantity,
                                    'mag': fn_pint_magnitude},
                               params=ops, cache_graph=True)
@@ -144,16 +150,24 @@ class Preprocessor:
                 os.makedirs(outdir)
             conf.write(outfile)
 
-    def add_to_database(self, db_path, tb_path='/', tb_name='simulations',
+    def add_to_database(self, db, tb_path='/', tb_name='simulations',
                         skip_keys=None):
         """
         Add the generated configs to table located immediately beneath path
-        `tb_path` with name 'tb_name' inside a PyTables HDF5 file located on
-        the filesystem at `db_path`.
+        `tb_path` with name 'tb_name' inside an HDF5 file `db`.
 
-        If there is no file located at `db_path`, it is created. If no table
-        with matching location exists inside the HDF5 file, all intermediate
-        groups along the path and the table at the end of the path are created
+        Parameters
+        ----------
+
+        db : str, :py:class:`tb.file.File`
+            Either a path to an HDF5 file as a string, or a PyTables file
+            handle. The file handle may be open or closed. If it's open, it
+            just gets passed through unmodified. If it's closed, it gets
+            reopened. If `db` is a string representing a path that does not yet
+            exist, it is created. If no table with matching location exists
+            inside the HDF5 file, all intermediate groups along the path and
+            the table at the end of the path are created
+
         """
 
         skip_keys = skip_keys if skip_keys is not None else []
@@ -166,7 +180,7 @@ class Preprocessor:
         desc, meta = get_pytables_desc(desc_dict)
         desc['ID']._v_pos = 0
         # Open in append mode!
-        hdf = tb.open_file(db_path, mode='a')
+        hdf = open_pytables_file(db, 'a')
         try:
             table = hdf.create_table(where=tb_path, name=tb_name,
                                      description=desc, createparents=True)

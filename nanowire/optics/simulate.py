@@ -44,7 +44,8 @@ from nanowire.utils.utils import (
     sorted_dict,
     find_keypaths,
     ureg,
-    Q_
+    Q_,
+    open_pytables_file
 )
 from nanowire.optics.utils.utils import (
     get_incident_amplitude,
@@ -259,12 +260,13 @@ class SimulationManager:
     using a variety of different execution backends
     """
 
-    def __init__(self, nodes=None, ip=None,
-                 base_dir='', num_cores=None, log_level='INFO'):
+    def __init__(self, db, nodes=None, ip=None, base_dir='', num_cores=None,
+                 log_level='INFO'):
         self.runners = {'serial': self.run_serial,
                         'parallel': self.run_parallel,
                         'dispy': self.run_dispy}
         self.nodes = nodes
+        self.db = open_pytables_file(db, 'r')
         self.ip_addr = ip
         if num_cores is None:
             self.num_cores = mp.cpu_count()
@@ -284,14 +286,11 @@ class SimulationManager:
         """
         Load configs from disk
 
-        Collect all the simulations contained in the HDF5 database file located
-        at filesystem path `db` satisfying the query `query`.
+        Collect all the simulations contained in the HDF5 database file
+        satisfying the query `query`.
 
         Parameters
         ----------
-        db : str
-            A path to an HDF5 file containing the database of simulation
-            configs
         base_dir : str, optional
             The base directory of the directory tree that all simulations will
             dump their output data into. If not specified, defaults to the
@@ -309,10 +308,14 @@ class SimulationManager:
 
         Returns
         -------
-        list
+        confs : list
             A list of :py:class:`nanowire.preprocess.config.Config` objects
+        t_sweeps : dict
+            A dict describing which simulations are thickness sweeps. The key:value
+            pairs are pairs of simulation IDs. The keys are sim IDs whose solution
+            files are hard links to the solution of the simulation ID value
         """
-        confs, t_sweeps = load_confs(*args, **kwargs)
+        confs, t_sweeps, db = load_confs(self.db, *args, **kwargs)
         self.t_sweeps = t_sweeps
         self.sim_confs = confs
         return confs, t_sweeps
@@ -548,7 +551,6 @@ class Simulator:
         self.conf = conf
         numbasis = self.conf['Simulation']['numbasis']
         period = self.conf['Simulation']['array_period']
-        print('__init__: {}'.format(type(period.magnitude)))
         self.ID = conf.ID
         self.path = osp.abspath(osp.normpath(osp.expandvars(outdir)))
         self.base, self.dir = osp.split(self.path)
@@ -558,7 +560,6 @@ class Simulator:
         self.runtime = 0
         self.lgth_unit = self.conf['General']['base_unit']
         self.period = period
-        print('self.period: {}'.format(type(period.magnitude)))
 
     def __del__(self):
         """
@@ -711,7 +712,6 @@ class Simulator:
             self.log.debug('Building layer: %s' % layer_name)
             base_mat = layer.base_material
             layer_t = layer.thickness
-            print('layer_t type: {}'.format(type(layer_t)))
             self.s4.AddLayer(Name=layer_name, Thickness=layer_t.magnitude,
                              Material=base_mat)
             self.log.debug('Building geometry in layer: {}'.format(layer_name))
@@ -815,11 +815,11 @@ class Simulator:
         f_phys = self.conf['Simulation']['frequency']
         self.log.debug('Physical Frequency = {}' % f_phys)
         base_unit = self.conf['General']['base_unit']
-        print('base unit: {}'.format(base_unit))
+        self.log.debug('base unit: {}'.format(base_unit))
         c_conv = ureg.speed_of_light / base_unit
         f_conv = f_phys / c_conv
-        print('F_conv: {}'.format(f_conv))
-        print('F_conv base_units: {}'.format(f_conv.to_base_units()))
+        self.log.debug('Converted Frequency: {}'.format(f_conv))
+        self.log.debug('Converted Frequency base_units: {}'.format(f_conv.to_base_units()))
         self.s4.SetFrequency(f_conv.to_base_units().magnitude)
         polar = self.conf['Simulation']['polar_angle']
         azimuth = self.conf['Simulation']['azimuthal_angle']
@@ -1358,7 +1358,6 @@ class Simulator:
         import pprint
         path = osp.join(self.path, 'sim_conf.yml')
         self.log.debug('Saving conf to YAML file: %s', path)
-        print(type(self.conf['Simulation/array_period'].magnitude))
         self.conf.write(path)
         if not self.conf['General']['save_as']:
             pass

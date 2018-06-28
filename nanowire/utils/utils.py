@@ -23,6 +23,7 @@ from collections import Iterable, OrderedDict, MutableMapping
 ureg = pint.UnitRegistry()
 Q_ = ureg.Quantity
 
+
 def do_profile(follow=[], out=''):
     def inner(func):
         def profiled_func(*args, **kwargs):
@@ -773,3 +774,48 @@ def wait_until_released(path):
                 #     file_open = True
         time.sleep(3)
     print('Path {} released!'.format(path))
+
+
+def open_pytables_file(hdf, mode):
+    """
+    Simple utility function to open an hdf5 file using PyTables if its a path
+    as a string or a PyTables file handle
+
+    Parameters
+    ----------
+
+    hdf : str, :py:class:`tb.file.File`
+        Either a path to an HDF5 file as a string, or a PyTables file handle.
+        The file handle may be open or closed. If it's open, it just gets
+        passed through unmodified. If it's closed, it gets reopened
+    mode : str
+        The mode to open the file in. Can be one of the following
+        - r: Read-only; no data can be modified.
+        - w: Write; a new file is created (an existing file with the same name
+        would be deleted).
+        - a: Append; an existing file is opened for reading and writing, and if
+        the file does not exist it is created.
+        - r+: It is similar to ‘a’, but the file must already exist.
+
+    Returns
+    -------
+    hdf : :py:class:`tb.file.File`
+        An open PyTables file handle
+
+    Raises
+    ------
+    ValueError
+       The hdf argument is not a path to a file or is not an instance of a
+       :py:class:`tb.file.File`
+    """
+
+    if isinstance(hdf, str):
+        if os.path.exists(hdf) and not os.path.isfile(hdf):
+            raise ValueError('Path {} is not a regular file'.format(hdf))
+        hdf = tb.open_file(hdf, mode)
+    elif isinstance(hdf, tb.file.File):
+        if not hdf.isopen:
+            hdf = tb.open_file(hdf.filename, mode)
+    else:
+        raise ValueError('Invalid file argument: {}'.format(hdf))
+    return hdf

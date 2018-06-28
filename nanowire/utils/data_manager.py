@@ -48,7 +48,6 @@ class UnitRowWrapper:
 
     def __setitem__(self, key, val):
         if isinstance(val, pint.quantity._Quantity):
-            print("Setting a pint quantity in UnitRowWrapper")
             if key not in self.units:
                 msg = 'Attempting to store a pint Quantity not in the ' \
                       'self.units dict'
@@ -59,16 +58,9 @@ class UnitRowWrapper:
 
     def fetch_all_fields(self):
         fields = self._row.fetch_all_fields()
-        print('Fields: {}'.format(fields))
-        print('type Fields: {}'.format(type(fields)))
-        print('dtype Fields: {}'.format(fields.dtype))
         fields = fields.astype(self.unit_dtype)
-        print('new dtype Fields: {}'.format(fields.dtype))
         for k, unit in self.units.items():
-            print('k: ', k)
-            print('unit: ', unit)
             q = Q_(fields[k], unit)
-            print('Quantity: {}'.format(q))
             fields[k] = q
         return fields
 
@@ -94,7 +86,6 @@ class UnitTable(tb.Table):
         #                                 chunkshape=chunkshape, byteorder=byteorder,
         #                                 _log=_log)
 
-        print('Received descr: {}'.format(description))
         type_mapping = type_mapping if type_mapping is not None else {}
         # The user is instantiating a table from scratch (i.e not loading from
         # disk) and passed in a sample record from which we can derive the
@@ -114,9 +105,6 @@ class UnitTable(tb.Table):
                                                        type_mapping)
         # At the point we have a converted, object-free description which we
         # can pass to a normal Table.__init__
-        print('Descr to super __init__: {}'.format(descr))
-        print('type(Descr) to super __init__: {}'.format(type(descr)))
-
         super(UnitTable, self).__init__(*args, description=descr,
                                         **kwargs)
         # This should be totally possible to handle, but when writing this
@@ -145,14 +133,8 @@ class UnitTable(tb.Table):
                 msg = 'Found objects in fields {} without corresponding ' \
                       'units'.format(diff)
                 raise ValueError(msg)
-        print('After super')
         self.units = units
         self.attrs['units'] = units
-
-        print('UnitTable attrs: ', self.attrs)
-        print('UnitTable attr names: ', self.attrs._v_attrnames)
-        print('UnitTable units: ', self.units)
-        # print('UnitTable units: ', self.attrs['units'])
         self.unit_dtype = self._f_build_unit_dtype()
         self.vector_Q = np.vectorize(Q_, otypes=[np.object])
 
@@ -163,7 +145,6 @@ class UnitTable(tb.Table):
         new_dtype_struct = []
         units = {}
         had_objects = set()
-        print('Orig Sample dtype: {}'.format(sample.dtype))
         for field, descr in sample.dtype.fields.items():
             el = sample[field]
             el_dtype = descr[0]
@@ -178,8 +159,6 @@ class UnitTable(tb.Table):
             else:
                 new_dtype_struct.append((field, el_dtype))
         new_dtype = np.dtype(new_dtype_struct)
-        print('New Sample dtype: {}'.format(new_dtype))
-        print('Sample units: {}'.format(units))
         return units, new_dtype, had_objects
 
     def _f_convert_descr(self, descr, type_mapping):
@@ -209,7 +188,6 @@ class UnitTable(tb.Table):
             objects
         """
         if descr is None and not type_mapping:
-            print('Got description is none!')
             return descr, False
         if not isinstance(descr, np.dtype):
             dtype = tb.description.dtype_from_descr(descr)
@@ -246,13 +224,9 @@ class UnitTable(tb.Table):
         return np.dtype(new_descr)
 
     def _apply_units(self, data):
-        print("UnitTable data: ", data)
-        print("UnitTable units: ", self.units)
-        print(type(data))
         units_data = data.astype(self.unit_dtype)
         for field, unit in self.units.items():
             units_data[field] = self.vector_Q(units_data[field], unit)
-        print('Unit data: ', units_data)
         return units_data
 
     @lazyattr
@@ -278,20 +252,12 @@ class UnitTable(tb.Table):
 
     def iterrows(self, *args, **kwargs):
         for row in tb.Table.iterrows(self, *args, **kwargs):
-            print('Orig row: {}'.format(row))
-            print('Type of orig row: {}'.format(type(row)))
             wrapped_row = UnitRowWrapper(row, self.units, self.unit_dtype)
-            print('Wrapped row: {}'.format(wrapped_row))
-            print('Type of wrapped row: {}'.format(type(wrapped_row)))
             yield wrapped_row
 
     def itersequence(self, *args, **kwargs):
         for row in tb.Table.itersequence(self, *args, **kwargs):
-            print('Orig row: {}'.format(row))
-            print('Type of orig row: {}'.format(type(row)))
             wrapped_row = UnitRowWrapper(row, self.units, self.unit_dtype)
-            print('Wrapped row: {}'.format(wrapped_row))
-            print('Type of wrapped row: {}'.format(type(wrapped_row)))
             yield wrapped_row
 
     def itersorted(self, *args, **kwargs):

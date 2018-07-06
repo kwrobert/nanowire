@@ -150,8 +150,9 @@ class Layer:
         arr[layer.get_slice()]
         """
 
-        start_ind = np.searchsorted(zcoords, self.start)
-        end_ind = np.searchsorted(zcoords, self.end)
+        zcoords = zcoords.to(self.start.units).magnitude
+        start_ind = np.searchsorted(zcoords, self.start.magnitude)
+        end_ind = np.searchsorted(zcoords, self.end.magnitude)
         return (slice(start_ind, end_ind), ...)
 
     def get_nk_dict(self, freq):

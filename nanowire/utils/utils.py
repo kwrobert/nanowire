@@ -555,7 +555,8 @@ def get_pytables_desc(data, skip_keys=[], keypath=''):
             value = bool(value)
 
         if isinstance(value, dict):
-            fields[key], meta[key] = get_pytables_desc(value, keypath=newpath)
+            fields[key], meta[key] = get_pytables_desc(value, keypath=newpath,
+                                                       skip_keys=skip_keys)
         # elif isinstance(value, list):
         #     # Make sure all elements in list have same type
         #     first_type = type(value[0])
@@ -595,11 +596,13 @@ def _recurse_row(row, base, data):
             row[new] = value
 
 
-def add_row(tbl, data):
+def add_row(tbl, data, skip_keys=[]):
     """Add a new row to a table based on the contents of a dict.
     """
     row = tbl.row
     for (key, value) in data.items():
+        if key in skip_keys:
+            continue
         if isinstance(value, MutableMapping):
             _recurse_row(row, key + '/', value)
         # elif isinstance(value, list) and type(value[0]) == str:

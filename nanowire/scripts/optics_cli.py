@@ -146,7 +146,7 @@ def run_all(db, exec_mode, base_dir, params, query, update, table_path,
 
 @optics.command()
 @click.argument('db', type=exist_read_path)
-@click.argument('config', type=exist_read_path)
+@click.argument('template', type=exist_read_path)
 @click.option('-b', '--base-dir',
               callback=lambda ctx, p, v: os.path.dirname(ctx.params['db']) if not v else v,
               type=exist_read_dir, help=h0)
@@ -186,26 +186,27 @@ def run_all(db, exec_mode, base_dir, params, query, update, table_path,
 @click.option('-v', '--log-level', help="Set verbosity of logging",
               type=click.Choice(['info', 'debug', 'warning', 'critical', 'error']),
               default='info')
-def postprocess(db, config, base_dir, params, query, table_path, table_name,
+def postprocess(db, template, base_dir, params, query, table_path, table_name,
                 crunch, gcrunch, plot, gplot, group_by, group_against,
                 print_ids, num_cores, log_level):
     """
-    Run all simulations matching QUERY located in the HDF5 DB
+    Postprocess all simulations matching QUERY located in the HDF5 DB
 
     Collects all simulations inside the HDF5 database DB matching query string
     QUERY and postprocesses them according to the plan specified in CONFIG.
     """
 
     import nanowire.optics.postprocess as post
-    import nanowire.preprocess as prep
 
-    processor = prep.Preprocessor(config)
-    parsed_dicts = processor.generate_configs(skip_keys=[], params=params)
-    if len(parsed_dicts) != 1:
-        raise ValueError('Must have only 1 set of unique parameters for the '
-                         'manager configuration')
-    conf = parsed_dicts[0]
-    proc = post.Processor(db, conf, base_dir=base_dir, num_cores=num_cores)
+    # click.echo('Parsing config file ...')
+    # processor = prep.Preprocessor(config)
+    # parsed_dicts = processor.generate_configs(skip_keys=[], params=params)
+    # if len(parsed_dicts) != 1:
+    #     raise ValueError('Must have only 1 set of unique parameters for the '
+    #                      'manager configuration')
+    # conf = parsed_dicts[0]
+    proc = post.Processor(db, template, base_dir=base_dir, num_cores=num_cores)
+    click.echo('Loading configs from database ...')
     proc.load_confs(base_dir=base_dir, query=query,
                     table_path=table_path, table_name=table_name)
     if print_ids:

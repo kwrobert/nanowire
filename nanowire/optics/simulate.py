@@ -886,7 +886,7 @@ class Simulator:
             self.s4.SetLayerThickness(Layer=layer, Thickness=thickness)
 
     # @do_profile(out='$nano/tests/profile_writing/line_profiler.txt', follow=[])
-    @ureg.wraps(('volt/micrometer', 'volt/micrometer', 'volt/micrometer'),
+    @ureg.wraps(('', '', ''),
                 None)
     def compute_fields(self, zvals=None):
         """
@@ -956,7 +956,7 @@ class Simulator:
         self.log.debug('Finished computing fields!')
         return Ex, Ey, Ez, Hx, Hy, Hz
 
-    @ureg.wraps(('volt/micrometer', 'volt/micrometer', 'volt/micrometer'),
+    @ureg.wraps(('', '', ''),
                 None)
     def compute_fields_by_point(self):
         self.log.debug('Computing fields ...')
@@ -988,7 +988,7 @@ class Simulator:
                         Hz[zcount, i, j] = H[2]
         return Ex, Ey, Ez, Hx, Hy, Hz
 
-    @ureg.wraps(('volt/micrometer', 'volt/micrometer', 'volt/micrometer'),
+    @ureg.wraps(('', '', ''),
                 None)
     def compute_fields_at_point(self, x, y, z):
         """
@@ -1003,7 +1003,7 @@ class Simulator:
             H = (None, None, None)
         return E[0], E[1], E[2], H[0], H[1], H[2]
 
-    @ureg.wraps(('volt/micrometer', 'volt/micrometer', 'volt/micrometer'),
+    @ureg.wraps(('', '', ''),
                 None)
     def compute_fields_by_layer(self, sample_dict):
         """
@@ -1041,7 +1041,7 @@ class Simulator:
         return results
 
     # @do_profile(follow=[])
-    @ureg.wraps(('volt/micrometer', 'volt/micrometer', 'volt/micrometer'),
+    @ureg.wraps(('', '', ''),
                 None)
     def compute_fields_on_plane(self, z, xs, ys):
         """
@@ -1178,19 +1178,26 @@ class Simulator:
 
     def compute_fluxes(self):
         """
-        Get the fluxes at the top and bottom of each layer. This is a surface
-        integral of the component of the Poynting flux perpendicular to this
-        x-y plane of the interface, and have forward and backward components.
-        Returns a dict where the keys are the layer name and the values are a
-        length 2 tuple with the forward component first and the backward
-        component second. The components are complex numbers
+        Compute the power fluxes at the top and bottom of each layer.
+
+        This is a surface integral of the z component of the Poynting vector
+        over the entire x-y plane, divided by the area of the unit cell.
+        Because forward and backward moving waves are treated separately in
+        RCWA, the quantities returned by GetPowerFlux have forward and backward
+        components.
+
+        Returns a numpy structured array wit the layer name, forward, and
+        backward components as fields. The components are pint Quantities
+        wrapping complex numbers.
         """
+
         self.log.debug('Computing fluxes ...')
         rows = len(list(self.conf['Layers'].keys()))*2
         # O is object type, for storing Pint quantities
         dt = [('layer', 'S25'), ('forward', 'O'), ('backward', 'O')]
         flux_arr = np.recarray((rows,), dtype=dt)
-        unit = ureg.volt / self.lgth_unit
+        # unit = ureg.volt**2 / self.lgth_unit**2
+        unit = ureg.dimensionless
         counter = 0
         for layer, ldata in self.conf['Layers'].items():
             self.log.debug('Computing fluxes through layer: %s' % layer)
@@ -1231,8 +1238,7 @@ class Simulator:
             eps_mat = np.zeros((self.xsamps, self.ysamps), dtype=np.complex128)
             for ix in range(self.xsamps):
                 for iy in range(self.ysamps):
-                    eps_val =  self.s4.GetEpsilon(xv[ix, iy], yv[ix, iy],
-                                                  z)
+                    eps_val = self.s4.GetEpsilon(xv[ix, iy], yv[ix, iy], z)
                     eps_mat[ix, iy] = eps_val
             key = 'dielectric_profile_{}'.format(layer)
             self.data[key] = eps_mat

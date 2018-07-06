@@ -5,6 +5,8 @@ import sys
 import time
 import copy
 import logging
+import pint
+import conff
 import tables as tb
 import multiprocessing as mp
 import matplotlib
@@ -25,6 +27,12 @@ from itertools import repeat
 from scipy import interpolate
 from sympy import Circle
 from nanowire.optics.simulate import Simulator
+
+from nanowire.preprocess.preprocessor import (
+    UNSAFE_OPERATORS,
+    fn_pint_quantity,
+    fn_pint_magnitude,
+)
 from nanowire.optics.utils.utils import (
     get_nk,
     get_incident_power,
@@ -40,11 +48,17 @@ from nanowire.utils.utils import (
     cartesian_product,
     arithmetic_arange,
     open_pytables_file,
+    ureg,
+    Q_,
 )
 from nanowire.utils.logging import (
     IdFilter,
 )
-from nanowire.utils.data_manager import DataManager, HDF5DataManager
+from nanowire.utils.data_manager import (
+    DataManager,
+    HDF5DataManager,
+    create_rescaling_hook,
+)
 from nanowire.optics.utils.geometry import (
     Layer,
     get_mask_by_shape,
@@ -102,26 +116,66 @@ sys.excepthook = handle_exception
 
 class Simulation:
     """
-    An object that represents a simulation. It stores a DataManager object for
-    managing the reading and writing of all data in the ``self.data``
-    attribute. It also stores a Config object, which is a dict-like object
-    representing the configuration for the simulation, in the ``self.conf``
-    attribute. Many of the methods are for performing calculations on the data.
+    An object that represents a completed simulation and it used for
+    postprocessing the data associated with said Simulation. It stores a
+    DataManager object for managing the reading and writing of all data in the
+    ``self.data`` attribute. It also stores a Config object, which is a
+    dict-like object representing the configuration for the simulation, in the
+    ``self.conf`` attribute.
+
+    Parameters
+    ----------
+
+    outdir : str
+        The directory this simulation will output all plots and postprocessed
+        data files to
+    bandwith : float, :py:class:`Quantity`
+        Either a floating point number or a pint Quantity representing the
+        spectral bandwidth for this simulation. This is necessary for
+        determining the input power given a spectrum and scaling the electric
+        and magnetic fields accordingly. If a float is received, it is assumed
+        to be in units of Hertz and will immediately be converted to a pint
+        Quantity with units of Hertz. If a Quantity is received, it will be
+        converted to Hertz if possible, and raise a Dimensionality error if
+        not. If unspecified, and attempt will be made to read the bandwidth
+        from the Postprocessing section of the Config, and raises a value error
+        if it cannot be found.
     """
 
-    def __init__(self, outdir, conf=None, simulator=None):
+    def __init__(self, outdir, bandwidth=None, conf=None, simulator=None):
         """
         :param :class:`~utils.config.Config`: Config object for this simulation
+
         """
 
         if conf is None and simulator is None:
             raise ValueError('Must pass in either a Config object or a'
                              ' Simulator object')
-        if conf is not None:
+        if isinstance(conf, str):
+            self.conf = Config.fromFile(conf)
+        elif isinstance(conf, Config):
             self.conf = conf
         else:
             self.conf = copy.deepcopy(simulator.conf)
-        self.ID = self.conf['General']['sim_dir'][-10:]
+        if bandwidth is None:
+            try:
+                self.bandwidth = self.conf['Postprocessing/bandwidth']
+            except KeyError as e:
+                msg = 'Need to specify bandwidth either as a kwarg or in ' \
+                      'the Postprocessing config at Postprocessing/bandwidth'
+                e.args = (msg,)
+                raise
+        else:
+            if isinstance(bandwidth, pint.quantity._Quantity):
+                self.bandwidth = bandwidth.to('hertz', 'spectroscopy')
+            elif isinstance(bandwidth, float):
+                self.bandwidth = Q_(bandwidth, 'hertz')
+            else:
+                msg = 'Invalid bandwidth argument: {}'.format(bandwidth)
+                raise ValueError(msg)
+        if not isinstance(self.bandwidth, pint.quantity._Quantity):
+            raise ValueError("Bandwidth must be a pint Quantity")
+        self.ID = self.conf.ID
         self.path = osp.abspath(osp.normpath(osp.expandvars(outdir)))
         self.base, self.dir = osp.split(self.path)
         self.fhandler = logging.FileHandler(osp.join(self.dir, 'postprocess.log'))
@@ -154,22 +208,22 @@ class Simulation:
             self.data.update({'fluxes': flux_arr})
         else:
             self.data = self._get_data_manager()
-        self.failed = False
-        self.avgs = {}
+            sdict = self.conf['General']['sample_dict']
+            if sdict:
+                for f in ('Ex', 'Ey', 'Ez'):
+                    ks = ['{}_{}'.format(lname, f) for lname in simulator.layers.keys()]
+                    self.data[f] = np.concatenate([self.data[k] for k in ks])
         # Compute and store dx, dy, dz at attributes
-        if type(self.conf['General']['z_samples']) == list:
-            self.zsamps = len(self.conf['General']['z_samples'])
-        else:
-            self.zsamps = int(self.conf['General']['z_samples'])
-        self.xsamps = int(self.conf['General']['x_samples'])
-        self.ysamps = int(self.conf['General']['y_samples'])
         self.X = self.data['xcoords']
         self.Y = self.data['ycoords']
         self.Z = self.data['zcoords']
         self.dx = self.X[1] - self.X[0]
         self.dy = self.Y[1] - self.Y[0]
         self.dz = self.Z[1] - self.Z[0]
-        self.period = self.conf['Simulation']['params']['array_period']
+        self.xsamps = len(self.X)
+        self.ysamps = len(self.Y)
+        self.zsamps = len(self.Z)
+        self.period = self.conf['Simulation/array_period']
         self.layers = get_layers(self)
         self.height = self.get_height()
 
@@ -180,8 +234,32 @@ class Simulation:
         """
 
         ftype = self.conf['General']['save_as'].lower()
+        amplitude = get_incident_amplitude(
+            self.conf['Postprocessing/spectrum'],
+            self.conf['Simulation/frequency'],
+            self.conf['Simulation/polar_angle'],
+            self.bandwidth, logger=self.log
+        )
+        power = get_incident_power(
+            self.conf['Postprocessing/spectrum'],
+            self.conf['Simulation/frequency'],
+            self.conf['Simulation/polar_angle'],
+            self.bandwidth, logger=self.log
+        )
+        print("power = {}".format(power))
+        # Create the rescaling hook for the data manager that rescales all
+        # powers and fields using the power/amplitude of the incident spectrum
+        hook = create_rescaling_hook(power, amplitude, self.log)
         if ftype == 'hdf5':
-            return HDF5DataManager(self.conf, self.log)
+            file_path = os.path.join(self.path, 'sim.hdf5')
+            gpath = '/sim_{}'.format(self.conf.ID)
+            # Add a get_hook to the data manager that rescales the field
+            # components using the incident amplitude
+            manager = HDF5DataManager(file_path, group_path=gpath, mode='r+',
+                                      logger=self.log, get_hooks=[hook])
+            for k in ('Ex', 'Ey', 'Ez', 'fluxes'):
+                manager.add_to_blacklist(k)
+            return manager
         else:
             raise ValueError('Invalid file type in config')
 
@@ -199,23 +277,32 @@ class Simulation:
 
     def get_height(self):
         """Returns the total height of the device"""
-        height = 0
-        for layer, ldata in self.conf['Layers'].items():
-            layer_t = ldata['params']['thickness']
-            height += layer_t
-        return height
+        return sum(layer.thickness for layer in self.layers.values())
 
     def get_scalar_quantity(self, quantity):
         """
         Retrieves the entire 3D matrix for some scalar quantity
 
-        :param str quantity: The quantity you would like to retrive (ex: 'Ex'
-                             or 'normE')
-        :return: A 3D numpy array shape (zsamples, xsamples, ysamples)
-                 containing the specified quantity
-        :rtype: np.ndarray
-        :raises KeyError: If the specified quantity does not exist in the data
-                          dict
+        Parameters
+        ----------
+
+        quantity : str
+            The quantity you would like to retrive (ex: 'Ex' or 'normE')
+
+        Returns
+        -------
+
+        numpy.ndarray
+            A 3D numpy array shape (zsamples, xsamples, ysamples) containing
+            the specified quantity
+
+        Raises
+        ------
+
+        AttributeError
+            If you tried to retrieve a quantity that does not exist in the data
+            dict and cannot be calculated via a method of the same name in this
+            class
         """
 
         self.log.debug('Retrieving scalar quantity %s', str(quantity))
@@ -233,13 +320,6 @@ class Simulation:
                            quantity)
             raise
 
-    def clear_data(self):
-        """Clears all the data attributes to free up memory"""
-        if isinstance(self.data, DataManager):
-            self.data._update_keys(clear=True)
-        else:
-            self.data = {}
-
     def extend_data(self, quantity, new_data):
         """
         Adds a new key, value pair to the DataManager object
@@ -251,21 +331,39 @@ class Simulation:
             self.log.debug('Adding %s to data dict', str(quantity))
             self.data[quantity] = new_data
 
+    def clear_data(self):
+        """
+        Clears all the data from the self.data DataManager object to free up memory
+        """
+        if isinstance(self.data, DataManager):
+            self.data._update_keys(clear=True)
+        else:
+            self.data = {}
+
     def get_line(self, quantity, line_dir, c1, c2):
         """
         Gets data along a line through the 3D data array for the given quantity
         along a given direction
 
-        :param str line_dir: Any of 'x', 'y', or 'z'. Determines the direction
-                             along which the line cut is taken, the other two
-                             coordinates remain fixed and are specified by c1
-                             and c2.
-        :param int c1: The integer index for the first fixed coordinate.
-                       Indexes are in x,y, z order so if line_dir='z' then c1
-                       corresponds to x
-        :param int c2: The integer index for the second coordinate.
-        :param str quantity: The quantity whose data array you wish to take a
-                             line cut through
+        Parameters
+        ----------
+        line_dir : str
+            Any of 'x', 'y', or 'z'. Determines the direction along which the
+            line cut is taken, the other two coordinates remain fixed and are
+            specified by c1 and c2.
+        c1 : int
+            The integer index for the first fixed coordinate.  Indexes are in
+            x,y,z order so if line_dir='z' then c1 corresponds to x
+        c2 : int
+            The integer index for the second coordinate.
+        quantity : str
+            The quantity whose data array you wish to take a line cut through
+
+        Returns
+        -------
+
+        np.ndarray
+            A 1D numpy array containing data along the specified line cut
         """
 
         scalar = self.get_scalar_quantity(quantity)
@@ -284,13 +382,24 @@ class Simulation:
         Gets data along a 2D plane/slice through the 3D data array for a given
         quantity
 
-        :param str plane: Any of 'xy', 'yz', or 'xz'. Determines the plane
-                          along which the slice is taken
-        :param int pval: The index along the final unspecified direction. If
-                         plane='xy' then index would index along the z
-                         direction.
-        :param str quantity: The quantity whose data array you wish to take a
-                             line cut through
+        Parameters
+        ----------
+
+        plane : str
+            Any of 'xy', 'yz', or 'xz'. Determines the plane along which the
+            slice is taken
+        pval : int
+            The index along the final unspecified direction. If plane='xy' then
+            index would index along the z direction.
+
+        quantity : str
+            The quantity whose data array you wish to take a line cut through
+
+        Returns
+        -------
+
+        np.ndarray
+            A 2D numpy array containing data on the specified plane
         """
 
         self.log.info('Retrieving plane for %s', quantity)
@@ -305,11 +414,16 @@ class Simulation:
             # x along rows, y along columns
             return scalar[pval, :, :]
 
+
     def normE(self):
         """
         Calculates the norm of E. Adds it to the data dict for the simulation
         and also returns a 3D array
-        :return: A 3D numpy array containing :math: |E|
+
+        Returns
+        -------
+        np.ndarray
+            A 3D numpy array containing :math:`|E|`
         """
 
         # Get the magnitude of E and add it to our data
@@ -323,7 +437,11 @@ class Simulation:
         """
         Calculates and returns normE squared. Adds it to the data dict for
         the simulation and also returns a 3D array
-        :return: A 3D numpy array containing :math: |E|^2
+
+        Returns
+        -------
+        np.ndarray
+            A 3D numpy array containing :math: |E|^2
         """
 
         # Get the magnitude of E and add it to our data
@@ -352,21 +470,25 @@ class Simulation:
         self.extend_data('normHsquared', H_magsq)
         return H_magsq
 
-    def genRate(self):
+    def genRate(self, units='1 / cm**3 / second'):
         """
         Computes and returns the 3D matrix containing the generation rate.
-        Returns in units of cm^-3
+
+        units : str
+            The units to return the generation rate in.
+            Default: 1 / cm**3 / second
         """
 
         # We need to compute normEsquared before we can compute the generation
         # rate
         normEsq = self.get_scalar_quantity('normEsquared')
+        print('normEsq units: {}'.format(normEsq.units))
         # Prefactor for generation rate. Note we gotta convert from m^3 to
         # cm^3, hence 1e6 factor
-        fact = consts.epsilon_0 / (consts.hbar * 1e6)
-        gvec = np.zeros_like(normEsq)
+        fact = 1.0 * ureg.vacuum_permittivity / ureg.hbar
+        gvec = Q_(np.zeros_like(normEsq), normEsq.units)
         # Main loop to compute generation in each layer
-        freq = self.conf[('Simulation', 'params', 'frequency')]
+        freq = self.conf['Simulation/frequency']
         for name, layer in self.layers.items():
             self.log.debug('LAYER: %s', name)
             self.log.debug('LAYER T: %f', layer.thickness)
@@ -375,8 +497,13 @@ class Simulation:
             # Use the layer object to get the nk matrix with correct material
             # geometry
             nmat, kmat = layer.get_nk_matrix(freq, self.X, self.Y)
-            gvec[layer.get_slice(self.Z)] = fact * nmat * kmat * normEsq[layer.get_slice(self.Z)]
-            # gvec[layer.get_slice()] = nmat * kmat * normEsq[layer.get_slice(self.Z)]
+            gvec[layer.get_slice(self.Z)] = nmat * kmat * normEsq[layer.get_slice(self.Z)]
+        gvec *= fact
+        gvec.ito(units)
+        print('genRate units: {}'.format(gvec.units))
+        print('genRate dimensions: {}'.format(gvec.dimensionality))
+        print('genRate base units: {}'.format(gvec.to_base_units().units))
+        print('max(genRate): {}'.format(np.amax(gvec.to_base_units())))
         self.extend_data('genRate', gvec)
         return gvec
 
@@ -2200,7 +2327,7 @@ def _call_func(quantity, obj, args):
     return result
 
 
-def execute_plan(conf, plan, grouped_against=None, grouped_by=None):
+def execute_plan(conf, outdir, plan, grouped_against=None, grouped_by=None):
     """
     Executes the given plan for the given Config object or list/tuple of Config
     objects. If conf is a single Config object, a Simulation object will
@@ -2244,18 +2371,18 @@ def execute_plan(conf, plan, grouped_against=None, grouped_by=None):
         else:
             log.info("Executing Simulation plan")
             if not conf['General']['save_as']:
-                obj = Simulation(simulator=Simulator(conf))
+                obj = Simulation(outdir, simulator=Simulator(conf))
             else:
-                obj = Simulation(conf=conf)
+                obj = Simulation(outdir, conf=conf)
                 # Concatenate the field components in each layer into a single 3D
                 # array, but add to blacklist so the concatenated arrays don't get
                 # written to disk
                 # FIXME: This is grossly memory-inefficient
-                for f in ('Ex', 'Ey', 'Ez'):
-                    ks = ['{}_{}'.format(lname, f) for lname in obj.layers.keys()]
-                    obj.data[f] = np.concatenate([obj.data[k] for k in ks])
-                    obj.data.add_to_blacklist(f)
-            ID = obj.id[0:10]
+                # for f in ('Ex', 'Ey', 'Ez'):
+                #     ks = ['{}_{}'.format(lname, f) for lname in obj.layers.keys()]
+                #     obj.data[f] = np.concatenate([obj.data[k] for k in ks])
+                #     obj.data.add_to_blacklist(f)
+            ID = obj.ID
 
         for task_name in ('crunch', 'plot'):
             if task_name not in plan:
@@ -2288,15 +2415,17 @@ def execute_plan(conf, plan, grouped_against=None, grouped_by=None):
             else:
                 obj.write_data()
             obj.clear_data()
+            obj.data.close()
         else:
             log.info("Clearing data for SimulationGroup %s", ID)
             for sim in obj.sims:
                 sim.clear_data()
+                sim.data.close()
     except Exception as e:
         if isinstance(conf, list) or isinstance(conf, tuple):
             log.error('Group raised exception')
         else:
-            log.error('Conf %s raised exception', conf['General']['sim_dir'])
+            log.error('Conf %s raised exception', conf.ID)
         raise
 
 
@@ -2306,32 +2435,29 @@ class Processor:
     SimulationGroups
     """
 
-    def __init__(self, db, conf, base_dir='', num_cores=0, sims=None,
-                 sim_groups=None):
-        sims = sims if sims is not None else []
-        sim_groups = sim_groups if sim_groups is not None else []
-
+    def __init__(self, db, template, base_dir='', num_cores=0):
         if not osp.isfile(db):
             raise ValueError("Path {} to conf file doesn't "
                              "exist".format(db))
         self.db = open_pytables_file(db, 'r')
-        if isinstance(conf, str):
-            if not osp.isfile(conf):
-                raise ValueError("Path {} to conf file doesn't "
-                                 "exist".format(conf))
-            self.gconf = Config.fromFile(osp.abspath(conf))
-        elif isinstance(conf, Config):
-            self.gconf = conf
-        else:
-            msg = "Must pass in either path to a config file or a Config " \
-                  "object"
-            raise ValueError(msg)
+        # if isinstance(conf, str):
+        #     if not osp.isfile(conf):
+        #         raise ValueError("Path {} to conf file doesn't "
+        #                          "exist".format(conf))
+        #     self.gconf = Config.fromFile(osp.abspath(conf))
+        # elif isinstance(conf, Config):
+        #     self.gconf = conf
+        # else:
+        #     msg = "Must pass in either path to a config file or a Config " \
+        #           "object"
+        #     raise ValueError(msg)
+        self.template = Config.fromFile(template)
         self.base_dir = base_dir if base_dir else osp.dirname(db)
         self.log = logging.getLogger(__name__)
         self.log.debug("Processor base init")
         self.num_cores = num_cores
-        self.sims = sims
-        self.sim_groups = sim_groups
+        self.sims = []
+        self.sim_groups = []
         self.grouped_against = None
         self.grouped_by = None
 
@@ -2365,16 +2491,30 @@ class Processor:
             A list of :py:class:`nanowire.preprocess.config.Config` objects
         """
         confs, t_sweeps, db = load_confs(self.db, *args, **kwargs)
+        print(type(confs))
         self.t_sweeps = t_sweeps
         self.sim_confs = confs
         return confs, t_sweeps
 
-    def make_sims(self):
+    def make_plans(self):
         """
-        Build out the self.sims list by constructing Simulations objects from
-        the collected confs
+        Build out the list of postprocessing plans by parsing the
+        postprocessing plan template with the configuration of each simulation
+        accessible in names
         """
-        self.sims = [Simulation(conf=c) for c in self.sim_confs]
+        self.log.info('Building simulation plans from template plan')
+        ops = {'simpleeval': {'operators': UNSAFE_OPERATORS}}
+        parser = conff.Parser(fns={'Q': fn_pint_quantity,
+                                   'mag': fn_pint_magnitude},
+                              params=ops, cache_graph=True)
+        plans = {}
+        for ID, (conf, conf_path) in self.sim_confs.items():
+            parser.update_names({'P': conf})
+            plan = parser.parse(self.template)
+            plans[conf.ID] = plan
+        # self.sims = [Simulation(conf=c) for c in self.sim_confs]
+        self.log.info('Plan building complete!')
+        return plans
 
     def group_against(self, key, **kwargs):
         """
@@ -2464,57 +2604,67 @@ class Processor:
                 vals.append(val)
         return vals
 
-    def _serial_process(self, plan, grouped_by=None, grouped_against=None):
+    def _serial_process(self, confs_and_plans, grouped_by=None,
+                        grouped_against=None):
         """
         """
         self.log.info('Beginning serial processing ...')
-        if 'crunch' in plan or 'plot' in plan:
-            for conf in self.sim_confs:
-                execute_plan(conf, plan, grouped_against=grouped_against,
-                             grouped_by=grouped_by)
-        else:
-            self.log.info('No actions to execute!')
+        for conf, conf_path, plan in confs_and_plans:
+            outdir = os.path.dirname(conf_path)
+            execute_plan(conf, outdir, plan,
+                         grouped_against=grouped_against,
+                         grouped_by=grouped_by)
 
-    def _parallel_process(self, plan, grouped_by=None, grouped_against=None):
+    def _parallel_process(self, confs_and_plans, grouped_by=None,
+                          grouped_against=None):
         """
         """
-        if 'crunch' in plan or 'plot' in plan:
-            self.log.info('Beginning parallel processing using %s cores ...',
-                          str(self.num_cores))
-            args_list = list(zip(self.sim_confs, repeat(plan),
-                                 repeat(grouped_against),
-                                 repeat(grouped_by)))
-            with mp.Pool(processes=self.num_cores) as pool:
-                pool.starmap(execute_plan, args_list)
-            pool.join()
-        else:
-            self.log.info('No actions to execute!')
+        self.log.info('Beginning parallel processing using %s cores ...',
+                      str(self.num_cores))
+        args_list = list(zip(confs, plans,
+                             repeat(grouped_against),
+                             repeat(grouped_by)))
+        with mp.Pool(processes=self.num_cores) as pool:
+            pool.starmap(execute_plan, args_list)
+        pool.join()
 
     def process(self, crunch=True, plot=True, gcrunch=True, gplot=True,
                 grouped_against=None, grouped_by=None):
         # First process all the sims
-        self.log.info('Processing individual simulations')
-        plan = copy.deepcopy(self.gconf['Postprocessing']['Single'])
-        if not crunch:
-            del plan['crunch']
-        if not plot:
-            del plan['plot']
-        if self.num_cores:
-            self._parallel_process(plan, grouped_by=grouped_by,
-                                   grouped_against=grouped_against)
+        if crunch or plot:
+            self.log.info('Processing individual simulations')
+            # Each invididual simulation could have a different postprocessing
+            # plan depending on the parameters of that simulation.
+            plans = self.make_plans()
+            for plan in plans.values():
+                if not crunch:
+                    del plan['Postprocessing/Single/crunch']
+                if not plot:
+                    del plan['Postprocessing/Single/plot']
+            if len(plans) != len(self.sim_confs):
+                raise ValueError('Must have same number of plans as simulations!')
+            data = [self.sim_confs[ID] + (plans[ID],) for ID in plans.keys()]
+            if self.num_cores:
+                self._parallel_process(data, grouped_by=grouped_by,
+                                       grouped_against=grouped_against)
+            else:
+                self._serial_process(data, grouped_by=grouped_by,
+                                     grouped_against=grouped_against)
         else:
-            self._serial_process(plan, grouped_by=grouped_by,
-                                 grouped_against=grouped_against)
+            self.log.info("No processing to do for individual simulations!")
         # Process groups
-        self.log.info('Processing simulation groups')
-        plan = copy.deepcopy(self.gconf['Postprocessing']['Group'])
-        if not gcrunch:
-            del plan['crunch']
-        if not gplot:
-            del plan['plot']
-        if self.num_cores:
-            self._parallel_process(plan, grouped_by=grouped_by,
-                                   grouped_against=grouped_against)
+        if gcrunch or gplot:
+            self.log.info('Processing simulation groups')
+            plan = copy.deepcopy(self.gconf['Postprocessing']['Group'])
+            if not gcrunch:
+                del plan['crunch']
+            if not gplot:
+                del plan['plot']
+            if self.num_cores:
+                self._parallel_process(plan, grouped_by=grouped_by,
+                                       grouped_against=grouped_against)
+            else:
+                self._serial_process(plan, grouped_by=grouped_by,
+                                     grouped_against=grouped_against)
         else:
-            self._serial_process(plan, grouped_by=grouped_by,
-                                 grouped_against=grouped_against)
+            self.log.info("No processing to do for simulation groups!")

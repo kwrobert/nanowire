@@ -1,9 +1,12 @@
 import os
+import logging
 import numpy as np
 import scipy.integrate as intg
-from nanowire.utils.utils import ureg
 from scipy import interpolate
-from scipy import constants
+from nanowire.utils.utils import (
+    ureg,
+    Q_
+)
 
 
 def setup_sim(sim):
@@ -47,18 +50,37 @@ def get_nk(path, freq):
     return f_n(freq), f_k(freq)
 
 
-def get_incident_power(sim):
+@ureg.with_context('spectroscopy')
+@ureg.wraps(ureg.watt / ureg.meter**2,
+            (None, ureg.hertz, ureg.degrees, ureg.hertz))
+def get_incident_power(spectrum, freq, polar_angle, bandwidth, logger=None):
     """
     Returns the incident power per area (W/m^2) for a simulation depending on
-    frequency and the incident polar angle. Uses the spectrum provided in the
-    config file for all computations. Power is multiplied by a factor of
-    cos(polar_angle)
+    frequency, the incident polar angle, the input spectrum, and the bandwidth
+    of simulation. Power is multiplied by a factor of cos(polar_angle)
 
     Each simulation is conducted at a single frequency :math:`f =  \\omega
     / 2\\pi` which is associated with a frequency "bin" of spectral width
     :math:`\\Delta f`. The solar spectrum is expressed in units of Watts *
-    m^-2 * Hz^-1. In order to compute the incident power/area for this
-    simulation, we have a few options
+    m^-2 * nm^-1. To get the spectrum in W*m^-2*Hz^-1, we need to perform a
+    quick conversion. We start by noting the the integral of the spectrum in
+    either set of units must be the same
+
+    .. math:: \\int I_{\\lambda}(\\lambda)d\\lambda = \\int I_{f}(f)df
+
+    From here, we can see for this to be true the integrands must themselves be
+    equal
+
+    .. math:: I_{\\lambda}(\\lambda)d\\lambda = I_{f}(f)df
+
+    Using the relation :math:`c = \\lambda f` we see :math:`d\\lambda =
+    \\frac{c}{f^2}df` and we can insert this into the above relation to arrive
+    at
+
+    .. math:: I_{f}(f)df = \\frac{c}{f^2} I_{\\lambda}(\\lambda)
+
+    Once we have the spectrum in the correct units, we can compute the incident
+    power/area. We have a few options here
 
     1. Interpolate to find the spectral irradiance at the frequency for
        this simulation, then multiply by the spectral width
@@ -81,25 +103,39 @@ def get_incident_power(sim):
     :raises ValueError: If the maximum or minimum bin edge extend beyond
                         the data range in the provided spectral data
     """
-
-    freq = sim.conf['Simulation']['frequency']
-    polar_angle = sim.conf['Simulation']['polar_angle']
-    path = os.path.expandvars(sim.conf['Simulation']['input_power'])
-    bin_size = sim.conf['Simulation']['bandwidth']
-    # Get NREL AM1.5 data
-    freq_vec, p_vec = np.loadtxt(path, unpack=True, delimiter=',')
+    
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    # TODO: This feels a bit limiting. Maybe allow user to pass in an
+    # arbitrary spectrum somehow
+    allowed_spectra = {'am1.5g', 'am1.5d', 'am0'}
+    if spectrum not in allowed_spectra:
+        raise ValueError('Invalid spectrum. Must be one of '
+                         '{}'.format(allowed_spectra))
+    index = {'am1.5g': 2, 'am1.5d': 3, 'am0': 1}
+    data_dir = os.path.normpath(os.path.join(os.path.dirname(__file__),
+                                             '../../', 'spectra'))
+    data_file = os.path.join(data_dir, 'ASTMG173.csv')
+    wvs, power = np.loadtxt(data_file, delimiter=',',
+                            usecols=[0, index[spectrum]], unpack=True)
+    wvs = Q_(wvs, 'nanometers')
+    power = Q_(power, 'W*m^-2*nm^-1')
+    freq_vec = wvs.to('hertz')
+    # Convert the spectrum
+    p_vec = power * ureg.speed_of_light / freq_vec ** 2
+    freq_vec = freq_vec.magnitude
+    p_vec = p_vec.to('watts*meter^-2*hertz^-1').magnitude
     # Get all available power values within this bin
-    left = freq - bin_size / 2.0
-    right = freq + bin_size / 2.0
+    left = freq - bandwidth / 2.0
+    right = freq + bandwidth / 2.0
     inds = np.where((left < freq_vec) & (freq_vec < right))[0]
     # Check for edge cases
     if len(inds) == 0:
-        # It is unphysical to claim that an input wave of a single
-        # frequency can contain any power. If we're simulating at a single
-        # frequency, just assume the wave has the power contained within
-        # the NREL bin surrounding that frequency
-        sim.log.warning('Your bins are smaller than NRELs! Using NREL'
-                        ' bin size')
+        # If we're simulating at a bandwidth narrower than the available NREL
+        # spectral resolution just assume the wave has the power contained
+        # within the NREL bin surrounding that frequency and log a warning
+        logger.warning('Your bins are smaller than NRELs! Using NREL'
+                       ' bin size')
         closest_ind = np.argmin(np.abs(freq_vec - freq))
         # Is the closest one to the left or the right?
         if freq_vec[closest_ind] > freq:
@@ -129,8 +165,7 @@ def get_incident_power(sim):
         # linear interpolation to get the irradiance values at the bin edges.
         # If the left of right edge happens to be directly on an NREL bin edge
         # (unlikely) the linear interpolation will just return the value at the
-        # NREL bin. Also the selection of inds above excluded the case of left
-        # or right being equal to an NREL bin,
+        # NREL bin.
         left_power = lin_interp(freq_vec[inds[0] - 1], freq_vec[inds[0]],
                                 p_vec[inds[0] - 1], p_vec[inds[0]], left)
         right_power = lin_interp(freq_vec[inds[-1]], freq_vec[inds[-1] + 1],
@@ -139,16 +174,17 @@ def get_incident_power(sim):
     freqs = [left]+list(freq_vec[inds])+[right]
     # All the power values
     power_values = [left_power]+list(p_vec[inds])+[right_power]
-    sim.log.info('Frequency points in bin: %s', str(freqs))
-    sim.log.info('Power values in bin: %s', str(power_values))
+    logger.info('Frequency points in bin: %s', str(freqs))
+    logger.info('Power values in bin: %s', str(power_values))
     # Just use a trapezoidal method to integrate the spectrum and multiply by
     # angular factor
     power = intg.trapz(power_values, x=freqs)*np.cos(polar_angle)
-    sim.log.info('Incident Power/area: %s', str(power))
+    logger.info('Incident Power/area: %s', str(power))
     return power
 
 
-def get_incident_amplitude(sim):
+def get_incident_amplitude(spectrum, freq, polar_angle, bandwidth,
+                           logger=None):
     """
     Computes the amplitude of the incident electric field for a simulation.
     This just calls :py:func:`get_incident_power` and then multiplies its
@@ -161,14 +197,14 @@ def get_incident_amplitude(sim):
     of the Poynting vector.
     """
 
-    power_per_area = get_incident_power(sim)
-    period = sim.conf['Simulation']['array_period']
-    area = period*period
-    power = power_per_area*area
-    sim.log.info('Incident Power: %s', str(power))
+    power_per_area = get_incident_power(spectrum, freq, polar_angle, bandwidth,
+                                        logger=logger)
+    logger.info('Incident Power/Area: %s', str(power_per_area))
     # We need to reduce amplitude of the incident wave depending on
     #  incident polar angle
     # E = np.sqrt(2*constants.c*constants.mu_0*intensity)*np.cos(polar_angle)
-    E = np.sqrt(2 * constants.c * constants.mu_0 * power)
-    sim.log.info('Incident Amplitude: %s', str(E))
+    E = np.sqrt(2 * ureg.speed_of_light * ureg.vacuum_permeability *
+                power_per_area)
+    E = E.to(ureg.volts / ureg.meter)
+    logger.info('Incident Amplitude: %s', str(E))
     return E

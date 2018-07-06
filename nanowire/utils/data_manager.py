@@ -320,7 +320,7 @@ class DataManager(MutableMapping, metaclass=ABCMeta):
     slightly less memory efficient but not in a significant way.
     """
 
-    def __init__(self, store_path, logger=None):
+    def __init__(self, store_path, logger=None, get_hooks=None, set_hooks=None):
         self._data = {}
         self._avgs = {}
         self._updated = {}
@@ -331,6 +331,8 @@ class DataManager(MutableMapping, metaclass=ABCMeta):
         self.store_path = store_path
         self._dstore = None
         self._blacklist = set()
+        self.get_hooks = get_hooks if get_hooks is not None else []
+        self.set_hooks = set_hooks if set_hooks is not None else []
 
     def add_to_blacklist(self, key):
         """
@@ -404,9 +406,10 @@ class DataManager(MutableMapping, metaclass=ABCMeta):
         """
         if self._data[key] is None:
             self._load_data(key)
-            return self._data[key]
-        else:
-            return self._data[key]
+        val = self._data[key]
+        for hook in self.get_hooks:
+            val = hook(self, key, val)
+        return val
 
     def __setitem__(self, key, value):
         """
@@ -423,10 +426,12 @@ class DataManager(MutableMapping, metaclass=ABCMeta):
             unchanged = False
         if unchanged:
             self.log.info('Data in %s unchanged, not updating', key)
-        else:
-            self.log.info('Updating %s', key)
-            self._data[key] = value
-            self._updated[key] = True
+            return
+        self.log.info('Updating %s', key)
+        for hook in self.set_hooks:
+            value = hook(self, key, val)
+        self._data[key] = value
+        self._updated[key] = True
 
     def __delitem__(self, key):
         del self._data[key]
@@ -454,15 +459,17 @@ class HDF5DataManager(DataManager):
     # DEFAULT_FILTER = tb.Filters(complevel=8, complib='zlib')
     DEFAULT_FILTER = None
 
-    def __init__(self, store_path, group_path='/', filt=None, logger=None):
+    def __init__(self, store_path, *, group_path='/', filt=None, mode='a',
+                 logger=None, **kwargs):
         """
         :param :class:`~utils.config.Config`: Config object for the simulation
         that this DataManager will be managing data for
         :param logger: A logger object
         """
 
-        super(HDF5DataManager, self).__init__(store_path, logger=logger)
-        self.open_dstore()
+        super(HDF5DataManager, self).__init__(store_path, logger=logger,
+                                              **kwargs)
+        self.open_dstore(mode)
         self.gpath = group_path
         self.filt = filt if filt is not None else self.DEFAULT_FILTER
         try:
@@ -554,8 +561,8 @@ class HDF5DataManager(DataManager):
             e.args = e.args + (msg,)
             raise
 
-    def open_dstore(self):
-        self._dstore = tb.open_file(self.store_path, 'a')
+    def open_dstore(self, mode):
+        self._dstore = tb.open_file(self.store_path, mode)
 
     def write_struct_array(self, recarr, name):
         """
@@ -790,3 +797,74 @@ class NPZDataManager(DataManager):
         dpath = os.path.join(base, 'all.avg')
         with open_atomic(dpath, 'w') as out:
             np.savez_compressed(out, **self._avgs)
+
+
+def create_rescaling_hook(power, amplitude, log):
+    """
+    Create a function that rescales the field amplitudes and power fluxes using
+    the provided power and amplitude scaling factors
+
+    Parameters
+    ----------
+
+    power : pint.quantity.Quantity
+        The incident power per unit area you want to scale your fields by
+    amplitude : pint.quantity.Quantity
+        The incident amplitude you want to scale your fields by
+
+    Returns
+    -------
+
+    function
+        A function that can be passed to the get_hooks kwarg of a data manager.
+        It will rescale any keys in {'Ex', 'Ey', 'Ez'} and similarly for H
+        using the provided amplitude such that the returned value is in SI
+        units. It will scale all fluxes in the 'fluxes' array to be in SI units
+
+    Notes
+    -----
+
+    This function in written such that if the fields have already been scaled,
+    they do not get rescaled again on subsequent accesses
+    """
+    
+    def hook(inst, key, value):
+        hook.log.debug('Calling get hook!')
+        # Do not rescale twice
+        if hasattr(inst, 'rescaled'):
+            if key in inst.rescaled:
+                if inst.rescaled[key]:
+                    print('Key {} already scaled!'.format(key))
+                    return value
+        else:
+            inst.rescaled = {}
+        if key in {'Ex', 'Ey', 'Ez'}:
+            hook.log.info('Rescaling field %s!', key)
+            value = value * hook.amplitude
+            inst.rescaled[key] = True
+        elif key in {'Hx', 'Hy', 'Hz'}:
+            hook.log.info('Rescaling field %s!', key)
+            # Need to divide by impedance of free space
+            value = value * hook.amplitude / ureg.Z_0
+            value = value.to_base_units()
+            inst.rescaled[key] = True
+        elif key == 'fluxes':
+            # pws = [.5*el/ureg.Z_0 for el in value['forward']]
+            # pws = [el.to(ureg.volt**2 / self.lg.magnitude*power for el in pws]
+            for row in value:
+                print('Layer: {}'.format(row['layer']))
+                print('Forward: {}'.format(row['forward']))
+                print('Backward: {}'.format(row['backward']))
+            pws = [.5*el*hook.power for el in value['forward']]
+            value['forward'] = pws
+            # pws = [.5*el/ureg.Z_0 for el in value['backward']]
+            # pws = [el.to_base_units().magnitude*power for el in pws]
+            pws = [.5*el.magnitude*hook.power for el in value['backward']]
+            value['backward'] = pws
+            inst.rescaled[key] = True
+        return value
+    hook.amplitude = amplitude
+    hook.power = power
+    hook.log = log
+    return hook
+

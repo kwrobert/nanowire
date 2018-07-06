@@ -18,6 +18,19 @@ from nanowire.utils.utils import (
 )
 from nanowire.utils.config import Config
 
+UNSAFE_OPERATORS = {ast.Add: op.add, ast.Sub: op.sub, ast.Mult: op.mul,
+                    ast.Div: op.truediv, ast.FloorDiv: op.floordiv,
+                    ast.Pow: op.pow, ast.Mod: op.mod,
+                    ast.Eq: op.eq, ast.NotEq: op.ne,
+                    ast.Gt: op.gt, ast.Lt: op.lt,
+                    ast.GtE: op.ge, ast.LtE: op.le,
+                    ast.Not: op.not_,
+                    ast.USub: op.neg, ast.UAdd: op.pos,
+                    ast.In: lambda x, y: op.contains(y, x),
+                    ast.NotIn: lambda x, y: not op.contains(y, x),
+                    ast.Is: lambda x, y: x is y,
+                    ast.IsNot: lambda x, y: x is not y,
+                    }
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 

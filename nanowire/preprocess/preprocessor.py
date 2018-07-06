@@ -1,5 +1,4 @@
 import os
-import conff
 import posixpath
 import itertools
 import tables as tb
@@ -17,6 +16,7 @@ from nanowire.utils.utils import (
     open_pytables_file
 )
 from nanowire.utils.config import Config
+from .parser import Parser
 
 UNSAFE_OPERATORS = {ast.Add: op.add, ast.Sub: op.sub, ast.Mult: op.mul,
                     ast.Div: op.truediv, ast.FloorDiv: op.floordiv,
@@ -108,9 +108,9 @@ class Preprocessor:
         template passed to the constructor of Preprocessor. This function
         """
         ops = {'simpleeval': {'operators': self.DEFAULT_OPERATORS}}
-        parser = conff.Parser(fns={'Q': fn_pint_quantity,
-                                   'mag': fn_pint_magnitude},
-                              params=ops, cache_graph=True)
+        parser = Parser(fns={'Q': fn_pint_quantity,
+                             'mag': fn_pint_magnitude},
+                        params=ops, cache_graph=True)
         if params is None:
             in_pars = {}
         elif type(params) == str:
@@ -124,9 +124,9 @@ class Preprocessor:
             raise ValueError('params must be a path to a regular file or '
                              'a dict')
         locs, lists = find_lists(in_pars)
-        parser = conff.Parser(fns={'Q': fn_pint_quantity,
-                                   'mag': fn_pint_magnitude},
-                              params=ops, cache_graph=True)
+        parser = Parser(fns={'Q': fn_pint_quantity,
+                             'mag': fn_pint_magnitude},
+                        params=ops, cache_graph=True)
         if locs:
             paths = [posixpath.join(*l) for l in locs]
             combos = list(itertools.product(*lists))

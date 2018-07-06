@@ -4,6 +4,9 @@ scipy==1.0.0
 matplotlib==2.1.0
 sympy==1.1.1
 tables==3.4.2
+boltons==18.0.0
+click==6.7
+cryptography==2.2.2
 cycler==0.10.0
 decorator==4.1.2
 dicthash==0.0.1
@@ -18,11 +21,13 @@ lxml==4.1.1
 mpmath==1.0.0
 #naturalneighbor==0.1.8
 netifaces==0.10.7
+networkx==2.1
 nose2==0.7.4
 numexpr==2.6.4
 parso==0.1.0
 pexpect==4.3.0
 pickleshare==0.7.4
+pint==0.8.1
 prompt-toolkit==1.0.15
 psutil==5.4.0
 ptyprocess==0.5.2

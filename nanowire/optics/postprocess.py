@@ -2516,6 +2516,12 @@ class Processor:
         self.log.info('Plan building complete!')
         return plans
 
+    def close_all(self):
+        for sim in self.sims:
+            if isinstance(sim, Simulation):
+                self.log.info('Closing sim %s', sim.ID[0:10])
+                sim.data.close()
+
     def group_against(self, key, **kwargs):
         """
         Group configs against particular parameter.

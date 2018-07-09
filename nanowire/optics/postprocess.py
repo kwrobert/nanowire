@@ -492,7 +492,6 @@ class Simulation:
         # We need to compute normEsquared before we can compute the generation
         # rate
         normEsq = self.get_scalar_quantity('normEsquared')
-        print('normEsq units: {}'.format(normEsq.units))
         # Prefactor for generation rate. Note we gotta convert from m^3 to
         # cm^3, hence 1e6 factor
         fact = 1.0 * ureg.vacuum_permittivity / ureg.hbar
@@ -510,16 +509,16 @@ class Simulation:
             gvec[layer.get_slice(self.Z)] = nmat * kmat * normEsq[layer.get_slice(self.Z)]
         gvec *= fact
         gvec.ito(units)
-        print('genRate units: {}'.format(gvec.units))
-        print('genRate dimensions: {}'.format(gvec.dimensionality))
-        print('genRate base units: {}'.format(gvec.to_base_units().units))
-        print('max(genRate): {}'.format(np.amax(gvec)))
         self.extend_data('genRate', gvec)
         return gvec
 
     def angularAvg(self, quantity):
         """
-        Perform an angular average of some quantity for either the E or H field
+        Perform an angular average of some quantity
+
+        The purpose of this function is primarily to take the generation rate
+        in 3D and average about the azimuthal angle to get a 2D generation
+        rate. This 2D generation rate is then fed into an electrical model. 
         """
 
         try:
@@ -533,10 +532,14 @@ class Simulation:
                     quantity]['compute'] = False
             except KeyError:
                 pass
+        dx_mag = self.dx.magnitude
+        dx_units = self.dx.units
+        dy_mag = self.dy.magnitude
+        dy_units = self.dy.units
         # Get spatial discretization
-        rsamp = self.conf['General']['r_samples']
-        thsamp = self.conf['General']['theta_samples']
-        period = self.conf['Simulation']['params']['array_period']
+        rsamp = self.conf['General/r_samples']
+        thsamp = self.conf['General/theta_samples']
+        period = self.conf['Simulation/array_period']
         # Maximum r value such that circle and square unit cell have equal area
         rmax = period / np.sqrt(np.pi)
         # Diff between rmax and unit cell boundary at point of maximum
@@ -553,43 +556,41 @@ class Simulation:
         # want, flips it along the correct dimension then sticks in the correct
         # spot in the extended array
         ext_vals[:, x_inds:-x_inds, 0:y_inds] = quant[:, :, 0:y_inds][:, :, ::-1]
-        ext_vals[:, x_inds:-x_inds, -
-                 y_inds:] = quant[:, :, -y_inds:][:, :, ::-1]
+        ext_vals[:, x_inds:-x_inds, - y_inds:] = quant[:, :, -y_inds:][:, :, ::-1]
         # Top-Bottom extensions
-        ext_vals[:, 0:x_inds, y_inds:-
-                 y_inds] = quant[:, 0:x_inds, :][:, ::-1, :]
-        ext_vals[:, -x_inds:, y_inds:-
-                 y_inds] = quant[:, -x_inds:, :][:, ::-1, :]
+        ext_vals[:, 0:x_inds, y_inds:- y_inds] = quant[:, 0:x_inds, :][:, ::-1, :]
+        ext_vals[:, -x_inds:, y_inds:- y_inds] = quant[:, -x_inds:, :][:, ::-1, :]
         # Corners, slightly trickier
         # Top left
         ext_vals[:, 0:x_inds, 0:y_inds] = ext_vals[
             :, x_inds:2 * x_inds, 0:y_inds][:, ::-1, :]
         # Bottom left
-        ext_vals[:, -x_inds:, 0:y_inds] = ext_vals[:, -
-                                                   2 * x_inds:-x_inds, 0:y_inds][:, ::-1, :]
+        ext_vals[:, -x_inds:, 0:y_inds] = ext_vals[:, -2 * x_inds:-x_inds, 0:y_inds][:, ::-1, :]
         # Top right
-        ext_vals[:, 0:x_inds, -y_inds:] = ext_vals[:,
-                                                   0:x_inds, -2 * y_inds:-y_inds][:, :, ::-1]
+        ext_vals[:, 0:x_inds, -y_inds:] = ext_vals[:, 0:x_inds, -2 * y_inds:-y_inds][:, :, ::-1]
         # Bottom right
-        ext_vals[:, -x_inds:, -y_inds:] = ext_vals[:, -
-                                                   x_inds:, -2 * y_inds:-y_inds][:, :, ::-1]
+        ext_vals[:, -x_inds:, -y_inds:] = ext_vals[:, - x_inds:, -2 * y_inds:-y_inds][:, :, ::-1]
         # Now the center
         ext_vals[:, x_inds:-x_inds, y_inds:-y_inds] = quant[:, :, :]
         # Extend the points arrays to include these new regions
-        x = np.concatenate((np.array([self.dx * i for i in
-                                      range(-x_inds, 0)]), self.X,
-                            np.array([self.X[-1] + self.dx * i for i in range(1, x_inds + 1)])))
-        y = np.concatenate((np.array([self.dy * i for i in
-                                      range(-y_inds, 0)]), self.Y,
-                            np.array([self.Y[-1] + self.dy * i for i in range(1, y_inds + 1)])))
+        pts_left = Q_(np.array([dx_mag * i for i in range(-x_inds, 0)]),
+                      dx_units)
+        pts_right = Q_(np.array([self.X[-1].magnitude + dx_mag * i for i in range(1, x_inds + 1)]),
+                       dx_units)
+        x = np.concatenate((pts_left, self.X, pts_right))
+        pts_bot = Q_(np.array([dy_mag * i for i in range(-y_inds, 0)]),
+                     dy_units)
+        pts_top = Q_(np.array([self.Y[-1].magnitude + dy_mag * i for i in range(1, y_inds + 1)]),
+                     dy_units)
+        y = np.concatenate((pts_bot, self.Y, pts_top))
         # The points on which we have data
         points = (x, y)
         # The points corresponding to "rings" in cylindrical coordinates. Note
         # we construct these rings around the origin so we have to shift them
         # to actually correspond to the center of the nanowire
-        rvec = np.linspace(0, rmax, rsamp)
-        thvec = np.linspace(0, 2 * np.pi, thsamp)
-        cyl_coords = np.zeros((len(rvec) * len(thvec), 2))
+        rvec = Q_(np.linspace(0, rmax.magnitude, rsamp), rmax.units)
+        thvec = Q_(np.linspace(0, 2 * np.pi, thsamp), 'radians')
+        cyl_coords = Q_(np.zeros((len(rvec) * len(thvec), 2)), rmax.units)
         start = 0
         for r in rvec:
             xring = r * np.cos(thvec)
@@ -1182,20 +1183,22 @@ class Simulation:
         center = shape.center
         cx = float(shape.center.x)
         cy = float(shape.center.y)
+        print("cx = {}".format(cx))
+        print("type(cx) = {}".format(type(cx)))
         radius = float(shape.radius)
         if plane == 'xy':
             circle = mpatches.Circle((center.x, center.y), radius=radius,
                                      fill=False)
             ax_hand.add_artist(circle)
         if plane in ["xz", "zx", "yz", "zy"]:
-            plane_x = pval*self.dx
+            plane_x = pval*self.dx.magnitude
             plane_to_center = np.abs(cx - plane_x)
             self.log.debug('DIST: {}'.format(plane_to_center))
             # Only draw if the observation plane actually intersects with the
             # circle
             if not plane_to_center >= radius:
                 # Check if the plane intersects with the center of the circle
-                if plane_to_center > 0:
+                if plane_to_center > plane_to_center:
                     intersect_angle = np.arccos(plane_to_center/radius)
                     self.log.debug('ANGLE: {}'.format(intersect_angle))
                     half_width = plane_to_center*np.tan(intersect_angle)
@@ -1205,7 +1208,7 @@ class Simulation:
                 # Vertical lines should span height of the layer
                 # z = [self.height - layer.start + .5, self.height - layer.end +.5]
                 # z = [layer.start+.5, layer.end+.5]
-                z = [layer.start, layer.end]
+                z = [layer.start.magnitude, layer.end.magnitude]
                 # The upper edge
                 x = [cy + half_width, cy + half_width]
                 line = mlines.Line2D(x, z, linestyle='solid', linewidth=2.0,
@@ -1224,7 +1227,8 @@ class Simulation:
         and plane value"""
         for sname, (shape, material) in layer.shapes.items():
             if isinstance(shape, Circle):
-                ax = self._draw_layer_circle(layer, shape, material, plane, pval, ax_hand)
+                ax = self._draw_layer_circle(layer, shape, material, plane,
+                                             pval, ax_hand)
             else:
                 self.log.warning('Drawing of shape {} not '
                                  'supported'.format(shape))
@@ -1233,15 +1237,15 @@ class Simulation:
     def draw_geometry_2d(self, plane, pval, ax_hand, skip_list=[]):
         """This function draws the layer boundaries and in-plane geometry on 2D
         heatmaps"""
-        period = self.conf['Simulation']['params']['array_period']
+        period = self.conf['Simulation/array_period']
         for lname, layer in self.layers.items():
             if plane in ["xz", "zx", "yz", "zy"]:
                 # Get boundaries between layers and their starting and ending
                 # indices
-                if layer.thickness > 0:
+                if layer.thickness > Q_(0.0, layer.thickness.units):
                     if layer not in skip_list:
-                        x = [0, period]
-                        y = [layer.end, layer.end]
+                        x = [0, period.magnitude]
+                        y = [layer.end.magnitude, layer.end.magnitude]
                         # label_y = y[0] + 3*self.dz
                         # label_x = x[-1] - .01
                         # ax_hand.text(label_x, label_y, layer, ha='right',
@@ -1255,7 +1259,7 @@ class Simulation:
         return ax_hand
 
     def heatmap2d(self, x, y, cs, labels, ptype, pval, save_path=None,
-                  show=False, draw=False, fixed=None, colorsMap='jet'):
+                  show=False, draw=False, fixed=None, colorsMap='viridis'):
         """A general utility method for plotting a 2D heat map"""
         # cs = np.flipud(cs)
         cm = plt.get_cmap(colorsMap)
@@ -1264,15 +1268,8 @@ class Simulation:
                              labels[2])
             cs = cs.real
         if fixed:
-            if 'dielectric_profile' in save_path:
-                cNorm = matplotlib.colors.Normalize(
-                    vmin=np.amin(0), vmax=np.amax(16))
-            else:
-                pass
-                cNorm = matplotlib.colors.Normalize(
-                    vmin=np.amin(cs), vmax=np.amax(cs))
-                # cNorm = matplotlib.colors.Normalize(
-                #     vmin=np.amin(0), vmax=np.amax(2.5))
+            cNorm = matplotlib.colors.Normalize(
+                vmin=fixed[0], vmax=fixed[1])
         else:
             cNorm = matplotlib.colors.Normalize(
                 vmin=np.amin(cs), vmax=np.amax(cs))
@@ -1312,42 +1309,38 @@ class Simulation:
         # x = np.arange(0, self.period, self.dx)
         # y = np.arange(0, self.period, self.dy)
         # z = np.arange(0, self.height + self.dz, self.dz)
-        x = self.X
-        y = self.Y
-        z = self.Z
+        x = self.X.magnitude
+        y = self.Y.magnitude
+        z = self.Z.magnitude
         # Get the scalar values
-        freq = self.conf['Simulation']['params']['frequency']
+        freq = self.conf['Simulation/frequency']
         wvlgth = (consts.c / freq) * 1E9
         title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(
             freq, wvlgth)
         # Get the plane we wish to plot
-        cs = self.get_plane(quantity, plane, pval)
+        cs = self.get_plane(quantity, plane, pval).magnitude
         self.log.info('DATA SHAPE: %s' % str(cs.shape))
         show = self.conf['General']['show_plots']
         p = False
-        sim_dir = osp.expandvars(self.conf['General']['sim_dir'])
         if plane == 'yz' or plane == 'zy':
             labels = ('y [um]', 'z [um]', quantity, title)
             if self.conf['General']['save_plots']:
-                p = osp.join(sim_dir,
-                                 '%s_plane_2d_yz_pval%s.png' % (quantity,
-                                                               str(pval)))
+                fname = '%s_plane_2d_yz_pval%s.png' % (quantity, str(pval))
+                p = osp.join(self.path, fname)
             self.heatmap2d(y, z, cs, labels, plane, pval,
                            save_path=p, show=show, draw=draw, fixed=fixed)
         elif plane == 'xz' or plane == 'zx':
             labels = ('x [um]', 'z [um]', quantity, title)
             if self.conf['General']['save_plots']:
-                p = osp.join(sim_dir,
-                                 '%s_plane_2d_xz_pval%s.png' % (quantity,
-                                                               str(pval)))
+                fname = '%s_plane_2d_xz_pval%s.png' % (quantity, str(pval))
+                p = osp.join(self.path, fname)
             self.heatmap2d(x, z, cs, labels, plane, pval,
                            save_path=p, show=show, draw=draw, fixed=fixed)
         elif plane == 'xy' or plane == 'yx':
             labels = ('y [um]', 'x [um]', quantity, title)
             if self.conf['General']['save_plots']:
-                p = osp.join(sim_dir,
-                                 '%s_plane_2d_xy_pval%s.png' % (quantity,
-                                                               str(pval)))
+                fname = '%s_plane_2d_xy_pval%s.png' % (quantity, str(pval))
+                p = osp.join(self.path, fname)
             self.heatmap2d(x, y, cs, labels, plane, pval,
                            save_path=p, show=show, draw=draw, fixed=fixed)
 
@@ -1471,7 +1464,7 @@ class Simulation:
         elif direction == 'z':
             # x along rows, y along columns
             pos_data = self.Z
-        freq = self.conf['Simulation']['params']['frequency']
+        freq = self.conf['Simulation/frequency']
         wvlgth = (consts.c / freq) * 1E9
         title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(
             freq, wvlgth)
@@ -1487,8 +1480,7 @@ class Simulation:
         ax.legend()
         if self.conf['General']['save_plots']:
             name = labels[2] + '_' + ptype + '.png'
-            sim_dir = osp.expandvars(self.conf['General']['sim_dir'])
-            path = osp.join(sim_dir, name)
+            path = osp.join(self.path, name)
             fig.savefig(path)
         if self.conf['General']['show_plots']:
             plt.show()

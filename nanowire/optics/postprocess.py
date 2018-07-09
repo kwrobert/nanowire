@@ -6,7 +6,6 @@ import time
 import copy
 import logging
 import pint
-import conff
 import tables as tb
 import multiprocessing as mp
 import matplotlib
@@ -27,12 +26,12 @@ from itertools import repeat
 from scipy import interpolate
 from sympy import Circle
 from nanowire.optics.simulate import Simulator
-
 from nanowire.preprocess.preprocessor import (
     UNSAFE_OPERATORS,
     fn_pint_quantity,
     fn_pint_magnitude,
 )
+from nanowire.preprocess import Parser
 from nanowire.optics.utils.utils import (
     get_nk,
     get_incident_power,
@@ -46,6 +45,7 @@ from nanowire.utils.config import (
 )
 from nanowire.utils.utils import (
     cartesian_product,
+    pairwise,
     arithmetic_arange,
     open_pytables_file,
     ureg,
@@ -142,12 +142,12 @@ class Simulation:
         if it cannot be found.
     """
 
-    def __init__(self, outdir, bandwidth=None, conf=None, simulator=None):
+    def __init__(self, outdir, bandwidth, spectrum='am1.5g', conf=None, simulator=None):
         """
         :param :class:`~utils.config.Config`: Config object for this simulation
 
         """
-
+        self.spectrum = spectrum
         if conf is None and simulator is None:
             raise ValueError('Must pass in either a Config object or a'
                              ' Simulator object')
@@ -157,22 +157,22 @@ class Simulation:
             self.conf = conf
         else:
             self.conf = copy.deepcopy(simulator.conf)
-        if bandwidth is None:
-            try:
-                self.bandwidth = self.conf['Postprocessing/bandwidth']
-            except KeyError as e:
-                msg = 'Need to specify bandwidth either as a kwarg or in ' \
-                      'the Postprocessing config at Postprocessing/bandwidth'
-                e.args = (msg,)
-                raise
+        # if bandwidth is None:
+        #     try:
+        #         self.bandwidth = self.conf['Postprocessing/bandwidth']
+        #     except KeyError as e:
+        #         msg = 'Need to specify bandwidth either as a kwarg or in ' \
+        #               'the Postprocessing config at Postprocessing/bandwidth'
+        #         e.args = (msg,)
+        #         raise
+        # else:
+        if isinstance(bandwidth, pint.quantity._Quantity):
+            self.bandwidth = bandwidth.to('hertz', 'spectroscopy')
+        elif isinstance(bandwidth, float):
+            self.bandwidth = Q_(bandwidth, 'hertz')
         else:
-            if isinstance(bandwidth, pint.quantity._Quantity):
-                self.bandwidth = bandwidth.to('hertz', 'spectroscopy')
-            elif isinstance(bandwidth, float):
-                self.bandwidth = Q_(bandwidth, 'hertz')
-            else:
-                msg = 'Invalid bandwidth argument: {}'.format(bandwidth)
-                raise ValueError(msg)
+            msg = 'Invalid bandwidth argument: {}'.format(bandwidth)
+            raise ValueError(msg)
         if not isinstance(self.bandwidth, pint.quantity._Quantity):
             raise ValueError("Bandwidth must be a pint Quantity")
         self.ID = self.conf.ID
@@ -234,19 +234,20 @@ class Simulation:
         """
 
         ftype = self.conf['General']['save_as'].lower()
-        amplitude = get_incident_amplitude(
-            self.conf['Postprocessing/spectrum'],
+        amplitude = get_incident_amplitude(
+            self.spectrum,
             self.conf['Simulation/frequency'],
             self.conf['Simulation/polar_angle'],
-            self.bandwidth, logger=self.log
+            self.bandwidth,
+            logger=self.log
         )
         power = get_incident_power(
-            self.conf['Postprocessing/spectrum'],
+            self.spectrum,
             self.conf['Simulation/frequency'],
             self.conf['Simulation/polar_angle'],
-            self.bandwidth, logger=self.log
+            self.bandwidth,
+            logger=self.log
         )
-        print("power = {}".format(power))
         # Create the rescaling hook for the data manager that rescales all
         # powers and fields using the power/amplitude of the incident spectrum
         hook = create_rescaling_hook(power, amplitude, self.log)
@@ -263,7 +264,7 @@ class Simulation:
         else:
             raise ValueError('Invalid file type in config')
 
-    def write_data(self, blacklist=('normE', 'normEsquared', 'genRate')):
+    def write_data(self, blacklist=('normE', 'normEsquared')):
         """
         Writes the data. This is a simple wrapper around the write_data()
         method of the DataManager object, with some code to compute the time it
@@ -281,13 +282,17 @@ class Simulation:
 
     def get_scalar_quantity(self, quantity):
         """
-        Retrieves the entire 3D matrix for some scalar quantity
+        Retrieves the entire 3D matrix for some scalar quantity.
+
+        If the quantity does not exist in the data manager, and attempt is made
+        to calculate it by calling an instance method of the same name. If that
+        fails, an AttributeError is raised
 
         Parameters
         ----------
 
         quantity : str
-            The quantity you would like to retrive (ex: 'Ex' or 'normE')
+            The quantity you would like to retrieve (ex: 'Ex' or 'normE')
 
         Returns
         -------
@@ -427,9 +432,12 @@ class Simulation:
         """
 
         # Get the magnitude of E and add it to our data
-        E_mag = np.zeros_like(self.data['Ex'], dtype=np.float64)
+        E_mag = Q_(np.zeros_like(self.data['Ex'], dtype=np.float64),
+                   ureg.volt ** 2 / ureg.meter ** 2)
         for comp in ('Ex', 'Ey', 'Ez'):
+            d = self.data[comp]
             E_mag += np.absolute(self.data[comp])**2
+        E_mag = np.sqrt(E_mag)
         self.extend_data('normE', np.sqrt(E_mag))
         return np.sqrt(E_mag)
 
@@ -445,8 +453,10 @@ class Simulation:
         """
 
         # Get the magnitude of E and add it to our data
-        E_magsq = np.zeros_like(self.data['Ex'], dtype=np.float64)
+        E_magsq = Q_(np.zeros_like(self.data['Ex'], dtype=np.float64),
+                     ureg.volt ** 2 / ureg.meter ** 2)
         for comp in ('Ex', 'Ey', 'Ez'):
+            d = self.data[comp]
             E_magsq += np.absolute(self.data[comp])**2
             # E_magsq += self.data[comp].real**2
         self.extend_data('normEsquared', E_magsq)
@@ -503,7 +513,7 @@ class Simulation:
         print('genRate units: {}'.format(gvec.units))
         print('genRate dimensions: {}'.format(gvec.dimensionality))
         print('genRate base units: {}'.format(gvec.to_base_units().units))
-        print('max(genRate): {}'.format(np.amax(gvec.to_base_units())))
+        print('max(genRate): {}'.format(np.amax(gvec)))
         self.extend_data('genRate', gvec)
         return gvec
 
@@ -936,36 +946,33 @@ class Simulation:
         """
 
         data = self.data['fluxes']
-        # sorted_layers is an OrderedDict, and thus has the popitem method
-        sorted_layers = self.conf.sorted_dict(self.conf['Layers'])
         # self.log.info('SORTED LAYERS: %s', str(sorted_layers))
-        first_layer = sorted_layers.popitem(last=False)
+        first_layer = list(self.layers.items())[0]
         self.log.info('FIRST LAYER: %s', str(first_layer))
         # An ordered dict is actually just a list of tuples so we can access
         # the key directly like so
         first_name = first_layer[0]
-        bfirst_name = first_name.encode('utf-8')
         self.log.info('FIRST LAYER NAME: %s', str(first_name))
-        bport = port.encode('utf-8')
+        layers = [el.decode('utf-8') for el in data['layer']]
+        first_ind = layers.index(first_name)
+        port_ind = layers.index(port)
+        top_data = data[first_ind]
+        bot_data = data[port_ind]
         # p_inc = data[first_name][0]
         # p_ref = np.abs(data[first_name][1])
         # p_trans = data[last_name][0]
-        p_inc = np.absolute(data[data.layer == bfirst_name][0][1])
-        p_ref = np.absolute(data[data.layer == bfirst_name][0][2])
-        p_trans = np.absolute(data[data.layer == bport][0][1])
+        p_inc = np.absolute(top_data['forward'])
+        p_ref = np.absolute(top_data['backward'])
+        p_trans = np.absolute(bot_data['forward'])
         reflectance = p_ref / p_inc
         transmission = p_trans / p_inc
         absorbance = 1 - reflectance - transmission
-        tot = reflectance + transmission + absorbance
-        delta = np.abs(tot - 1)
         self.log.info('Reflectance %f' % reflectance)
         self.log.info('Transmission %f' % transmission)
         self.log.info('Absorbance %f' % absorbance)
-        self.log.info('Total = %f' % tot)
         assert(reflectance >= 0)
         assert(transmission >= 0)
         assert(absorbance >= 0)
-        # assert(delta < .00001)
         # Try to get a prexisting array if it exists
         try:
             # If array has been computed before get it
@@ -980,8 +987,8 @@ class Simulation:
                 arr[-1] = (port, reflectance, transmission, absorbance)
         except:
             # Otherwise we need to make a new one
-            dt = [('port', 'S25'), ('reflection', 'f8'),
-                  ('transmission', 'f8'), ('absorption', 'f8')]
+            dt = [('port', 'S25'), ('reflection', 'O'),
+                  ('transmission', 'O'), ('absorption', 'O')]
             arr = np.recarray((1,), dtype=dt)
             arr[-1] = (port, reflectance, transmission, absorbance)
         self.data['transmission_data'] = arr
@@ -2272,7 +2279,8 @@ def integrate2d(arr, xvals, yvals, meth=intg.trapz):
     return y_integral
 
 
-def integrate3d(arr, ax0, ax1, ax2, order=(0, 1, 2), meth=intg.trapz):
+def integrate3d(arr, ax0, ax1, ax2, order=(0, 1, 2), mask=None,
+                method=intg.trapz):
     """
     Perform numerical integration on a 3D array `arr` whose spatial coordinates
     along each axis correspond to the arrays `ax0`, `ax1`, and `ax2`.
@@ -2282,16 +2290,39 @@ def integrate3d(arr, ax0, ax1, ax2, order=(0, 1, 2), meth=intg.trapz):
     0, then axis 2. This is useful for determining if the integration order
     matters, which it sometimes can numerically.
 
-    :param arr: The 3D numpy array to be integrated. Must have shape (len(ax0),
-    len(ax1), len(ax2))
-    :param ax0, ax1, ax2: 1D numpy arrays specifying the spatial coordinates of
-    each axis
-    :param meth: The integration method to use.
-    :param order: A length 3 tuple specifying the order in which to integrate.
-    :type meth: function
+    Parameters
+    ----------
+
+    arr : np.ndarray
+        The 3D numpy array to be integrated. Must have shape
+        (len(ax0), len(ax1), len(ax2))
+    ax0, ax1, ax2 : np.ndarray
+        1D numpy arrays specifying the spatial coordinates of each axis
+    method : function
+        The integration method to use.
+    mask : np.ndarray
+        A numpy array of ones and zeros, which can be 2D or 3D. If a 3D array
+        is provided, it will multiply the 3D array of the quantity elementwise
+        before integration. The z-direction is along the first axis, i.e
+        mask[z, x, y].  If a 2D array is provided, it will be extended along
+        the z-direction and then will multiply the 3D array of the quantity
+        elementwise before integration. This can be useful if you want to
+        integrate only over a specific region of the device. You would supply a
+        3D mask that is 1 inside that region, and zero outside that region.
+        Combining with the layer arg is supported.
+    order : tuple
+        A length 3 tuple specifying the order in which to integrate.
+
+    Returns
+    -------
+
+    float
+        The result of the integral
     """
 
     coords = (ax0, ax1, ax2)
+    if mask is not None:
+        arr = arr*mask
     result = arr
     remaining_axes = [0, 1, 2]
     for ax in order:
@@ -2299,6 +2330,7 @@ def integrate3d(arr, ax0, ax1, ax2, order=(0, 1, 2), meth=intg.trapz):
         result = meth(result, x=coords[ax], axis=int_ax)
         remaining_axes.pop(int_ax)
     return result
+
 
 def counted(fn):
     def wrapper(self):
@@ -2327,7 +2359,7 @@ def _call_func(quantity, obj, args):
     return result
 
 
-def execute_plan(conf, outdir, plan, grouped_against=None, grouped_by=None):
+def execute_plan(conf, outdir, proc_config, bandwidth, grouped_against=None, grouped_by=None):
     """
     Executes the given plan for the given Config object or list/tuple of Config
     objects. If conf is a single Config object, a Simulation object will
@@ -2354,34 +2386,29 @@ def execute_plan(conf, outdir, plan, grouped_against=None, grouped_by=None):
     """
 
     log = logging.getLogger(__name__)
+    # print('plan: {}'.format(plan['Postprocessing']['Single']))
+    # print("list(plan.keys()) = {}".format(list(plan.keys())))
+    # print(list(plan['Postprocessing'].keys()))
     try:
         if isinstance(conf, list) or isinstance(conf, tuple):
-            sample_conf = conf[0]
             log.info("Executing SimulationGroup plan")
-            if not sample_conf['General']['save_as']:
-                obj = SimulationGroup([Simulation(simulator=Simulator(c)) for c
-                                       in conf],
-                                      grouped_against=grouped_against,
-                                      grouped_by=grouped_by)
-            else:
-                obj = SimulationGroup([Simulation(conf=c) for c in conf],
-                                      grouped_against=grouped_against,
-                                      grouped_by=grouped_by)
+            obj = SimulationGroup([Simulation(conf=c) for c in conf],
+                                  grouped_against=grouped_against,
+                                  grouped_by=grouped_by)
+            plan = proc_config['Postprocessing']['Group']
             ID = str(obj)
         else:
             log.info("Executing Simulation plan")
-            if not conf['General']['save_as']:
-                obj = Simulation(outdir, simulator=Simulator(conf))
-            else:
-                obj = Simulation(outdir, conf=conf)
-                # Concatenate the field components in each layer into a single 3D
-                # array, but add to blacklist so the concatenated arrays don't get
-                # written to disk
-                # FIXME: This is grossly memory-inefficient
-                # for f in ('Ex', 'Ey', 'Ez'):
-                #     ks = ['{}_{}'.format(lname, f) for lname in obj.layers.keys()]
-                #     obj.data[f] = np.concatenate([obj.data[k] for k in ks])
-                #     obj.data.add_to_blacklist(f)
+            plan = proc_config['Postprocessing']['Single']
+            obj = Simulation(outdir, bandwidth, conf=conf)
+            # Concatenate the field components in each layer into a single 3D
+            # array, but add to blacklist so the concatenated arrays don't get
+            # written to disk
+            # FIXME: This is grossly memory-inefficient
+            # for f in ('Ex', 'Ey', 'Ez'):
+            #     ks = ['{}_{}'.format(lname, f) for lname in obj.layers.keys()]
+            #     obj.data[f] = np.concatenate([obj.data[k] for k in ks])
+            #     obj.data.add_to_blacklist(f)
             ID = obj.ID
 
         for task_name in ('crunch', 'plot'):
@@ -2426,6 +2453,7 @@ def execute_plan(conf, outdir, plan, grouped_against=None, grouped_by=None):
             log.error('Group raised exception')
         else:
             log.error('Conf %s raised exception', conf.ID)
+        print(e)
         raise
 
 
@@ -2490,8 +2518,8 @@ class Processor:
         list
             A list of :py:class:`nanowire.preprocess.config.Config` objects
         """
+        self.log.info('Loading configs from database ...')
         confs, t_sweeps, db = load_confs(self.db, *args, **kwargs)
-        print(type(confs))
         self.t_sweeps = t_sweeps
         self.sim_confs = confs
         return confs, t_sweeps
@@ -2504,9 +2532,9 @@ class Processor:
         """
         self.log.info('Building simulation plans from template plan')
         ops = {'simpleeval': {'operators': UNSAFE_OPERATORS}}
-        parser = conff.Parser(fns={'Q': fn_pint_quantity,
+        parser = Parser(fns={'Q': fn_pint_quantity,
                                    'mag': fn_pint_magnitude},
-                              params=ops, cache_graph=True)
+                        params=ops, cache_graph=True)
         plans = {}
         for ID, (conf, conf_path) in self.sim_confs.items():
             parser.update_names({'P': conf})
@@ -2563,6 +2591,7 @@ class Processor:
         data structure
         """
 
+        confs = [tup[0] for tup in self.sim_confs.values()]
         self.sim_groups = _group_against(self.sim_confs)
         self.grouped_against = key
 
@@ -2615,9 +2644,9 @@ class Processor:
         """
         """
         self.log.info('Beginning serial processing ...')
-        for conf, conf_path, plan in confs_and_plans:
+        for conf, conf_path, plan, bandwidth in confs_and_plans:
             outdir = os.path.dirname(conf_path)
-            execute_plan(conf, outdir, plan,
+            execute_plan(conf, outdir, plan, bandwidth,
                          grouped_against=grouped_against,
                          grouped_by=grouped_by)
 
@@ -2627,15 +2656,36 @@ class Processor:
         """
         self.log.info('Beginning parallel processing using %s cores ...',
                       str(self.num_cores))
-        args_list = list(zip(confs, plans,
-                             repeat(grouped_against),
-                             repeat(grouped_by)))
+        # args_list = list(zip(confs, plans,
+        #                      repeat(grouped_against),
+        #                      repeat(grouped_by)))
+        args_list = []
+        for conf, conf_path, plan, bandwidth in confs_and_plans:
+            outdir = os.path.dirname(conf_path)
+            tup = (conf, outdir, plan, bandwidth, grouped_against, grouped_by)
+            args_list.append(tup)
         with mp.Pool(processes=self.num_cores) as pool:
             pool.starmap(execute_plan, args_list)
         pool.join()
 
+    def calculate_bandwidth(self):
+        confs = [tup[0] for tup in self.sim_confs.values()]
+        freq_groups = _group_against(confs, 'Simulation/frequency')
+        bandwidths = []
+        for group in freq_groups:
+            for c1, c2 in pairwise(group):
+                bandwidth = abs(c1['Simulation/frequency'] -
+                                c2['Simulation/frequency'])
+                bandwidths.append(2*bandwidth)
+        if not all(el == bandwidths[0] for el in bandwidths[1:]):
+            msg = 'Cannot currently handle nonuniform frequency sweeps'
+            raise NotImplementedError(msg)
+        return bandwidths[0]
+
     def process(self, crunch=True, plot=True, gcrunch=True, gplot=True,
                 grouped_against=None, grouped_by=None):
+        # We need to calculate the bandwidth
+        bandwidth = self.calculate_bandwidth()
         # First process all the sims
         if crunch or plot:
             self.log.info('Processing individual simulations')
@@ -2644,12 +2694,12 @@ class Processor:
             plans = self.make_plans()
             for plan in plans.values():
                 if not crunch:
-                    del plan['Postprocessing/Single/crunch']
+                    del plan['Postprocessing']['Single']['crunch']
                 if not plot:
-                    del plan['Postprocessing/Single/plot']
+                    del plan['Postprocessing']['Single']['plot']
             if len(plans) != len(self.sim_confs):
                 raise ValueError('Must have same number of plans as simulations!')
-            data = [self.sim_confs[ID] + (plans[ID],) for ID in plans.keys()]
+            data = [self.sim_confs[ID] + (plans[ID], bandwidth) for ID in plans.keys()]
             if self.num_cores:
                 self._parallel_process(data, grouped_by=grouped_by,
                                        grouped_against=grouped_against)

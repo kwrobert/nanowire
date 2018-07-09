@@ -17,7 +17,7 @@ import tables as tb
 from functools import wraps
 from line_profiler import LineProfiler
 from contextlib import contextmanager
-from itertools import accumulate, repeat, chain, product
+from itertools import accumulate, repeat, chain, product, tee
 from collections import Iterable, OrderedDict, MutableMapping
 
 ureg = pint.UnitRegistry()
@@ -822,3 +822,10 @@ def open_pytables_file(hdf, mode):
     else:
         raise ValueError('Invalid file argument: {}'.format(hdf))
     return hdf
+
+
+def pairwise(iterable):
+    "s -> (s0,s1), (s1,s2), (s2, s3), ..."
+    a, b = tee(iterable)
+    next(b, None)
+    return zip(a, b)

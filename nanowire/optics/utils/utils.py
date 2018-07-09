@@ -1,5 +1,6 @@
 import os
 import logging
+import pint
 import numpy as np
 import scipy.integrate as intg
 from scipy import interpolate
@@ -7,6 +8,7 @@ from nanowire.utils.utils import (
     ureg,
     Q_
 )
+pint.set_application_registry(ureg)
 
 
 def setup_sim(sim):
@@ -52,7 +54,7 @@ def get_nk(path, freq):
 
 @ureg.with_context('spectroscopy')
 @ureg.wraps(ureg.watt / ureg.meter**2,
-            (None, ureg.hertz, ureg.degrees, ureg.hertz))
+            (None, ureg.hertz, ureg.degrees, ureg.hertz, None))
 def get_incident_power(spectrum, freq, polar_angle, bandwidth, logger=None):
     """
     Returns the incident power per area (W/m^2) for a simulation depending on
@@ -118,8 +120,10 @@ def get_incident_power(spectrum, freq, polar_angle, bandwidth, logger=None):
     data_file = os.path.join(data_dir, 'ASTMG173.csv')
     wvs, power = np.loadtxt(data_file, delimiter=',',
                             usecols=[0, index[spectrum]], unpack=True)
-    wvs = Q_(wvs, 'nanometers')
-    power = Q_(power, 'W*m^-2*nm^-1')
+    # Reverse the vectors so when we convert to frequency everything is in the
+    # proper order
+    wvs = Q_(wvs[::-1], 'nanometers')
+    power = Q_(power[::-1], 'W*m^-2*nm^-1')
     freq_vec = wvs.to('hertz')
     # Convert the spectrum
     p_vec = power * ureg.speed_of_light / freq_vec ** 2
@@ -183,6 +187,8 @@ def get_incident_power(spectrum, freq, polar_angle, bandwidth, logger=None):
     return power
 
 
+# @ureg.wraps(ureg.volt / ureg.meter,
+#             (None, ureg.hertz, ureg.degrees, ureg.hertz, None))
 def get_incident_amplitude(spectrum, freq, polar_angle, bandwidth,
                            logger=None):
     """
@@ -196,7 +202,13 @@ def get_incident_amplitude(spectrum, freq, polar_angle, bandwidth,
     the plane wave and is not time averaged in any way, and S is the magnitude
     of the Poynting vector.
     """
-
+    # print("ureg = {}".format(ureg))
+    # print("freq.units = {}".format(freq.units))
+    # print("freq.magnitude = {}".format(freq.magnitude))
+    # print("freq._REGISTRY = {}".format(freq._REGISTRY))
+    # print("bandwidth.units = {}".format(bandwidth.units))
+    # print("bandwidth.magnitude = {}".format(bandwidth.magnitude))
+    # print("bandwidth._REGISTRY = {}".format(bandwidth._REGISTRY))
     power_per_area = get_incident_power(spectrum, freq, polar_angle, bandwidth,
                                         logger=logger)
     logger.info('Incident Power/Area: %s', str(power_per_area))

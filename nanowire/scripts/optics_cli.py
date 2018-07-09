@@ -206,7 +206,6 @@ def postprocess(db, template, base_dir, params, query, table_path, table_name,
     #                      'manager configuration')
     # conf = parsed_dicts[0]
     proc = post.Processor(db, template, base_dir=base_dir, num_cores=num_cores)
-    click.echo('Loading configs from database ...')
     proc.load_confs(base_dir=base_dir, query=query,
                     table_path=table_path, table_name=table_name)
     if print_ids:

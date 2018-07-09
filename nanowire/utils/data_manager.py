@@ -827,25 +827,27 @@ def create_rescaling_hook(power, amplitude, log):
     This function in written such that if the fields have already been scaled,
     they do not get rescaled again on subsequent accesses
     """
-    
+   
+    # Some attributes are set on this function after definition. Scroll down to
+    # see where hook.log comes from
     def hook(inst, key, value):
         hook.log.debug('Calling get hook!')
         # Do not rescale twice
         if hasattr(inst, 'rescaled'):
             if key in inst.rescaled:
                 if inst.rescaled[key]:
-                    print('Key {} already scaled!'.format(key))
+                    hook.log.debug('Key {} already scaled!'.format(key))
                     return value
         else:
             inst.rescaled = {}
         if key in {'Ex', 'Ey', 'Ez'}:
             hook.log.info('Rescaling field %s!', key)
-            value = value * hook.amplitude
+            value = value.magnitude * hook.amplitude
             inst.rescaled[key] = True
         elif key in {'Hx', 'Hy', 'Hz'}:
             hook.log.info('Rescaling field %s!', key)
             # Need to divide by impedance of free space
-            value = value * hook.amplitude / ureg.Z_0
+            value = value.magnitude * hook.amplitude / ureg.Z_0
             value = value.to_base_units()
             inst.rescaled[key] = True
         elif key == 'fluxes':
@@ -855,13 +857,14 @@ def create_rescaling_hook(power, amplitude, log):
                 print('Layer: {}'.format(row['layer']))
                 print('Forward: {}'.format(row['forward']))
                 print('Backward: {}'.format(row['backward']))
-            pws = [.5*el*hook.power for el in value['forward']]
-            value['forward'] = pws
+            # pws = [.5*el.magnitude*hook.power for el in value['forward']]
+            value['forward'] = [.5*el.magnitude*hook.power for el in value['forward']]
             # pws = [.5*el/ureg.Z_0 for el in value['backward']]
             # pws = [el.to_base_units().magnitude*power for el in pws]
-            pws = [.5*el.magnitude*hook.power for el in value['backward']]
-            value['backward'] = pws
+            # pws = [.5*el.magnitude*hook.power for el in value['backward']]
+            value['backward'] = [.5*el.magnitude*hook.power for el in value['backward']]
             inst.rescaled[key] = True
+        inst[key] = value
         return value
     hook.amplitude = amplitude
     hook.power = power

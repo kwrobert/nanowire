@@ -141,6 +141,32 @@ class Layer:
         self.shapes = shapes
         return shapes
 
+    def get_inds(self, zcoords):
+        """
+        Given any set of z coordinates within the device, get the starting and
+        ending indices of the slice of the zcoords array that falls within this
+        layer
+
+        Parmeters
+        ---------
+
+        zcoords : list, np.ndarray
+            A list or numpy array of z coordinates
+
+        Returns
+        -------
+
+        start_ind : int
+            An integer indicating the beginning of the slice
+        end_ind : int
+            An integer indicating the end of the slice
+        """
+
+        zcoords = zcoords.to(self.start.units).magnitude
+        start_ind = np.searchsorted(zcoords, self.start.magnitude)
+        end_ind = np.searchsorted(zcoords, self.end.magnitude)
+        return start_ind, end_ind
+
     def get_slice(self, zcoords):
         """
         Given a set of z coordinates, get a length 3 tuple can be used to
@@ -148,6 +174,20 @@ class Layer:
         assumes the z direction is along the zeroth axis (i.e arr[z, x, y]).
         So, one can slice out the chunk of the 3D array with
         arr[layer.get_slice()]
+
+        Parmeters
+        ---------
+
+        zcoords : list, np.ndarray
+            A list or numpy array of z coordinates
+
+        Returns
+        -------
+
+        start_ind : int
+            An integer indicating the beginning of the slice
+        end_ind : int
+            An integer indicating the end of the slice
         """
 
         zcoords = zcoords.to(self.start.units).magnitude

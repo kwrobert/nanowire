@@ -851,18 +851,8 @@ def create_rescaling_hook(power, amplitude, log):
             value = value.to_base_units()
             inst.rescaled[key] = True
         elif key == 'fluxes':
-            # pws = [.5*el/ureg.Z_0 for el in value['forward']]
-            # pws = [el.to(ureg.volt**2 / self.lg.magnitude*power for el in pws]
-            for row in value:
-                print('Layer: {}'.format(row['layer']))
-                print('Forward: {}'.format(row['forward']))
-                print('Backward: {}'.format(row['backward']))
-            # pws = [.5*el.magnitude*hook.power for el in value['forward']]
-            value['forward'] = [.5*el.magnitude*hook.power for el in value['forward']]
-            # pws = [.5*el/ureg.Z_0 for el in value['backward']]
-            # pws = [el.to_base_units().magnitude*power for el in pws]
-            # pws = [.5*el.magnitude*hook.power for el in value['backward']]
-            value['backward'] = [.5*el.magnitude*hook.power for el in value['backward']]
+            value['forward'] = [el.magnitude*hook.power for el in value['forward']]
+            value['backward'] = [el.magnitude*hook.power for el in value['backward']]
             inst.rescaled[key] = True
         inst[key] = value
         return value

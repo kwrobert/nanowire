@@ -645,7 +645,7 @@ class Simulator:
         """
         Set the attributes that define the spatial coordinate arrays. We can't
         do this in __init__ because if we are doing a thickness sweep then
-        layer thicknesses and hence max_depth have not yet been resolved in the
+        layer thicknesses and hence depth have not yet been resolved in the
         config
         """
 
@@ -654,13 +654,24 @@ class Simulator:
         samps_dict = self.conf['General']['sample_dict']
         if samps_dict:
             zcoords = []
+            count = len(self.layers)
             for lname, layer in self.layers.items():
-                if isinstance(samps_dict[lname], int):
-                    z_vals = np.linspace(layer.start, layer.end,
-                                         samps_dict[lname])
+                # Include the endpoint of the last layer, but otherwise exclude
+                # the endpoints so we don't have two planes of data at each
+                # layer interface
+                if count == 1:
+                    endpoint = True
                 else:
-                    args = [layer.start, layer.end, *samps_dict[lname]]
-                    z_vals = arithmetic_arange(*args)
+                    endpoint = False
+                if isinstance(samps_dict[lname], int):
+                    z_vals = np.linspace(layer.start.magnitude,
+                                         layer.end.magnitude,
+                                         samps_dict[lname], endpoint=endpoint)
+                else:
+                    args = [layer.start.magnitude, layer.end.magnitude,
+                            *samps_dict[lname]]
+                    z_vals = arithmetic_arange(*args, endpoint=endpoint)
+                count -= 1
                 zcoords.append(z_vals)
             self.Z = Q_(np.concatenate(zcoords), self.lgth_unit)
         elif type(self.conf['General']['z_samples']) == list:
@@ -669,17 +680,11 @@ class Simulator:
                         self.lgth_unit)
         else:
             self.zsamps = self.conf['General']['z_samples']
-            max_depth = self.conf['General']['max_depth']
-            if max_depth:
-                self.log.debug('Computing up to depth of {} '
-                               'microns'.format(max_depth))
-                self.Z = Q_(np.linspace(0, max_depth.magnitude, self.zsamps),
-                            max_depth.units)
-            else:
-                self.log.debug('Computing for entire device')
-                height = self.get_height()
-                self.Z = Q_(np.linspace(0, height, self.zsamps),
-                            self.lgth_unit)
+            depth = self.conf['General']['max_depth'] or self.get_height()
+            self.log.debug('Computing up to depth of {} '
+                           'microns'.format(depth))
+            self.Z = Q_(np.linspace(0, depth.magnitude, self.zsamps),
+                        depth.units)
         self.X = Q_(np.linspace(0, self.period.magnitude, self.xsamps),
                     self.lgth_unit)
         self.Y = Q_(np.linspace(0, self.period.magnitude, self.ysamps),
@@ -1002,43 +1007,6 @@ class Simulator:
             E = self.s4.GetFields(x, y, z)[0]
             H = (None, None, None)
         return E[0], E[1], E[2], H[0], H[1], H[2]
-
-    @ureg.wraps(('', '', ''),
-                None)
-    def compute_fields_by_layer(self, sample_dict):
-        """
-        Compute fields within each layer such that a z sample falls exactly on
-        the start and end of a layer. The purpose of this it to reduce
-        integration errors
-
-        :param sample_dict: A dictionary whose keys are strings of layer names
-        and whose values are integers indicating the number of z sampling
-        points to use in that layer
-        :type sample_dict: dict[str] int
-        :return: A dictionary whose keys are layers names, and whose values are
-        dictionaries containing all the field components
-        :rtype: dict[str] dict
-        """
-
-        results = {}
-        for lname, layer in self.layers.items():
-            if lname not in sample_dict:
-                self.log.info("Layer %s not in sample dict, skipping", lname)
-                continue
-            if isinstance(sample_dict[lname], int):
-                z = np.linspace(layer.start, layer.end, sample_dict[lname])
-            else:
-                args = [layer.start, layer.end, *sample_dict[lname]]
-                z = arithmetic_arange(*args)
-            self.log.info("Computing fields in layer %s using %i samples",
-                          lname, len(z))
-            Ex, Ey, Ez, Hx, Hy, Hz = self.compute_fields(zvals=z)
-            # results[lname] = {'Ex':Ex, 'Ey':Ey, 'Ez':Ez, 'Hx':Hx, 'Hy':Hy,
-            #                   'Hz':Hz}
-            results.update({'{}_{}'.format(lname, fname): arr for fname, arr in
-                           (('Ex', Ex), ('Ey', Ey), ('Ez', Ez), ('Hx', Hx),
-                            ('Hy', Hy), ('Hz', Hz))})
-        return results
 
     # @do_profile(follow=[])
     @ureg.wraps(('', '', ''),
@@ -1471,15 +1439,7 @@ class Simulator:
             self.update_thicknesses()
         self.save_conf()
         self.load_state()
-        # sdict = {"Air": 5, "ITO": 100, "NW_AlShell": 200, "Substrate": 300}
-        # sdict = {"Air": 5, "ITO": 10, "NW_AlShell": 20, "Substrate": 30}
-        # self.compute_fields_by_layer(sdict)
-        sdict = self.conf['General']['sample_dict']
-        if sdict:
-            results = self.compute_fields_by_layer(sdict)
-            self.data.update(results)
-        else:
-            self.get_field()
+        self.get_field()
         self.get_fluxes()
         self.get_fourier_coefficients()
         self.get_q_values()

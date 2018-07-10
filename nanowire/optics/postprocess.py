@@ -14,6 +14,7 @@ try:
 except KeyError:
     matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+plt.style.use(['paper'])
 import matplotlib.cm as cmx
 import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
@@ -192,27 +193,19 @@ class Simulation:
         if not self.conf['General']['save_as']:
             self.data = {}
             simulator.setup()
-            self.data.update(simulator.data)
-            sdict = self.conf['General']['sample_dict']
-            if sdict:
-                results = simulator.compute_fields_by_layer(sdict)
-                self.data.update(results)
-                for f in ('Ex', 'Ey', 'Ez'):
-                    ks = ['{}_{}'.format(lname, f) for lname in simulator.layers.keys()]
-                    self.data[f] = np.concatenate([self.data[k] for k in ks])
-            else:
+            comps = {'Ex', 'Ey', 'Ez', 'Hx', 'Hy', 'Hz'}
+            dkeys = set(simulator.data.keys())
+            compute = any(comp not in dkeys for comp in comps)
+            if compute:
                 Ex, Ey, Ez, Hx, Hy, Hz = simulator.compute_fields()
                 self.data.update({'Ex': Ex, 'Ey': Ey, 'Ez': Ez,
                                   'Hx': Hx, 'Hy': Hy, 'Hz': Hz})
-            flux_arr = simulator.compute_fluxes()
-            self.data.update({'fluxes': flux_arr})
+            if 'fluxes' not in dkeys:
+                flux_arr = simulator.compute_fluxes()
+                self.data.update({'fluxes': flux_arr})
+            # self.data.update(simulator.data)
         else:
             self.data = self._get_data_manager()
-            sdict = self.conf['General']['sample_dict']
-            if sdict:
-                for f in ('Ex', 'Ey', 'Ez'):
-                    ks = ['{}_{}'.format(lname, f) for lname in simulator.layers.keys()]
-                    self.data[f] = np.concatenate([self.data[k] for k in ks])
         # Compute and store dx, dy, dz at attributes
         self.X = self.data['xcoords']
         self.Y = self.data['ycoords']
@@ -506,7 +499,8 @@ class Simulation:
             # Use the layer object to get the nk matrix with correct material
             # geometry
             nmat, kmat = layer.get_nk_matrix(freq, self.X, self.Y)
-            gvec[layer.get_slice(self.Z)] = nmat * kmat * normEsq[layer.get_slice(self.Z)]
+            start, end = layer.get_inds(self.Z)
+            gvec[start:end, :, :] = nmat * kmat * normEsq[start:end, :, :]
         gvec *= fact
         gvec.ito(units)
         self.extend_data('genRate', gvec)
@@ -518,7 +512,7 @@ class Simulation:
 
         The purpose of this function is primarily to take the generation rate
         in 3D and average about the azimuthal angle to get a 2D generation
-        rate. This 2D generation rate is then fed into an electrical model. 
+        rate. This 2D generation rate is then fed into an electrical model.
         """
 
         try:
@@ -615,187 +609,12 @@ class Simulation:
         self.data[key] = avgs
         return avgs
 
-    def integrate_nanowire(self, zvals, nkEsq=None):
-        """
-        Use natural neighbor interpolation to integrate nk|E|^2 inside the
-        nanowire in shell in polar coordinates for optimum accuracy
-        """
-
-        # if len(self.X) % 2 == 0 or len(self.Y) % 2 == 0:
-        #     raise ValueError("Need and odd number of x-y samples to use this "
-        #                      " function")
-        self.log.info("CALLING INTEGRATE_NANOWIRE")
-        nw_layer = self.layers['NW_AlShell']
-        core_rad = self.conf['Layers']['NW_AlShell']['params']['core_radius']
-        shell_rad = self.conf['Layers']['NW_AlShell']['params']['shell_radius']
-        period = self.conf['Simulation']['params']['array_period']
-        # shell_rad = self.conf['Layers']['NW_AlShell']['params']['shell_radius']
-        # Extract nkEsq data in layer
-        if nkEsq is None:
-            nkEsq = self.data['nknormEsq'][nw_layer.get_slice(self.Z)]
-        # Get masks for each region
-        core_mask = get_mask_by_material(nw_layer, 'GaAs', self.X, self.Y)
-        shell_mask = get_mask_by_material(nw_layer, 'AlInP', self.X, self.Y)
-        cyc_mask = np.logical_not(np.logical_or(core_mask, shell_mask))
-        core_mask3d = np.broadcast_to(core_mask,
-                                      (nkEsq.shape[0],
-                                       core_mask.shape[0],
-                                       core_mask.shape[1]))
-        shell_mask3d = np.broadcast_to(shell_mask,
-                                       (nkEsq.shape[0],
-                                        shell_mask.shape[0],
-                                        shell_mask.shape[1]))
-        cyc_mask3d = np.broadcast_to(cyc_mask,
-                                     (nkEsq.shape[0],
-                                      cyc_mask.shape[0],
-                                      cyc_mask.shape[1]))
-        # Finally the cyclotene
-        cyc_vals = nkEsq*cyc_mask3d
-        cyc_result = integrate3d(cyc_vals, zvals, self.X, self.Y,
-                                 meth=intg.simps)
-        # Extract vals in each region from nkEsq array
-        core_inds = np.where(core_mask3d)
-        shell_inds = np.where(shell_mask3d)
-        core_vals = nkEsq[core_inds]
-        shell_vals = nkEsq[shell_inds]
-        pts = cartesian_product((zvals, self.X, self.Y))
-        # Shift x and y values so origin is at center of nanowire
-        # core_pts_inds = np.where((core_pts[:, 1] - period/2)**2 + (core_pts[:, 2] - period/2)**2 <= core_rad**2)
-        p2 = period/2.0
-        pts[:, 2] -= p2
-        pts[:, 1] -= p2
-        core_pts_inds = np.where(pts[:, 1]**2 + pts[:, 2]**2 <= core_rad**2)
-        shell_pts_inds = np.where((core_rad**2 < pts[:, 1]**2 + pts[:, 2]**2)
-                                  &
-                                  (pts[:, 1]**2 + pts[:, 2]**2 <= shell_rad**2))
-        # core_pts_inds = np.where((pts[:, 1]-p2)**2 + (pts[:, 2]-p2)**2 <= core_rad**2)
-        # shell_pts_inds = np.where((core_rad**2 <= (pts[:, 1]-p2)**2 + (pts[:, 2]-p2)**2)
-        #                           &
-        #                           ((pts[:, 1]-p2)**2 + (pts[:, 2]-p2)**2 <= shell_rad**2))
-        core_pts = pts[core_pts_inds[0], :]
-        shell_pts = pts[shell_pts_inds[0], :]
-        # core_pts = np.column_stack((xx[core_inds[1], core_inds[2], core_inds[0]],
-        #                        yy[core_inds[1], core_inds[2], core_inds[0]],
-        #                        zz[core_inds[1], core_inds[2], core_inds[0]]))
-        # Transform cartesian points into polar coordinates.
-        # polar_pts[r, theta, z]
-        core_polar_pts = np.zeros_like(core_pts)
-        core_polar_pts[:, 0] = np.sqrt(core_pts[:, 2]**2 + core_pts[:, 1]**2)
-        # This returns angles on [-pi, pi], so shift them
-        core_polar_pts[:, 1] = np.arctan2(core_pts[:, 2], core_pts[:, 1])
-        # core_polar_pts[:, 1][core_polar_pts[:, 1] < 0] += 2*np.pi
-        core_polar_pts[:, 2] = core_pts[:, 0]
-        # Same for the shell
-        shell_polar_pts = np.zeros_like(shell_pts)
-        shell_polar_pts[:, 0] = np.sqrt(shell_pts[:, 2]**2 + shell_pts[:, 1]**2)
-        # This returns angles on [-pi, pi], so shift them
-        shell_polar_pts[:, 1] = np.arctan2(shell_pts[:, 2], shell_pts[:, 1])
-        # shell_polar_pts[:, 1][shell_polar_pts[:, 1] < 0] += 2*np.pi
-        shell_polar_pts[:, 2] = shell_pts[:, 0]
-        ###########
-        # Insert S4 data at r = 0 here and all theta values.
-        # Odd numbers of points guarantee an S4 point at the center of the unit
-        # cell. Use an odd number of points, and take the center value and
-        # replicate it across all thetas for r = 0
-        # 1) Does the weird start in the center go away
-        # 2) Compare integral by material to plain old integral and flux method
-        ###########
-        # Get function value at r = 0
-        # center_inds = np.where((pts[:, 1] == .125) & (pts[:, 2] == .125))
-        center_inds = np.where(core_polar_pts[:, 0] == 0)
-        rzero_core_vals = core_vals[center_inds[0]]
-        extra_theta = 180
-        extra_pts = cartesian_product((np.array([0]),
-                                       np.linspace(-np.pi, np.pi, extra_theta),
-                                       core_polar_pts[center_inds[0], 2]))
-        repeated_zero_vals = np.concatenate([rzero_core_vals for i in range(extra_theta)])
-        core_polar_pts = np.concatenate((core_polar_pts, extra_pts))
-        core_vals = np.concatenate((core_vals, repeated_zero_vals))
-
-        # Extract interpolated points on a polar grid
-        rstart = 0
-        core_numr = 180
-        shell_numr = 60
-        numtheta = 360
-        numz = 200
-        # If the last element of each range is complex, the ranges behave like
-        # np.linspace
-        ranges = [[rstart, core_rad, 1j*core_numr], [-np.pi, np.pi, 1j*numtheta],
-                  [nw_layer.start, nw_layer.end, 1j*numz]]
-        # ranges = [[rstart, core_rad, 1j*core_numr], [0, 2*np.pi, 1j*numtheta],
-        #           [nw_layer.start, nw_layer.end, 1j*numz]]
-        core_interp = nn.griddata(core_polar_pts, core_vals, ranges)
-        # ranges = [[core_rad, shell_rad, 1j*shell_numr], [0, 2*np.pi, 1j*numtheta],
-        #           [nw_layer.start, nw_layer.end, 1j*numz]]
-        ranges = [[core_rad, shell_rad, 1j*shell_numr], [-np.pi, np.pi, 1j*numtheta],
-                  [nw_layer.start, nw_layer.end, 1j*numz]]
-        shell_interp = nn.griddata(shell_polar_pts, shell_vals, ranges)
-        # Multiply by area factor in polar coords to get integrand
-        core_rvals = np.linspace(rstart, core_rad, core_numr)
-        thetavals = np.linspace(-np.pi, np.pi, numtheta)
-        intzvals = np.linspace(nw_layer.start, nw_layer.end, numz)
-        rr, tt = np.meshgrid(core_rvals, thetavals, indexing='ij')
-        # xx = rr*np.cos(tt)
-        # yy = rr*np.sin(tt)
-        # __import__('pdb').set_trace()
-        integrand = core_interp*rr[:, :, None]
-        core_result = integrate3d(integrand, thetavals, intzvals, core_rvals,
-                                  meth=intg.simps)
-        # Shell integral
-        shell_rvals = np.linspace(core_rad, shell_rad, shell_numr)
-        rr, tt = np.meshgrid(shell_rvals, thetavals, indexing='ij')
-        integrand = shell_interp*rr[:, :, None]
-        # integrand = core_interp*rr[:, :, None]
-        shell_result = integrate3d(integrand, thetavals, intzvals, shell_rvals,
-                                   meth=intg.simps)
-        #plt.matshow(shell_mask3d[1, :, :])
-        #plt.show()
-        #plt.matshow(shell_mask)
-        #plt.show()
-        self.log.info("Core Integral Result = {}".format(core_result))
-        self.log.info("Shell Integral Result = {}".format(shell_result))
-        self.log.info("Cyc Integral Result = {}".format(cyc_result))
-        return sum((core_result, shell_result, cyc_result))
-        # return (core_rvals, shell_rvals, thetavals, zvals, core_interp,
-        #         shell_interp, core_result, shell_result, cyc_result)
-
-    def integrate_layer(self, lname, layer):
-        freq = self.conf[('Simulation', 'params', 'frequency')]
-        n_mat, k_mat = layer.get_nk_matrix(freq, self.X, self.Y)
-        try:
-            Esq = self.data['normEsquared']
-        except KeyError:
-            Esq = self.normEsquared()
-        nkEsq = n_mat*k_mat*Esq[layer.get_slice(self.Z)]
-        results = {}
-        for mat in layer.materials.keys():
-            mask = get_mask_by_material(layer, mat, self.X, self.Y)
-            values = nkEsq*mask
-            points = (self.Z[layer.get_slice(self.Z)], self.X, self.Y)
-            rgi = interpolate.RegularGridInterpolator(points, values,
-                                                      method='linear',
-                                                      bounds_error=True)
-            z = self.Z[layer.get_slice(self.Z)]
-            # x = self.X
-            # y = self.Y
-            z = np.linspace(self.Z[layer.get_slice(self.Z)][0],
-                            self.Z[layer.get_slice(self.Z)][-1], len(z)*2)
-            x = np.linspace(self.X[0], self.X[-1], len(self.X)*2)
-            y = np.linspace(self.Y[0], self.Y[-1], len(self.Y)*2)
-            pts = cartesian_product((z, x, y))
-            vals = rgi(pts).reshape((len(z), len(x), len(y)))
-            z_integral = intg.trapz(vals, x=z, axis=0)
-            x_integral = intg.trapz(z_integral, x=x, axis=0)
-            y_integral = intg.trapz(x_integral, x=y, axis=0)
-            results[mat] = y_integral
-        result = sum(results.values())
-        return result
-
     def absorption_per_layer(self, per_area=True, order=(0, 1, 2)):
         """
-        Computes the absorption in each layer of the device using two methods.
-        The first method takes the difference between the areal power fluxes
-        entering a layer and leaving a layer.
+        Computes the absorption in each layer of the device as well as the
+        total absorption using two methods.  The first method takes the
+        difference between the areal power fluxes entering a layer and leaving
+        a layer.
 
         :math:`P_{abs} = P_{in} - P_{out}`
 
@@ -824,87 +643,45 @@ class Simulation:
         """
 
         fluxes = self.data['fluxes']
-        base_unit = self.conf['General']['base_unit']
-        Zo = consts.physical_constants['characteristic impedance of vacuum'][0]
-        # try:
-        #     Esq = self.data['normEsquared']
-        # except KeyError:
-        #     Esq = self.normEsquared()
-        freq = self.conf[('Simulation', 'params', 'frequency')]
-        dt = [('layer', 'S25'), ('flux_method', 'c16'), ('int_method', 'c16'),
-              ('int_method_polar', 'c16'), ('difference', 'f8'),
-              ('difference_polar', 'f8')]
+        Esq = self.get_scalar_quantity('normEsquared')
+        freq = self.conf['Simulation/frequency']
+        # object type for pint Quantities
+        dt = [('layer', 'S25'), ('flux_method', 'O'), ('int_method', 'O'),
+              ('difference', 'O')]
         num_rows = len(list(self.layers.keys()))
         absorb_arr = np.recarray((num_rows,), dtype=dt)
         counter = 0
-        sdict = self.conf['General']['sample_dict']
         for layer_name, layer_obj in self.layers.items():
             # Method 1: Go through power flux
-            blayer_name = layer_name.encode('utf-8')
             bottom = layer_name+'_bottom'
-            bbottom = bottom.encode('utf-8')
-            port, forw_top, back_top = fluxes[fluxes.layer == blayer_name][0]
-            port, forw_bot, back_bot = fluxes[fluxes.layer == bbottom][0]
+            layers = [el.decode('utf-8') for el in fluxes['layer']]
+            top_ind = layers.index(layer_name)
+            bottom_ind = layers.index(bottom)
+            _, forw_top, back_top = fluxes[top_ind]
+            _, forw_bot, back_bot = fluxes[bottom_ind]
             # Minus sign because S4 stick a minus in front of all backward
             # components
             Pin = forw_top - back_bot
             Pout = forw_bot - back_top
-            Plost = Pin - Pout
+            Pabs_flux = Pin - Pout
             # S4 returns \int |E|^2 / Area, so we need to multiply by the area
             # here. Factor of one over vacuum impedance to get the units into
             # power.
-            Pabs_flux = .5*Plost/Zo
             if not per_area:
                 Pabs_flux *= self.period**2
+                Pabs_flux.ito(ureg.watt)
+            else:
+                Pabs_flux.ito(ureg.watt / ureg.meter**2)
             self.log.info("Layer: {}".format(layer_name))
             self.log.info("Flux Method Absorbed: {}".format(Pabs_flux))
             # Method 2: Go through integral of field intensity
             # if layer_name == 'Air':
             #     continue
             n_mat, k_mat = layer_obj.get_nk_matrix(freq, self.X, self.Y)
-            keys = ['{}_{}'.format(layer_name, f) for f in ("Ex", "Ey", "Ez")]
-            fields = {k[-2:]: self.data[k] for k in keys}
-            Esq = np.abs(fields['Ex'])**2 + np.abs(fields['Ey'])**2 + np.abs(fields['Ez'])**2
-            # z = np.linspace(layer_obj.start, layer_obj.end, Esq.shape[0])
-            if isinstance(sdict[layer_name], int):
-                z = np.linspace(layer_obj.start, layer_obj.end,
-                                sdict[layer_name])
-            else:
-                args = [layer_obj.start, layer_obj.end, *sdict[layer_name]]
-                z = arithmetic_arange(*args)
-            if layer_name == "NW_AlShell":
-                # y_integral_polar = self.integrate_nanowire(z, nkEsq=n_mat*k_mat*Esq)
-                y_integral_polar = 0
-                y_integral = integrate3d(n_mat*k_mat*Esq, z, self.X, self.Y,
-                                         meth=intg.simps, order=order)
-            else:
-                y_integral_polar = 0
-                y_integral = integrate3d(n_mat*k_mat*Esq, z, self.X, self.Y,
-                                         meth=intg.simps, order=order)
-            # abs_dict[lname] = result
-            # nkEsq = n_mat*k_mat*Esq
-            # y_integral = 0
-            # for material in layer_obj.materials:
-            #     mask = get_mask_by_material(layer_obj, material, self.X,
-            #                                 self.Y)
-            #     y_integral += self.integrate_quantity(nkEsq, layer=layer_name,
-            #                                           mask=mask)
-
-            # n and k could be functions of space, so we need to multiply the
-            # fields by n and k before integrating
-            # arr_slice = Esq[layer_obj.get_slice(self.Z)]*n_mat*k_mat
-            # z_vals = self.Z[layer_obj.get_slice(self.Z)]
-            # z_integral = intg.trapz(arr_slice, x=z_vals, axis=0)
-            # x_integral = intg.trapz(z_integral, x=self.X, axis=0)
-            # y_integral = intg.trapz(x_integral, x=self.Y, axis=0)
-            # y_integral = self.integrate_layer(layer_name, layer_obj)
-
-            # print('Arr slice shape: {}'.format(arr_slice.shape))
-            # x_integral = intg.trapz(arr_slice, x=self.X, axis=1)
-            # print('X Integral shape: {}'.format(x_integral.shape))
-            # y_integral = intg.trapz(x_integral, x=self.Y, axis=1)
-            # print('Y Integral shape: {}'.format(y_integral.shape))
-            # z_integral = intg.trapz(y_integral, x=z_vals, axis=0)
+            start, end = layer_obj.get_inds(self.Z)
+            integrand = n_mat*k_mat*Esq[start:end, :, :]
+            z = self.Z[start:end]
+            y_integral = integrate3d(integrand, z, self.X, self.Y)
             # 2\pi for conversion to angular frequency
             # epsilon_0 comes out of dielectric constant
             # Factor of base unit because we need to convert from our reference
@@ -912,20 +689,17 @@ class Simulation:
             # Factor of 1/2 for time averaging gets canceled by imaginary part
             # of dielectric constant (2*n*k)
             self.log.info("Pabs Pure Integral Result: {}".format(y_integral))
-            Pabs_integ_polar = 2*np.pi*freq*consts.epsilon_0*base_unit*y_integral_polar
-            Pabs_integ = 2*np.pi*freq*consts.epsilon_0*base_unit*y_integral
+            Pabs_integ = Q_(2*np.pi, ureg.radians)*freq*ureg.vacuum_permittivity*y_integral
+            print(Pabs_integ.units)
             # Pabs_integ = 2*np.pi*freq*consts.epsilon_0*base_unit*z_integral
             if per_area:
                 Pabs_integ /= self.period**2
-                Pabs_integ_polar /= self.period**2
+                Pabs_integ.ito(ureg.watts / ureg.meter**2)
+            else:
+                Pabs_integ.ito(ureg.watts)
             self.log.info("Integrated Absorbed: {}".format(Pabs_integ))
             diff = np.abs(Pabs_flux - Pabs_integ)/Pabs_flux
-            if layer_name == "NW_AlShell":
-                diff_polar = np.abs(Pabs_flux - Pabs_integ_polar)/Pabs_flux
-            else:
-                diff_polar = 0
-            absorb_arr[counter] = (layer_name, Pabs_flux, Pabs_integ,
-                                   Pabs_integ_polar, diff, diff_polar)
+            absorb_arr[counter] = (layer_name, Pabs_flux, Pabs_integ, diff)
             counter += 1
         self.log.info("Integration Order: %s, Layer absorption arr: %s",
                       str(order), str(absorb_arr))
@@ -995,34 +769,42 @@ class Simulation:
         self.data['transmission_data'] = arr
         return reflectance, transmission, absorbance
 
-    def integrate_quantity(self, q, mask=None, layer=None):
+    def integrate_quantity(self, q, **kwargs):
         """
         Compute a 3D integral of a specified quantity
 
-        :param q: A key in the self.data dict that specifies the quantity you
-                  wish to integrate
-        :type q: str or np.array
-        :param mask: A numpy array of ones and zeros, which can be 2D or 3D. If
-                     a 3D array is provided, it will multiply the 3D array of
-                     the quantity elementwise before integration. The
-                     z-direction is along the first axis, i.e mask[z, x, y].
-                     If a 2D array is provided, it will be extended along the
-                     z-direction and then will multiply the 3D array of the
-                     quantity elementwise before integration. This can be
-                     useful if you want to integrate only over a specific
-                     region of the device. You would supply a 3D mask that is
-                     1 inside that region, and zero outside that region.
-                     Combining with the layer arg is supported.
-        :type mask: np.ndarray
-        :param layer: The name of the layer you wish to integrate over.
-                      Providing this will extract a 3D slice of data that is in
-                      the specified layer, and only integrate over that slice.
-                      Use this if you do not want to include all layers in the
-                      integration. Combining with the mask arg is supported.
-        :type layer: str
-        :return: Result of :math:`\\int quantity(x, y, z) dV`
-        :rtype: float
+
+        Parameters
+        ----------
+
+        q : str
+            A key in the self.data dict that specifies the quantity you wish to
+            integrate
+        mask : np.ndarray
+            A numpy array of ones and zeros, which can be 2D or 3D. If a 3D
+            array is provided, it will multiply the 3D array of the quantity
+            elementwise before integration. The z-direction is along the first
+            axis, i.e mask[z, x, y].  If a 2D array is provided, it will be
+            extended along the z-direction and then will multiply the 3D array
+            of the quantity elementwise before integration. This can be useful
+            if you want to integrate only over a specific region of the device.
+            You would supply a 3D mask that is 1 inside that region, and zero
+            outside that region.  Combining with the layer arg is supported.
+        layer : str
+            The name of the layer you wish to integrate over.  Providing this
+            will extract a 3D slice of data that is in the specified layer, and
+            only integrate over that slice.  Use this if you do not want to
+            include all layers in the integration. Combining with the mask arg
+            is supported.
+
+
+        Returns
+        -------
+
+        float
+            Result of :math:`\\int quantity(x, y, z) dV`
         """
+
         if type(q) == str:
             qarr = self.get_scalar_quantity(q)
         else:
@@ -1035,12 +817,8 @@ class Simulation:
                 mask = mask[l.get_slice(self.Z)]
         else:
             z_vals = self.Z
-        if mask is not None:
-            qarr = qarr*mask
-        z_integral = intg.trapz(qarr, x=z_vals, axis=0)
-        x_integral = intg.trapz(z_integral, x=self.X, axis=0)
-        y_integral = intg.trapz(x_integral, x=self.Y, axis=0)
-        return y_integral
+        result = integrate3d(q, z_vals, self.X, self.Y, **kwargs)
+        return result
 
     def jsc_contrib(self, port='Substrate_bottom'):
         self.log.info('Computing Jsc contrib')
@@ -1183,8 +961,6 @@ class Simulation:
         center = shape.center
         cx = float(shape.center.x)
         cy = float(shape.center.y)
-        print("cx = {}".format(cx))
-        print("type(cx) = {}".format(type(cx)))
         radius = float(shape.radius)
         if plane == 'xy':
             circle = mpatches.Circle((center.x, center.y), radius=radius,
@@ -1323,21 +1099,30 @@ class Simulation:
         show = self.conf['General']['show_plots']
         p = False
         if plane == 'yz' or plane == 'zy':
-            labels = ('y [um]', 'z [um]', quantity, title)
+            labels = (r'$y [{:~L}]$'.format(self.Y.units),
+                      r'$z [{:~L}]$'.format(self.Z.units),
+                      quantity,
+                      title)
             if self.conf['General']['save_plots']:
                 fname = '%s_plane_2d_yz_pval%s.png' % (quantity, str(pval))
                 p = osp.join(self.path, fname)
             self.heatmap2d(y, z, cs, labels, plane, pval,
                            save_path=p, show=show, draw=draw, fixed=fixed)
         elif plane == 'xz' or plane == 'zx':
-            labels = ('x [um]', 'z [um]', quantity, title)
+            labels = (r'$x [{:~L}]$'.format(self.X.units),
+                      r'$z [{:~L}]$'.format(self.Z.units),
+                      quantity,
+                      title)
             if self.conf['General']['save_plots']:
                 fname = '%s_plane_2d_xz_pval%s.png' % (quantity, str(pval))
                 p = osp.join(self.path, fname)
             self.heatmap2d(x, z, cs, labels, plane, pval,
                            save_path=p, show=show, draw=draw, fixed=fixed)
         elif plane == 'xy' or plane == 'yx':
-            labels = ('y [um]', 'x [um]', quantity, title)
+            labels = (r'$y [{:~L}]$'.format(self.Y.units),
+                      r'$x [{:~L}]$'.format(self.X.units),
+                      quantity,
+                      title)
             if self.conf['General']['save_plots']:
                 fname = '%s_plane_2d_xy_pval%s.png' % (quantity, str(pval))
                 p = osp.join(self.path, fname)
@@ -2260,18 +2045,21 @@ def scatter3d(x, y, z, cs=None, colorsMap='jet'):
     return fig, ax
 
 
+@ureg.wraps('=A*B', ('=A', '=B'))
 def integrate1d(arr, xvals, meth=intg.trapz):
     x_integral = meth(arr, x=xvals, axis=0)
     return x_integral
 
 
+@ureg.wraps('=A*B**2', ('=A', '=B', '=B'))
 def integrate2d(arr, xvals, yvals, meth=intg.trapz):
     x_integral = meth(arr, x=xvals, axis=0)
     y_integral = meth(x_integral, x=yvals, axis=0)
     return y_integral
 
 
-def integrate3d(arr, ax0, ax1, ax2, order=(0, 1, 2), mask=None,
+# @ureg.wraps('=A*B**3', ('=A', '=B', '=B', '=B'))
+def integrate3d(qarr, qax0, qax1, qax2, order=(0, 1, 2), mask=None,
                 method=intg.trapz):
     """
     Perform numerical integration on a 3D array `arr` whose spatial coordinates
@@ -2311,7 +2099,10 @@ def integrate3d(arr, ax0, ax1, ax2, order=(0, 1, 2), mask=None,
     float
         The result of the integral
     """
-
+    arr = qarr.magnitude
+    ax0 = qax0.magnitude
+    ax1 = qax1.magnitude
+    ax2 = qax2.magnitude
     coords = (ax0, ax1, ax2)
     if mask is not None:
         arr = arr*mask
@@ -2319,9 +2110,10 @@ def integrate3d(arr, ax0, ax1, ax2, order=(0, 1, 2), mask=None,
     remaining_axes = [0, 1, 2]
     for ax in order:
         int_ax = remaining_axes.index(ax)
-        result = meth(result, x=coords[ax], axis=int_ax)
+        result = method(result, x=coords[ax], axis=int_ax)
         remaining_axes.pop(int_ax)
-    return result
+    units = qarr.units*qax0.units*qax1.units*qax2.units
+    return Q_(result, units)
 
 
 def counted(fn):

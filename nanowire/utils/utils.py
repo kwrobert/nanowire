@@ -436,6 +436,7 @@ def arithmetic_arange(a, b, dx0, d, endpoint=True):
         pts = pts[0:-1]
     return pts
 
+
 def ipv4():
     """
     Get all IPv4 addresses for all interfaces.

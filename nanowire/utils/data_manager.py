@@ -429,7 +429,7 @@ class DataManager(MutableMapping, metaclass=ABCMeta):
             return
         self.log.info('Updating %s', key)
         for hook in self.set_hooks:
-            value = hook(self, key, val)
+            value = hook(self, key, value)
         self._data[key] = value
         self._updated[key] = True
 
@@ -523,7 +523,19 @@ class HDF5DataManager(DataManager):
         # np.array_equal is necessary in case we are dealing with numpy arrays
         # Elementwise comparison of arrays of different shape throws a
         # deprecation warning, and array_equal works on dicts and lists
-        return np.array_equal(self._data[key], value)
+        item = self._data[key]
+        if isinstance(value, pint.quantity._Quantity):
+            if isinstance(item, pint.quantity._Quantity):
+                if item.dimensionality == value.dimensionality:
+                    is_equal = np.array_equal(item.to_base_units().magnitude,
+                                              value.to_base_units().magnitude)
+                else:
+                    is_equal = False
+            else:
+                is_equal = np.array_equal(item, value.magnitude)
+        else:
+            is_equal = np.array_equal(item, value)
+        return is_equal
 
     def _load_data(self, key):
         """
@@ -554,9 +566,10 @@ class HDF5DataManager(DataManager):
         try:
             self.log.info('The node you requested does not exist in the '
                           'HDF5 file, checking group attributes')
-            self._data[key] = self.gobj._v_attrs[key]
+            item = self.gobj._v_attrs[key]
+            self._data[key] = item
         except KeyError as e:
-            msg = 'The nodes or attributes exist with name {}'.format(key)
+            msg = 'No nodes or attributes exist with name {}'.format(key)
             self.log.error(msg)
             e.args = e.args + (msg,)
             raise
@@ -827,11 +840,11 @@ def create_rescaling_hook(power, amplitude, log):
     This function in written such that if the fields have already been scaled,
     they do not get rescaled again on subsequent accesses
     """
-   
+
     # Some attributes are set on this function after definition. Scroll down to
     # see where hook.log comes from
     def hook(inst, key, value):
-        hook.log.debug('Calling get hook!')
+        hook.log.debug('Calling rescaling hook!')
         # Do not rescale twice
         if hasattr(inst, 'rescaled'):
             if key in inst.rescaled:

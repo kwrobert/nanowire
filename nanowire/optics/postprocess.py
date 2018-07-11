@@ -14,7 +14,7 @@ try:
 except KeyError:
     matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-plt.style.use(['paper'])
+# plt.style.use(['paper'])
 import matplotlib.cm as cmx
 import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
@@ -609,7 +609,7 @@ class Simulation:
         self.data[key] = avgs
         return avgs
 
-    def absorption_per_layer(self, per_area=True, order=(0, 1, 2)):
+    def power_absorbed(self, per_area=True, order=(0, 1, 2)):
         """
         Computes the absorption in each layer of the device as well as the
         total absorption using two methods.  The first method takes the
@@ -657,8 +657,10 @@ class Simulation:
             layers = [el.decode('utf-8') for el in fluxes['layer']]
             top_ind = layers.index(layer_name)
             bottom_ind = layers.index(bottom)
-            _, forw_top, back_top = fluxes[top_ind]
-            _, forw_bot, back_bot = fluxes[bottom_ind]
+            forw_top = fluxes[top_ind]['forward']
+            back_top = fluxes[top_ind]['backward']
+            forw_bot = fluxes[bottom_ind]['forward']
+            back_bot = fluxes[bottom_ind]['backward']
             # Minus sign because S4 stick a minus in front of all backward
             # components
             Pin = forw_top - back_bot
@@ -684,29 +686,26 @@ class Simulation:
             y_integral = integrate3d(integrand, z, self.X, self.Y)
             # 2\pi for conversion to angular frequency
             # epsilon_0 comes out of dielectric constant
-            # Factor of base unit because we need to convert from our reference
-            # lengths in base units to SI reference length unit (meters)
-            # Factor of 1/2 for time averaging gets canceled by imaginary part
-            # of dielectric constant (2*n*k)
             self.log.info("Pabs Pure Integral Result: {}".format(y_integral))
             Pabs_integ = Q_(2*np.pi, ureg.radians)*freq*ureg.vacuum_permittivity*y_integral
-            print(Pabs_integ.units)
-            # Pabs_integ = 2*np.pi*freq*consts.epsilon_0*base_unit*z_integral
             if per_area:
                 Pabs_integ /= self.period**2
                 Pabs_integ.ito(ureg.watts / ureg.meter**2)
             else:
                 Pabs_integ.ito(ureg.watts)
             self.log.info("Integrated Absorbed: {}".format(Pabs_integ))
-            diff = np.abs(Pabs_flux - Pabs_integ)/Pabs_flux
+            diff = np.abs((Pabs_flux - Pabs_integ)/Pabs_flux)
             absorb_arr[counter] = (layer_name, Pabs_flux, Pabs_integ, diff)
             counter += 1
+        total_flux = np.sum(absorb_arr['flux_method'])
+        total_integ = np.sum(absorb_arr['int_method'])
+        total_diff = np.abs((total_flux - total_integ)/total_flux)
+        new_rec = np.array(('total', total_flux, total_integ, total_diff),
+                           dtype=absorb_arr.dtype)
+        absorb_arr = np.append(absorb_arr, new_rec)
         self.log.info("Integration Order: %s, Layer absorption arr: %s",
                       str(order), str(absorb_arr))
-        fout = osp.join(self.dir, 'abs_per_layer.dat')
-        with open(fout, 'w') as f:
-            absorb_arr.tofile(f, sep=', ')
-        self.data['abs_per_layer'] = absorb_arr
+        self.data['power_absorbed'] = absorb_arr
         return absorb_arr
 
     def transmissionData(self, port='Substrate_bottom'):
@@ -769,7 +768,7 @@ class Simulation:
         self.data['transmission_data'] = arr
         return reflectance, transmission, absorbance
 
-    def integrate_quantity(self, q, **kwargs):
+    def integrate_quantity(self, q, layer=None, mask=None, **kwargs):
         """
         Compute a 3D integral of a specified quantity
 
@@ -817,89 +816,70 @@ class Simulation:
                 mask = mask[l.get_slice(self.Z)]
         else:
             z_vals = self.Z
-        result = integrate3d(q, z_vals, self.X, self.Y, **kwargs)
+        result = integrate3d(q, z_vals, self.X, self.Y, mask=mask, **kwargs)
         return result
 
-    def jsc_contrib(self, port='Substrate_bottom'):
-        self.log.info('Computing Jsc contrib')
-        wv_fact = consts.e / (consts.c * consts.h * 10)
+    def photocurrent_density(self):
+        """
+        Computes this Simulation's contribution to the total photocurrent
+        density.
+
+        This simulation was run at a single frequency centered within a
+        frequency bin of some finite, non-zero bandwidth. All powers and fields
+        were scaled by the power/amplitude contained within this bin (i.e the
+        integral of the chosen spectrum over the bin). The power absorbed by
+        the device (i.e rate of energy absorption) can be converted to a rate
+        of photon absorption (i.e number of photons absorbed per unit time) by
+        dividing the absorbed power by the energy of incident photons.  If we
+        assume that for every absorbed photon we extract exactly one electron,
+        the rate of photon absorption can be converted to a photocurrent
+        density by multiplying by the fundamental charge.
+
+        The energy of the incident photons is
+
+        ..math::
+
+            E_{photon} = h f = \\hbar \\omega
+
+             dividing the absorbed power
+
+        where :math:`h` is Planck's constant, :math:`f` is the temporal
+        frequency of the incident photon with units of Hertz, :math:`\\hbar =
+        h/2\\pi`, and the angular frequency is :math:`\\omega = 2 \\pi f` which
+        has units of radians/second. The input frequencies are temporal
+        frequencies with units of Hertz.
+        """
+
+        self.log.info('Computing contribution to photocurrent density')
+        freq = self.conf['Simulation/frequency']
+        E_photon = ureg.planck_constant * freq
         # Unpack data for the port we passed in as an argument
         try:
-            arr = self.data['transmission_data']
-            port, ref, trans, absorb = arr[arr.port == port.encode('utf-8')][0]
+            arr = self.data['abs_per_layer']
+            # port, ref, trans, absorb = arr[arr.port == port.encode('utf-8')][0]
         except KeyError:
-            ref, trans, absorb = self.transmissionData(port=port)
-        freq = self.conf['Simulation']['params']['frequency']
-        wvlgth = consts.c / freq
-        wvlgth_nm = wvlgth * 1e9
-        # Get solar power from chosen spectrum
-        sun_pow = get_incident_amplitude(self)
-        # This is our integrand
-        val = absorb * wvlgth * sun_pow
-        # val = absorb * wvlgth
-        # test = absorb * sun_pow * wvlgth_nm * wv_fact * delta_wv
-        # self.log.info('Sim %s Jsc Integrand: %f', self.ID, test)
-        # Use Trapezoid rule to perform the integration. Note all the
-        # necessary factors of the wavelength have already been included
-        # above
-        Jsc = wv_fact * val
-        outf = osp.join(self.dir, 'jsc_contrib.dat')
-        with open(outf, 'w') as out:
-            out.write('%f\n' % Jsc)
-        self.log.info('Jsc contrib = %f', Jsc)
-        return Jsc
-
-    def jsc_integrated_contrib(self):
-        self.log.info('Computing integrated Jsc contribution')
-        try:
-            genRate = self.data['genRate']
-        except KeyError:
-            genRate = self.genRate()
-        # Gen rate in cm^-3. Gotta convert lengths here from um to cm
-        z_integral = intg.trapz(genRate, x=self.Z, axis=0)
-        x_integral = intg.trapz(z_integral, x=self.X, axis=0)
-        y_integral = intg.trapz(x_integral, x=self.Y, axis=0)
-        # Convert period to cm and current to mA
-        sun_pow = get_incident_amplitude(self)
-        self.log.info('Sun power = %f', sun_pow)
-        self.log.info('Integral = %f', y_integral)
-        Jsc = 1000*(consts.e/(self.period*1e-4)**2)*y_integral
-        outf = osp.join(self.dir, 'jsc_integrated_contrib.dat')
-        with open(outf, 'w') as out:
-            out.write('%f\n' % Jsc)
-        self.log.info('Jsc_integrated contrib = %f', Jsc)
-        return Jsc
-
-    def integrated_absorbtion(self):
-        """
-        Computes the absorption of a layer by using the volume integral of
-        the product of the imaginary part of the relative permittivity and the
-        norm squared of the E field
-        """
-
-        raise NotImplementedError('There are some bugs in S4 and other reasons'
-                                  ' that this function doesnt work yet')
-        base = self.conf['General']['sim_dir']
-        path = osp.join(base, 'integrated_absorption.dat')
-        inpath = osp.join(base, 'energy_densities.dat')
-        freq = self.conf['Simulation']['params']['frequency']
-        # TODO: Assuming incident amplitude and therefore incident power is
-        # just 1 for now
-        fact = -.5 * freq * consts.epsilon_0
-        with open(inpath, 'r') as inf:
-            lines = inf.readlines()
-            # Remove header line
-            lines.pop(0)
-            # Dict where key is layer name and value is list of length 2 containing real and
-            # imaginary parts of energy density integral
-            data = {line.strip().split(',')[0]: line.strip().split(',')[
-                1:] for line in lines}
-        self.log.info('Energy densities: %s' % str(data))
-        with open(path, 'w') as outf:
-            outf.write('# Layer, Absorption\n')
-            for layer, vals in data.items():
-                absorb = fact * float(vals[1])
-                outf.write('%s,%s\n' % (layer, absorb))
+            arr = self.power_absorbed()
+        layers = [el['layer'].decode() for el in arr]
+        total_ind = layers.index('total')
+        totals = arr[total_ind]
+        power_abs_flux = totals['flux_method']
+        power_abs_integ = totals['int_method']
+        # check if powers are per area or not. If not per area, there will be a
+        # length squared in the dimensions
+        per_area = '[length]' not in power_abs_flux.dimensionality 
+        flux_jph = ureg.elementary_charge * power_abs_flux / E_photon
+        integ_jph = ureg.elementary_charge * power_abs_integ / E_photon
+        if per_area:
+            flux_jph.ito(ureg.milliampere / ureg.centimeter**2)
+            integ_jph.ito(ureg.milliampere / ureg.centimeter**2)
+        else:
+            flux_jph.ito(ureg.milliampere)
+            integ_jph.ito(ureg.milliampere)
+        # self.log.info('Flux Method Jph = {}'.format(flux_jph))
+        # self.log.info('Integral Method Jph = {}'.format(integ_jph))
+        self.data['jph_flux_method'] = flux_jph
+        self.data['jph_integral_method'] = integ_jph
+        return flux_jph, integ_jph
 
     def plot_q_values(self):
         """
@@ -912,7 +892,7 @@ class Simulation:
         which determines the oscillation frequency of the waves.
         """
 
-        sim_freq = self.conf['Simulation']['params']['frequency']
+        sim_freq = self.conf['Simulation/frequency']
         sim_wvlgth = 1e9*consts.c / sim_freq
         leg_str = ''
         for mat, matpath in self.conf['Materials'].items():
@@ -951,7 +931,7 @@ class Simulation:
             #              bbox=dict(boxstyle='round', fc='w'))
             plt.xlabel('Re(q) [radians/micron]')
             plt.ylabel('Im(q) [1/microns]')
-            plot_path = osp.join(self.dir, '{}_qvals.png'.format(lname))
+            plot_path = osp.join(self.path, '{}_qvals.png'.format(lname))
             plt.grid(True)
             plt.savefig(plot_path)
             plt.close()
@@ -1644,14 +1624,14 @@ class SimulationGroup:
                 try:
                     abs_arr = sim.data['abs_per_layer']
                 except KeyError:
-                    abs_arr = sim.absorption_per_layer()
+                    abs_arr = sim.power_absorbed()
                 absorbed_power = np.sum(abs_arr['flux_method'])
                 jph_vals[i] = absorbed_power / (E_photon*period**2)
             else:
                 try:
                     abs_arr = sim.data['abs_per_layer']
                 except KeyError:
-                    abs_arr = sim.absorption_per_layer()
+                    abs_arr = sim.power_absorbed()
                 absorbed_power = np.sum(abs_arr['int_method'])
                 jph_vals[i] = absorbed_power / (E_photon*period**2)
             sim.clear_data()
@@ -1763,7 +1743,7 @@ class SimulationGroup:
             outf.write('%f,%f,%f' % (wght_ref, wght_trans, wght_abs))
         return wght_ref, wght_trans, wght_abs
 
-    def plot_absorption_per_layer(self, input_ax=None, plot_layer=None, quant=None,
+    def plot_power_absorbed(self, input_ax=None, plot_layer=None, quant=None,
                                   sim_slice=(0, None), marker='--o', xlabel='',
                                   ylabel='', title='', leg_label=''):
         """
@@ -1771,7 +1751,7 @@ class SimulationGroup:
         """
 
         if self.grouped_against is None:
-            raise ValueError("Can only call plot_absorption_per_layer when "
+            raise ValueError("Can only call plot_power_absorbed when "
                              "sims are grouped against a parameter")
         results_dir = self.sims[0].conf['General']['results_dir']
         results_dict = {}
@@ -2170,9 +2150,6 @@ def execute_plan(conf, outdir, proc_config, bandwidth, grouped_against=None, gro
     """
 
     log = logging.getLogger(__name__)
-    # print('plan: {}'.format(plan['Postprocessing']['Single']))
-    # print("list(plan.keys()) = {}".format(list(plan.keys())))
-    # print(list(plan['Postprocessing'].keys()))
     try:
         if isinstance(conf, list) or isinstance(conf, tuple):
             log.info("Executing SimulationGroup plan")

@@ -6,6 +6,7 @@ import time
 import copy
 import logging
 import pint
+import hashlib
 import tables as tb
 import multiprocessing as mp
 import matplotlib
@@ -23,7 +24,7 @@ import scipy.integrate as intg
 import numpy as np
 # import naturalneighbor as nn
 from mpl_toolkits.mplot3d import Axes3D
-from itertools import repeat
+from itertools import repeat, product
 from scipy import interpolate
 from sympy import Circle
 from nanowire.optics.simulate import Simulator
@@ -49,6 +50,7 @@ from nanowire.utils.utils import (
     pairwise,
     arithmetic_arange,
     open_pytables_file,
+    get_record,
     ureg,
     Q_,
 )
@@ -179,7 +181,7 @@ class Simulation:
         self.ID = self.conf.ID
         self.path = osp.abspath(osp.normpath(osp.expandvars(outdir)))
         self.base, self.dir = osp.split(self.path)
-        self.fhandler = logging.FileHandler(osp.join(self.dir, 'postprocess.log'))
+        self.fhandler = logging.FileHandler(osp.join(self.path, 'postprocess.log'))
         self.fhandler.addFilter(IdFilter(ID=self.ID))
         formatter = logging.Formatter('%(asctime)s [%(name)s:%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
         self.fhandler.setFormatter(formatter)
@@ -337,81 +339,6 @@ class Simulation:
             self.data._update_keys(clear=True)
         else:
             self.data = {}
-
-    def get_line(self, quantity, line_dir, c1, c2):
-        """
-        Gets data along a line through the 3D data array for the given quantity
-        along a given direction
-
-        Parameters
-        ----------
-        line_dir : str
-            Any of 'x', 'y', or 'z'. Determines the direction along which the
-            line cut is taken, the other two coordinates remain fixed and are
-            specified by c1 and c2.
-        c1 : int
-            The integer index for the first fixed coordinate.  Indexes are in
-            x,y,z order so if line_dir='z' then c1 corresponds to x
-        c2 : int
-            The integer index for the second coordinate.
-        quantity : str
-            The quantity whose data array you wish to take a line cut through
-
-        Returns
-        -------
-
-        np.ndarray
-            A 1D numpy array containing data along the specified line cut
-        """
-
-        scalar = self.get_scalar_quantity(quantity)
-        if line_dir == 'x':
-            # z along rows, y along columns
-            return scalar[c2, :, c1]
-        elif line_dir == 'y':
-            # x along columns, z along rows
-            return scalar[c2, c1, :]
-        elif line_dir == 'z':
-            # x along rows, y along columns
-            return scalar[:, c1, c2]
-
-    def get_plane(self, quantity, plane, pval):
-        """
-        Gets data along a 2D plane/slice through the 3D data array for a given
-        quantity
-
-        Parameters
-        ----------
-
-        plane : str
-            Any of 'xy', 'yz', or 'xz'. Determines the plane along which the
-            slice is taken
-        pval : int
-            The index along the final unspecified direction. If plane='xy' then
-            index would index along the z direction.
-
-        quantity : str
-            The quantity whose data array you wish to take a line cut through
-
-        Returns
-        -------
-
-        np.ndarray
-            A 2D numpy array containing data on the specified plane
-        """
-
-        self.log.info('Retrieving plane for %s', quantity)
-        scalar = self.get_scalar_quantity(quantity)
-        if plane == 'yz' or plane == 'zy':
-            # z along rows, y along columns
-            return scalar[:, pval, :]
-        elif plane == 'xz' or plane == 'zx':
-            # x along columns, z along rows
-            return scalar[:, :, pval]
-        elif plane == 'xy' or plane == 'yx':
-            # x along rows, y along columns
-            return scalar[pval, :, :]
-
 
     def normE(self):
         """
@@ -666,6 +593,10 @@ class Simulation:
             Pin = forw_top - back_bot
             Pout = forw_bot - back_top
             Pabs_flux = Pin - Pout
+            if not np.isclose(Pabs_flux.imag, 0):
+                raise ValueError('Imaginary part of absorbed power not zero')
+            else:
+                Pabs_flux = np.abs(Pabs_flux)
             # S4 returns \int |E|^2 / Area, so we need to multiply by the area
             # here. Factor of one over vacuum impedance to get the units into
             # power.
@@ -1074,7 +1005,8 @@ class Simulation:
         title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(
             freq, wvlgth)
         # Get the plane we wish to plot
-        cs = self.get_plane(quantity, plane, pval).magnitude
+        quant_arr = self.get_scalar_quantity(quantity)
+        cs = get_plane(quant_arr, plane, pval).magnitude
         self.log.info('DATA SHAPE: %s' % str(cs.shape))
         show = self.conf['General']['show_plots']
         p = False
@@ -1140,7 +1072,7 @@ class Simulation:
         x = np.arange(0, self.period, self.dx)
         y = np.arange(0, self.period, self.dy)
         z = np.arange(0, self.height + self.dz, self.dz)
-        points = np.array(list(itertools.product(z, x, y)))
+        points = np.array(list(product(z, x, y)))
         # Get the scalar
         scalar = self.get_scalar_quantity(quantity)
         labels = ('X [um]', 'Y [um]', 'Z [um]', quantity)
@@ -1155,23 +1087,25 @@ class Simulation:
         # Get the scalar values
         # Get the data on the plane with a fixed x value. These means we'll
         # have changing (y, z) points
-        xdata = self.get_plane(quantity, 'yz', xplane)
+        quant_arr = self.get_scalar_quantity(quantity)
+        xdata = get_plane(quant_arr, 'yz', xplane)
         # z first cuz we want y to be changing before z to correspond with the
         # way numpy flattens arrays. Note this means y points will be in the
         # 2nd column
-        xplanepoints = np.array(list(itertools.product(self.Z, self.Y)))
+        xplanepoints = np.array(list(product(self.Z, self.Y)))
         xdata = xdata.flatten()
-        xplanexval = np.array(list(itertools.repeat(x[xplane], len(xdata))))
+        xplanexval = np.array(list(repeat(x[xplane], len(xdata))))
         xplanedata = np.zeros((xplanepoints.shape[0], 4))
         xplanedata[:, 0] = xplanexval
         xplanedata[:, 1] = xplanepoints[:, 1]
         xplanedata[:, 2] = xplanepoints[:, 0]
         xplanedata[:, 3] = xdata
         # Same procedure for fixed y plane
-        ydata = self.get_plane(quantity, 'xz', yplane)
-        yplanepoints = np.array(list(itertools.product(z, x)))
+        quant_arr = self.get_scalar_quantity(quantity)
+        ydata = get_plane(quant_arr, 'xz', yplane)
+        yplanepoints = np.array(list(product(z, x)))
         ydata = ydata.flatten()
-        yplaneyval = np.array(list(itertools.repeat(y[yplane], len(ydata))))
+        yplaneyval = np.array(list(repeat(y[yplane], len(ydata))))
         yplanedata = np.zeros((yplanepoints.shape[0], 4))
         yplanedata[:, 0] = yplanepoints[:, 1]
         yplanedata[:, 1] = yplaneyval
@@ -1219,7 +1153,8 @@ class Simulation:
         coord2 = int(coord2)
         # Get the scalar values
         # Filter out any undesired data that isn't on the planes
-        data = self.get_line(quantity, direction, coord1, coord2)
+        quant_arr = self.get_scalar_quantity(quantity)
+        data = get_line(quant_arr, direction, coord1, coord2)
         if direction == 'x':
             # z along rows, y along columns
             pos_data = self.X
@@ -1265,203 +1200,49 @@ class SimulationGroup:
     that is grouped against number of basis terms also doesn't make sense.
     """
 
-    def __init__(self, sims, grouped_against=None, grouped_by=None):
+    def __init__(self, sim_confs_and_dirs, base_dir, bandwidth, grouped_against=None, grouped_by=None):
         if grouped_by is None and grouped_against is None:
             raise ValueError("Must know how this SimulationGroup is grouped")
+        self.base_dir = base_dir
+        self.bandwidth = bandwidth
         self.grouped_by = grouped_by
         self.grouped_against = grouped_against
-        self.sims = sims
+        self.sim_confs = [tup[0] for tup in sim_confs_and_dirs]
+        self.ID, self.results_dir = self.get_group_info()
+        self.sims = [Simulation(outdir, bandwidth, conf=conf) for
+                     conf, outdir in sim_confs_and_dirs] 
         # for sim in self.sims:
         #     sim.get_layers()
         self.log = logging.getLogger(__name__)
-        self.num_sims = len(sims)
+        self.num_sims = len(self.sims)
 
+    def get_group_info(self):
+        all_ids = ''.join(conf.ID for conf in self.sim_confs)
+        print("all_ids = {}".format(all_ids))
+        hasher = hashlib.md5()
+        hasher.update(all_ids.encode('utf-8'))
+        GID = hasher.hexdigest()
+        print("GID = {}".format(GID))
+        if self.grouped_by is not None:
+            print('GROUPED BY')
+            print(self.grouped_by)
+            dname = self.grouped_by.replace('/', '_')
+            results_dir = osp.join(self.base_dir, 'grouped_by', dname, GID[0:10]) 
+        elif self.grouped_against is not None:
+            print('GROUPED_AGAINST')
+            print(self.grouped_against)
+            dname = self.grouped_against.replace('/', '_')
+            results_dir = osp.join(self.base_dir, 'grouped_against', dname, GID[0:10]) 
+        print("results_dir = {}".format(results_dir))
+        if not os.path.isdir(results_dir):
+            os.makedirs(results_dir)
+        return GID, results_dir
 
-    def get_plane(self, scalar, plane, pval):
-        """
-        Gets data along a 2D plane/slice through the 3D data array for a given
-        quantity
-
-        :param str plane: Any of 'xy', 'yz', or 'xz'. Determines the plane
-        along which the slice is taken
-        :param int pval: The index along the final unspecified direction. If
-        plane='xy' then index would index along the z direction.
-        :param str quantity: The quantity whose data array you wish to take a
-        line cut through
-        """
-
-        if plane == 'yz' or plane == 'zy':
-            # z along rows, y along columns
-            return scalar[:, pval, :]
-        elif plane == 'xz' or plane == 'zx':
-            # x along columns, z along rows
-            return scalar[:, :, pval]
-        elif plane == 'xy' or plane == 'yx':
-            # x along rows, y along columns
-            return scalar[pval, :, :]
-
-    def diff_sq(self, x, y):
-        """Returns the magnitude of the difference vector squared between two vector fields at each
-        point in space"""
-        # Calculate the magnitude of the difference vector SQUARED at each point in space
-        # This is mag(vec(x) - vec(y))^2 at each point in space. This should be a 1D array
-        # with # of elements = # sampling points
-        mag_diff_vec = sum([np.absolute(v1 - v2)**2 for v1, v2 in zip(x, y)])
-        return mag_diff_vec
-
-    def get_slice(self, sim):
-        """Returns indices for data that strip out air and substrate regions"""
-        # TODO: This function is definitely not general. We need to get a list
-        # of layers to exclude from the user. For now, just assume we want to
-        # exclude the top and bottom regions
-        # sorted_layers is an OrderedDict, and thus has the popitem method
-        sorted_layers = sim.conf.sorted_dict(sim.conf['Layers'])
-        first_layer = sorted_layers.popitem(last=False)
-        last_layer = sorted_layers.popitem()
-        # We can get the starting and ending planes from their heights
-        start_plane = int(round(first_layer[1]['params'][
-                          'thickness'] / sim.dz))
-        end_plane = int(round(last_layer[1]['params'][
-                        'thickness'] / sim.dz))
-        return start_plane, end_plane
-
-    def get_comp_vec(self, sim, field, start, end):
-        """Returns the comparison vector"""
-        # Compare all other sims to our best estimate, which is sim with highest number of
-        # basis terms (last in list cuz sorting)
-
-        # Get the proper file extension depending on the field.
-        norm = 'norm'+field
-        # Get the comparison vector
-        vecs = [sim.data[field+comp][start:end] for comp in ('x', 'y', 'z')]
-        normvec = sim.get_scalar_quantity('normE')
-        normvec = normvec[start:end]**2
-        return vecs, normvec
-
-    def difference_squared(self, field, layer_name, sim1, sim2):
-        """
-        Computes the difference squared between the given field in the given
-        layer of two simulations at each point in space, for example normE or
-        genRate. If any vector components are passed in, this is also handled
-        appropriately (for example Ex, Ey, or Ez)
-
-        :param field: The field or field component you wish to compare
-        :type field: str
-        :param layer_name: The name of the layer in which you wish to make the
-        comparison
-        :type layer_name: str
-        :return: An array containing the difference squared at each point in
-        space.
-        :rtype: np.ndarray
-        """
-
-        if field in ('Ex', 'Ey', 'Ez'):
-            field = '{}_{}'.format(layer_name, field)
-        self.log.info('Running the difference squared computation for quantity %s', field)
-        layer_obj = self.layers[layer_name]
-        # Set the reference sim
-        # Get the comparison vector
-        ref_arr = sim1.data[field][layer_obj.get_slice()]
-        # For all other sims in the groups, compare to best estimate
-        # and write to error file
-        comp_arr = sim2.data[field][layer_obj.get_slice()]
-        # Get the array containing the magnitude of the difference vector
-        # at each point in space
-        diff_sq = np.absolute(ref_arr - comp_arr)**2
-        return diff_sq
-
-    def global_error(self, field, exclude=False):
-        """Computes the global error between the vector fields of two simulations. This is the sum
-        of the magnitude squared of the difference vectors divided by the sum of the magnitude
-        squared of the comparison efield vector over the desired section of the simulation cell"""
-
-        self.log.info('Running the global error computation for quantity %s', field)
-        # If we need to exclude calculate the indices
-        if exclude:
-            start, end = self.get_slice(self.sims[0])
-            excluded = '_excluded'
-        else:
-            start = 0
-            end = None
-            excluded = ''
-        # base = self.sims[0].conf['General']['base_dir']
-        base = self.sims[0].conf['General']['results_dir']
-        errpath = osp.join(base, 'globalerror_%s%s.dat' % (field, excluded))
-        with open(errpath, 'w') as errfile:
-            self.log.info('Computing global error for sweep %s', base)
-            # Set reference sim
-            ref_sim = self.sims[-1]
-            # Get the comparison vector
-            vecs1, normvec = self.get_comp_vec(ref_sim, field, start, end)
-            # For all other sims in the groups, compare to best estimate
-            # and write to error file
-            for i in range(0, self.num_sims - 1):
-                sim2 = self.sims[i]
-                vecs2, normvec2 = self.get_comp_vec(sim2, field, start, end)
-                self.log.info("Computing global error between numbasis %i and numbasis %i",
-                              ref_sim.conf['Simulation'][ 'params']['numbasis'],
-                              sim2.conf['Simulation']['params']['numbasis'])
-                # Get the array containing the magnitude of the difference vector at each point
-                # in space
-                mag_diff_vec = self.diff_sq(vecs1, vecs2)
-                # Check for equal lengths between norm array and diff mag
-                # array
-                if len(mag_diff_vec) != len(normvec):
-                    self.log.error( "The normalization vector has an incorrect number of elements!!!")
-                    raise ValueError
-                # Error as a percentage should be the square root of the ratio of sum of mag diff vec
-                # squared to mag efield squared
-                error = np.sqrt(np.sum(mag_diff_vec) / np.sum(normvec))
-                errfile.write('%i,%f\n' % (sim2.conf['Simulation']['params']['numbasis'], error))
-                sim2.clear_data()
-            ref_sim.clear_data()
-
-    def adjacent_error(self, field, exclude=False):
-        """Computes the global error between the vector fields of two simulations. This is the sum
-        of the magnitude squared of the difference vectors divided by the sum of the magnitude
-        squared of the comparison efield vector over the desired section of the simulation cell.
-        This computes error between adjacent sims in a sweep through basis terms."""
-
-        self.log.info('Running the adjacent error computation for quantity %s', field)
-        # If we need to exclude calculate the indices
-        if exclude:
-            start, end = self.get_slice(self.sims[0])
-            excluded = '_excluded'
-        else:
-            start = 0
-            end = None
-            excluded = ''
-        base = self.sims[0].conf['General']['results_dir']
-        errpath = osp.join(base, 'adjacenterror_%s%s.dat' % (field, excluded))
-        with open(errpath, 'w') as errfile:
-            self.log.info('Computing adjacent error for sweep %s', base)
-            # For all other sims in the groups, compare to best estimate
-            # and write to error file
-            for i in range(1, self.num_sims):
-                # Set reference sim
-                ref_sim = self.sims[i]
-                # Get the comparison vector
-                vecs1, normvec = self.get_comp_vec(ref_sim, field, start, end)
-                sim2 = self.sims[i - 1]
-                vecs2, normvec2 = self.get_comp_vec(sim2, field, start, end)
-                self.log.info("Computing adjacent error between numbasis %i and numbasis %i",
-                              ref_sim.conf['Simulation'][ 'params']['numbasis'],
-                              sim2.conf['Simulation']['params']['numbasis'])
-                # Get the array containing the magnitude of the difference vector at each point
-                # in space
-                mag_diff_vec = self.diff_sq(vecs1, vecs2)
-                # Check for equal lengths between norm array and diff mag
-                # array
-                if len(mag_diff_vec) != len(normvec):
-                    self.log.error("The normalization vector has an incorrect number of elements!!!")
-                    raise ValueError
-                # Error as a percentage should be thkkk square root of the ratio of sum of mag diff vec
-                # squared to mag efield squared
-                error = np.sqrt(np.sum(mag_diff_vec) / np.sum(normvec))
-                # self.log.info(str(error))
-                errfile.write('%i,%f\n' % (sim2.conf['Simulation']['params']['numbasis'], error))
-                sim2.clear_data()
-                ref_sim.clear_data()
+    def save_group_info(self):
+        fname = osp.join(self.results_dir, 'sims_in_group.txt')
+        with open(fname, 'w') as f:
+            for sim in self.sims:
+                f.write('{}\n'.format(sim.ID))
 
     def scalar_reduce(self, quantity, avg=False):
         """
@@ -1472,9 +1253,8 @@ class SimulationGroup:
 
         base = self.sims[0].conf['General']['results_dir']
         self.log.info('Performing scalar reduction for group at %s' % base)
-        self.log.debug('QUANTITY: %s'%quantity)
+        self.log.debug('Quantity to reduce: %s', quantity)
         group_comb = self.sims[0].get_scalar_quantity(quantity)
-        self.log.debug(group_comb.dtype)
         self.sims[0].clear_data()
         # This approach is more memory efficient then building a 2D array
         # of all the data from each group and summing along an axis
@@ -1557,7 +1337,7 @@ class SimulationGroup:
         self.log.info('Fractional Absorbtion = %f' % frac_absorb)
         return frac_absorb
 
-    def photocurrent_density(self, port='Substrate_bottom', method='flux'):
+    def photocurrent_density(self, method='flux', units='mA/cm^2'):
         """
         Computes photocurrent density assuming perfect carrier collection,
         meaning every absorbed photon gets converted to 1 collected electron.
@@ -1596,51 +1376,46 @@ class SimulationGroup:
             msg = 'Invalid method {} for computing photocurrent density'.format(method)
             raise ValueError(msg)
 
-        print(self.grouped_against)
-        if not tuple(self.grouped_against) == ('Simulation', 'params', 'frequency'):
+        if not self.grouped_against == 'Simulation/frequency':
             raise ValueError('Can only compute photocurrent density when '
                              'grouped against frequency')
 
-
-        base = osp.expandvars(self.sims[0].conf['General']['results_dir'])
-        period = self.sims[0].conf['Simulation']['params']['array_period']
+        base = self.results_dir
         self.log.info('Computing photocurrent density for group at %s', base)
-        jph_vals = np.zeros(self.num_sims)
-        freqs = np.zeros(self.num_sims)
+        jph_vals = Q_(np.zeros(self.num_sims), units)
+        freqs = Q_(np.zeros(self.num_sims), 'hertz')
         for i, sim in enumerate(self.sims):
-            freq = sim.conf['Simulation']['params']['frequency']
+            freq = sim.conf['Simulation/frequency']
             freqs[i] = freq
         # Assuming the sims have been grouped by frequency, sum over all of
         # them
         for i, sim in enumerate(self.sims):
             # freq = sim.conf['Simulation']['params']['frequency']
             # freqs[i] = freq
-            E_photon = consts.h * freq
+            E_photon = ureg.planck_constant * freq
+            try:
+                abs_arr = sim.data['power_absorbed']
+            except KeyError:
+                abs_arr = sim.power_absorbed()
             if method == 'flux':
                 # arr = sim.data['transmission_data']
                 # _, ref, trans, absorb = arr[arr.port == port.encode('utf-8')][0]
                 # incident_power = get_incident_power(sim)
                 # jph_vals[i] = incident_power * absorb / E_photon
-                try:
-                    abs_arr = sim.data['abs_per_layer']
-                except KeyError:
-                    abs_arr = sim.power_absorbed()
-                absorbed_power = np.sum(abs_arr['flux_method'])
-                jph_vals[i] = absorbed_power / (E_photon*period**2)
+                key = 'flux_method'
             else:
-                try:
-                    abs_arr = sim.data['abs_per_layer']
-                except KeyError:
-                    abs_arr = sim.power_absorbed()
-                absorbed_power = np.sum(abs_arr['int_method'])
-                jph_vals[i] = absorbed_power / (E_photon*period**2)
+                key = 'int_method'
+            row = get_record(abs_arr, 'layer', 'total')[0]
+            print('ROW: {}'.format(row))
+            absorbed_power = row[key]
+            jph_vals[i] = ureg.elementary_charge * absorbed_power / E_photon
             sim.clear_data()
         # factor of 1/10 to convert A*m^-2 to mA*cm^-2
-        Jph = .1 * consts.e * np.sum(jph_vals)
+        Jph = np.sum(jph_vals)
         outf = osp.join(base, 'jph_{}.dat'.format(method))
         with open(outf, 'w') as out:
-            out.write('%f\n' % Jph)
-        self.log.info('Jph = %f', Jph)
+            out.write('%f\n' % Jph.magnitude)
+        self.log.info('Jph = {}'.format(Jph))
         return Jph
 
     def Jsc_integrated_persim(self):
@@ -1744,8 +1519,8 @@ class SimulationGroup:
         return wght_ref, wght_trans, wght_abs
 
     def plot_power_absorbed(self, input_ax=None, plot_layer=None, quant=None,
-                                  sim_slice=(0, None), marker='--o', xlabel='',
-                                  ylabel='', title='', leg_label=''):
+                            sim_slice=(0, None), marker='--o', xlabel='',
+                            ylabel='', title='', leg_label=''):
         """
         Plots absorption per layer and error
         """
@@ -1908,6 +1683,7 @@ class SimulationGroup:
                 scalar = np.load(datfile)
             else:
                 raise ValueError('Incorrect file type in config')
+
             cs = self.get_plane(scalar, plane, pval)
             if plane == 'yz' or plane == 'zy':
                 labels = ('y [um]', 'z [um]', quantity, title)
@@ -2095,6 +1871,78 @@ def integrate3d(qarr, qax0, qax1, qax2, order=(0, 1, 2), mask=None,
     units = qarr.units*qax0.units*qax1.units*qax2.units
     return Q_(result, units)
 
+def get_plane(arr, plane, pval):
+    """
+    Gets data along a 2D plane/slice through the 3D data array for a given
+    quantity
+
+    Parameters
+    ----------
+
+    plane : str
+        Any of 'xy', 'yz', or 'xz'. Determines the plane along which the
+        slice is taken
+    pval : int
+        The index along the final unspecified direction. If plane='xy' then
+        index would index along the z direction.
+
+    quantity : str
+        The quantity whose data array you wish to take a line cut through
+
+    Returns
+    -------
+
+    np.ndarray
+        A 2D numpy array containing data on the specified plane
+    """
+
+    if plane == 'yz' or plane == 'zy':
+        # z along rows, y along columns
+        return arr[:, pval, :]
+    elif plane == 'xz' or plane == 'zx':
+        # x along columns, z along rows
+        return arr[:, :, pval]
+    elif plane == 'xy' or plane == 'yx':
+        # x along rows, y along columns
+        return arr[pval, :, :]
+
+
+def get_line(arr, line_dir, c1, c2):
+    """
+    Gets data along a line through the 3D data array for the given quantity
+    along a given direction
+
+    Parameters
+    ----------
+    line_dir : str
+        Any of 'x', 'y', or 'z'. Determines the direction along which the
+        line cut is taken, the other two coordinates remain fixed and are
+        specified by c1 and c2.
+    c1 : int
+        The integer index for the first fixed coordinate.  Indexes are in
+        x,y,z order so if line_dir='z' then c1 corresponds to x
+    c2 : int
+        The integer index for the second coordinate.
+    quantity : str
+        The quantity whose data array you wish to take a line cut through
+
+    Returns
+    -------
+
+    np.ndarray
+        A 1D numpy array containing data along the specified line cut
+    """
+
+    if line_dir == 'x':
+        # z along rows, y along columns
+        return arr[c2, :, c1]
+    elif line_dir == 'y':
+        # x along columns, z along rows
+        return arr[c2, c1, :]
+    elif line_dir == 'z':
+        # x along rows, y along columns
+        return arr[:, c1, c2]
+
 
 def counted(fn):
     def wrapper(self):
@@ -2123,7 +1971,7 @@ def _call_func(quantity, obj, args):
     return result
 
 
-def execute_plan(conf, outdir, proc_config, bandwidth, grouped_against=None, grouped_by=None):
+def execute_sim_plan(conf, outdir, proc_config, bandwidth, grouped_against=None, grouped_by=None):
     """
     Executes the given plan for the given Config object or list/tuple of Config
     objects. If conf is a single Config object, a Simulation object will
@@ -2151,32 +1999,23 @@ def execute_plan(conf, outdir, proc_config, bandwidth, grouped_against=None, gro
 
     log = logging.getLogger(__name__)
     try:
-        if isinstance(conf, list) or isinstance(conf, tuple):
-            log.info("Executing SimulationGroup plan")
-            obj = SimulationGroup([Simulation(conf=c) for c in conf],
-                                  grouped_against=grouped_against,
-                                  grouped_by=grouped_by)
-            plan = proc_config['Postprocessing']['Group']
-            ID = str(obj)
-        else:
-            log.info("Executing Simulation plan")
-            plan = proc_config['Postprocessing']['Single']
-            obj = Simulation(outdir, bandwidth, conf=conf)
-            # Concatenate the field components in each layer into a single 3D
-            # array, but add to blacklist so the concatenated arrays don't get
-            # written to disk
-            # FIXME: This is grossly memory-inefficient
-            # for f in ('Ex', 'Ey', 'Ez'):
-            #     ks = ['{}_{}'.format(lname, f) for lname in obj.layers.keys()]
-            #     obj.data[f] = np.concatenate([obj.data[k] for k in ks])
-            #     obj.data.add_to_blacklist(f)
-            ID = obj.ID
+        log.info("Executing Simulation plan")
+        plan = proc_config['Postprocessing']['Single']
+        sim = Simulation(outdir, bandwidth, conf=conf)
+        # Concatenate the field components in each layer into a single 3D
+        # array, but add to blacklist so the concatenated arrays don't get
+        # written to disk
+        # FIXME: This is grossly memory-inefficient
+        # for f in ('Ex', 'Ey', 'Ez'):
+        #     ks = ['{}_{}'.format(lname, f) for lname in sim.layers.keys()]
+        #     sim.data[f] = np.concatenate([sim.data[k] for k in ks])
+        #     sim.data.add_to_blacklist(f)
 
         for task_name in ('crunch', 'plot'):
             if task_name not in plan:
                 continue
             task = plan[task_name]
-            log.info("Beginning %s for obj %s", task_name, ID)
+            log.info("Beginning %s for sim %s", task_name, sim.ID)
             for func, data in task.items():
                 if not data['compute']:
                     continue
@@ -2185,35 +2024,69 @@ def execute_plan(conf, outdir, proc_config, bandwidth, grouped_against=None, gro
                 if argsets and isinstance(argsets[0], list):
                     for argset in argsets:
                         if argset:
-                            _call_func(func, obj, argset)
+                            _call_func(func, sim, argset)
                         else:
-                            _call_func(func, obj, [])
+                            _call_func(func, sim, [])
                 else:
                     if argsets:
-                        _call_func(func, obj, argsets)
+                        _call_func(func, sim, argsets)
                     else:
-                        _call_func(func, obj, [])
-            log.info("Completed %s for obj %s", task_name, ID)
-        log.info("Plan execution for obj %s complete", ID)
-        if isinstance(obj, Simulation):
-            log.info("Saving and clearing data for Simulation %s", ID)
-            if obj.conf['General']['sample_dict']:
-                obj.write_data(blacklist=('normE', 'normEsquared', 'Ex', 'Ey',
-                                          'Ez'))
-            else:
-                obj.write_data()
-            obj.clear_data()
-            obj.data.close()
-        else:
-            log.info("Clearing data for SimulationGroup %s", ID)
-            for sim in obj.sims:
-                sim.clear_data()
-                sim.data.close()
+                        _call_func(func, sim, [])
+            log.info("Completed %s for sim %s", task_name, sim.ID)
+        log.info("Plan execution for sim %s complete", sim.ID)
+        log.info("Saving and clearing data for Simulation %s", sim.ID)
+        sim.write_data()
+        sim.clear_data()
+        sim.data.close()
     except Exception as e:
         if isinstance(conf, list) or isinstance(conf, tuple):
             log.error('Group raised exception')
         else:
             log.error('Conf %s raised exception', conf.ID)
+        print(e)
+        raise
+
+
+def execute_group_plan(sim_confs_and_dirs, base_dir, proc_config, bandwidth, grouped_by=None,
+                       grouped_against=None):
+    log = logging.getLogger(__name__)
+    try:
+        log.info("Executing SimulationGroup plan")
+        plan = proc_config['Postprocessing']['Group']
+        sim_group = SimulationGroup(sim_confs_and_dirs, base_dir, bandwidth,
+                                    grouped_by=grouped_by,
+                                    grouped_against=grouped_against)
+        sim_group.save_group_info()
+        for task_name in ('crunch', 'plot'):
+            if task_name not in plan:
+                continue
+            task = plan[task_name]
+            log.info("Beginning %s for group %s", task_name, sim_group.ID)
+            for func, data in task.items():
+                if not data['compute']:
+                    continue
+                else:
+                    argsets = data['args']
+                if argsets and isinstance(argsets[0], list):
+                    for argset in argsets:
+                        if argset:
+                            _call_func(func, sim_group, argset)
+                        else:
+                            _call_func(func, sim_group, [])
+                else:
+                    if argsets:
+                        _call_func(func, sim_group, argsets)
+                    else:
+                        _call_func(func, sim_group, [])
+            log.info("Completed %s for group %s", task_name, sim_group.ID)
+        log.info("Clearing data for SimulationGroup %s", sim_group.ID)
+        for sim in sim_group.sims:
+            log.info("Saving and clearing data for Simulation %s", sim.ID)
+            sim.clear_data()
+            sim.data.close()
+    except Exception as e:
+        # log.error('Group {} raised exception'.format(sim_group.ID))
+        log.error('Group raised exception')
         print(e)
         raise
 
@@ -2285,11 +2158,11 @@ class Processor:
         self.sim_confs = confs
         return confs, t_sweeps
 
-    def make_plans(self):
+    def make_processing_configs(self):
         """
-        Build out the list of postprocessing plans by parsing the
-        postprocessing plan template with the configuration of each simulation
-        accessible in names
+        Build out the list of postprocessing configurations for each individual
+        simulation by parsing the postprocessing template with the
+        configuration of each simulation accessible in names
         """
         self.log.info('Building simulation plans from template plan')
         ops = {'simpleeval': {'operators': UNSAFE_OPERATORS}}
@@ -2353,7 +2226,7 @@ class Processor:
         """
 
         confs = [tup[0] for tup in self.sim_confs.values()]
-        self.sim_groups = _group_against(self.sim_confs)
+        self.sim_groups = _group_against(confs, key, **kwargs)
         self.grouped_against = key
 
     def group_by(self, key, **kwargs):
@@ -2385,7 +2258,8 @@ class Processor:
             A singly nested list of lists. Each inner list contains a group of
             simulations.
         """
-        self.sim_groups = _group_by(self.sim_confs, key, **kwargs)
+        confs = [tup[0] for tup in self.sim_confs.values()]
+        self.sim_groups = _group_by(confs, key, **kwargs)
         self.grouped_by = key
 
     def param_vals(self, parseq):
@@ -2400,34 +2274,55 @@ class Processor:
                 vals.append(val)
         return vals
 
-    def _serial_process(self, confs_and_plans, grouped_by=None,
-                        grouped_against=None):
+    def _process(self, func, args_list, kwargs_list):
         """
-        """
-        self.log.info('Beginning serial processing ...')
-        for conf, conf_path, plan, bandwidth in confs_and_plans:
-            outdir = os.path.dirname(conf_path)
-            execute_plan(conf, outdir, plan, bandwidth,
-                         grouped_against=grouped_against,
-                         grouped_by=grouped_by)
+        Run function `func` serially for each pair of positional and keyword
+        arguments. Basically just:
 
-    def _parallel_process(self, confs_and_plans, grouped_by=None,
-                          grouped_against=None):
+        .. code-block:: python
+            for a, kw in zip(args, kwargs):
+                func(*a, **kw)
+
+        func : callable
+            The function to run
+        args_list : list
+            A list of tuples/lists containing position arguments that will be expanded and passed to
+            `func`
         """
-        """
-        self.log.info('Beginning parallel processing using %s cores ...',
-                      str(self.num_cores))
-        # args_list = list(zip(confs, plans,
-        #                      repeat(grouped_against),
-        #                      repeat(grouped_by)))
-        args_list = []
-        for conf, conf_path, plan, bandwidth in confs_and_plans:
-            outdir = os.path.dirname(conf_path)
-            tup = (conf, outdir, plan, bandwidth, grouped_against, grouped_by)
-            args_list.append(tup)
-        with mp.Pool(processes=self.num_cores) as pool:
-            pool.starmap(execute_plan, args_list)
-        pool.join()
+        if self.num_cores:
+            self.log.info('Beginning parallel processing using %s cores ...',
+                          str(self.num_cores))
+            with mp.Pool(processes=self.num_cores) as pool:
+                results = {}
+                for i, (a, kw) in enumerate(zip(args_list, kwargs_list)):
+                    res = pool.apply_async(func, a, kw)
+                    results[i] = res
+                while results:
+                    inds = list(results.keys())
+                    for ind in inds:
+                        res = results[ind]
+                        self.log.debug('Sim #%i', ind)
+                        if res.ready():
+                            success = res.successful()
+                            if success:
+                                self.log.debug('Sim #%i completed successfully!', ind)
+                                res.get(10)
+                                self.log.debug('Done getting Sim #%i', ind)
+                            else:
+                                self.log.warning('Sim #%i raised exception!',
+                                                 ind)
+                                res.wait(10)
+                            del results[ind]
+                        else:
+                            self.log.debug('Sim #%i not ready', ind)
+                    self.log.debug('Cleaned results: %s',
+                                   str(list(results.keys())))
+                    time.sleep(1)
+            pool.join()
+        else:
+            self.log.info('Beginning serial processing ...')
+            for a, kw in zip(args_list, kwargs_list):
+                func(*a, **kw)
 
     def calculate_bandwidth(self):
         confs = [tup[0] for tup in self.sim_confs.values()]
@@ -2447,41 +2342,54 @@ class Processor:
                 grouped_against=None, grouped_by=None):
         # We need to calculate the bandwidth
         bandwidth = self.calculate_bandwidth()
+        configs = self.make_processing_configs()
         # First process all the sims
         if crunch or plot:
             self.log.info('Processing individual simulations')
             # Each invididual simulation could have a different postprocessing
             # plan depending on the parameters of that simulation.
-            plans = self.make_plans()
-            for plan in plans.values():
+            for config in configs.values():
                 if not crunch:
-                    del plan['Postprocessing']['Single']['crunch']
+                    del config['Postprocessing']['Single']['crunch']
                 if not plot:
-                    del plan['Postprocessing']['Single']['plot']
-            if len(plans) != len(self.sim_confs):
+                    del config['Postprocessing']['Single']['plot']
+            if len(configs) != len(self.sim_confs):
                 raise ValueError('Must have same number of plans as simulations!')
-            data = [self.sim_confs[ID] + (plans[ID], bandwidth) for ID in plans.keys()]
-            if self.num_cores:
-                self._parallel_process(data, grouped_by=grouped_by,
-                                       grouped_against=grouped_against)
-            else:
-                self._serial_process(data, grouped_by=grouped_by,
-                                     grouped_against=grouped_against)
+            # NOTE: self.sim_confs[ID] = (Config_object, conf_path)
+            args_list = [(self.sim_confs[ID][0],
+                          osp.dirname(self.sim_confs[ID][1]), configs[ID],
+                          bandwidth) for ID in configs.keys()]
+            kws_list = [{'grouped_by': grouped_by, 'grouped_against':
+                         grouped_against} for i in range(len(args_list))]
+            self._process(execute_sim_plan, args_list, kws_list)
         else:
             self.log.info("No processing to do for individual simulations!")
         # Process groups
-        if gcrunch or gplot:
+        if (gcrunch or gplot) and self.sim_groups:
             self.log.info('Processing simulation groups')
-            plan = copy.deepcopy(self.gconf['Postprocessing']['Group'])
-            if not gcrunch:
-                del plan['crunch']
-            if not gplot:
-                del plan['plot']
-            if self.num_cores:
-                self._parallel_process(plan, grouped_by=grouped_by,
-                                       grouped_against=grouped_against)
-            else:
-                self._serial_process(plan, grouped_by=grouped_by,
-                                     grouped_against=grouped_against)
+            group_configs = [configs[group[0].ID] for group in self.sim_groups]
+            if len(group_configs) != len(self.sim_groups):
+                raise ValueError('Must have same number of group plans as groups!')
+            for config in group_configs:
+                if not gcrunch:
+                    del config['Postprocessing']['Group']['crunch']
+                if not gplot:
+                    del config['Postprocessing']['Group']['plot']
+            # TODO: Fix this. It's kind of an icky hack because each Simulation
+            # needs to know the directory where its data file is stored. This
+            # will go away when all the data is stored in a single master HDF5
+            # file
+            for i in range(len(self.sim_groups)):
+                self.sim_groups[i] = [(conf,
+                                       osp.dirname(self.sim_confs[conf.ID][1]))
+                                      for conf in self.sim_groups[i]]
+            args_list = [(group, self.base_dir, plan, bandwidth) for group, plan in
+                         zip(self.sim_groups, group_configs)]
+            kws_list = [{'grouped_by': grouped_by, 'grouped_against':
+                         grouped_against} for i in range(len(args_list))]
+            self._process(execute_group_plan, args_list, kws_list)
         else:
-            self.log.info("No processing to do for simulation groups!")
+            if not self.sim_groups:
+                self.log.info("No available simulation groups to process!")
+            else:
+                self.log.info("No processing to do for simulation groups!")

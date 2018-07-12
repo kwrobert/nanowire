@@ -436,6 +436,36 @@ def arithmetic_arange(a, b, dx0, d, endpoint=True):
         pts = pts[0:-1]
     return pts
 
+def get_record(arr, field, value):
+    """
+    Retrieve the record(s) from a numpy structured/record array where the given
+    field matches the given value.
+
+    Parameters
+    ----------
+
+    arr : np.ndarray, np.recarray
+        A structured numpy array to query
+    field : str
+        The field to search for matches
+    value : any
+        The value that must be matched by the field in the returned rows
+
+    Returns
+    -------
+
+    list
+        A list of matching records
+    """
+
+    if isinstance(value, str):
+        value = value.encode('utf-8')
+    matching_rows = []
+    for row in arr:
+        if row[field] == value:
+            matching_rows.append(row)
+    return matching_rows
+
 
 def ipv4():
     """

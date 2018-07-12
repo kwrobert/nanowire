@@ -208,6 +208,12 @@ def postprocess(db, template, base_dir, params, query, table_path, table_name,
     proc = post.Processor(db, template, base_dir=base_dir, num_cores=num_cores)
     proc.load_confs(base_dir=base_dir, query=query,
                     table_path=table_path, table_name=table_name)
+    if group_against:
+        proc.group_against(group_against)
+    elif group_against:
+        proc.group_by(group_by)
+    else:
+        click.secho('WARNING: No grouping specified', fg='yellow')
     if print_ids:
         for conf in proc.sim_confs:
             print(conf.ID)

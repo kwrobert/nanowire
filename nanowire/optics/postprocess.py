@@ -1251,15 +1251,13 @@ class SimulationGroup:
         computed
         """
 
-        base = self.sims[0].conf['General']['results_dir']
+        base = self.results_dir
         self.log.info('Performing scalar reduction for group at %s' % base)
         self.log.debug('Quantity to reduce: %s', quantity)
         group_comb = self.sims[0].get_scalar_quantity(quantity)
         self.sims[0].clear_data()
-        # This approach is more memory efficient then building a 2D array
-        # of all the data from each group and summing along an axis
         for sim in self.sims[1:]:
-            self.log.debug(sim.id)
+            self.log.debug(sim.ID)
             quant = sim.get_scalar_quantity(quantity)
             self.log.debug(quant.dtype)
             group_comb += quant
@@ -1271,71 +1269,11 @@ class SimulationGroup:
             fname = 'scalar_reduce_%s' % quantity
             path = osp.join(base, fname)
         ftype = self.sims[0].conf['General']['save_as']
-        if ftype == 'npz':
-            np.save(path, group_comb)
-        elif ftype == 'hdf5':
+        if ftype == 'hdf5':
             self.log.warning('FIX HDF5 SCALAR REDUCE SAVING')
             np.save(path, group_comb)
         else:
             raise ValueError('Invalid file type in config')
-
-    def fractional_absorbtion(self, port='Substrate'):
-        """
-        Computes the fraction of the incident spectrum that is absorbed by
-        the device. This is a unitless number, and its interpretation somewhat
-        depends on the units you express the incident spectrum in. If you
-        expressed your incident spectrum in photon number, this can be
-        interpreted as the fraction of incident photons that were absorbed. If
-        you expressed your incident spectrum in terms of power per unit area,
-        then this can be interpreted as the fraction of incident power per unit
-        area that gets absorbed. In summary, its the fraction of whatever you
-        put in that is being absorbed by the device.
-        """
-
-        base = self.sims[0].conf['General']['results_dir']
-        self.log.info('Computing fractional absorbtion for group at %s' % base)
-        vals = np.zeros(self.num_sims)
-        freqs = np.zeros(self.num_sims)
-        wvlgths = np.zeros(self.num_sims)
-        spectra = np.zeros(self.num_sims)
-        path = self.sims[0].conf['Simulation']['input_power_wv']
-        wv_vec, p_vec = np.loadtxt(path, usecols=(0, 2), unpack=True, delimiter=',')
-        p_wv = interpolate.interp1d(wv_vec, p_vec, kind='linear',
-                                    bounds_error=False, fill_value='extrapolate')
-        # Assuming the sims have been grouped by frequency, sum over all of
-        # them
-        for i, sim in enumerate(self.sims):
-            # Unpack data for the port we passed in as an argument
-            ref, trans, absorb = sim.data['transmission_data'][port]
-            freq = sim.conf['Simulation']['params']['frequency']
-            wvlgth = consts.c / freq
-            wvlgth_nm = wvlgth * 1e9
-            freqs[i] = freq
-            wvlgths[i] = wvlgth
-            # Get solar power from chosen spectrum
-            # Get p at wvlength by interpolation
-            sun_pow = p_wv(wvlgth_nm)
-            spectra[i] = sun_pow * wvlgth_nm
-            vals[i] = absorb * sun_pow * wvlgth_nm
-            sim.clear_data()
-        # Use Trapezoid rule to perform the integration. Note all the
-        # necessary factors of the wavelength have already been included
-        # above
-        wvlgths = wvlgths[::-1]
-        vals = vals[::-1]
-        spectra = spectra[::-1]
-        integrated_absorbtion = intg.trapz(vals, x=wvlgths * 1e9)
-        power = intg.trapz(spectra, x=wvlgths * 1e9)
-        # factor of 1/10 to convert A*m^-2 to mA*cm^-2
-        #wv_fact = consts.e/(consts.c*consts.h*10)
-        #wv_fact = .1
-        #Jsc = (Jsc*wv_fact)/power
-        frac_absorb = integrated_absorbtion / power
-        outf = osp.join(base, 'fractional_absorbtion.dat')
-        with open(outf, 'w') as out:
-            out.write('%f\n' % frac_absorb)
-        self.log.info('Fractional Absorbtion = %f' % frac_absorb)
-        return frac_absorb
 
     def photocurrent_density(self, method='flux', units='mA/cm^2'):
         """
@@ -1418,106 +1356,6 @@ class SimulationGroup:
         self.log.info('Jph = {}'.format(Jph))
         return Jph
 
-    def Jsc_integrated_persim(self):
-        for i, sim in enumerate(self.sims):
-            try:
-                genRate = sim.data['genRate']
-            except FileNotFoundError:
-                genRate = sim.genRate()
-            # Gen rate in cm^-3. Gotta convert lengths here from um to cm
-            z_vals = self.sims[0].Z
-            x_vals = self.sims[0].X
-            y_vals = self.sims[0].Y
-            z_integral = intg.trapz(genRate, x=z_vals, axis=0)
-            x_integral = intg.trapz(z_integral, x=x_vals, axis=0)
-            y_integral = intg.trapz(x_integral, x=y_vals, axis=0)
-            # z_integral = intg.simps(genRate, x=z_vals, axis=0)
-            # x_integral = intg.simps(z_integral, x=x_vals, axis=0)
-            # y_integral = intg.simps(x_integral, x=y_vals, axis=0)
-            # Convert period to cm and current to mA
-            Jsc = 1000*(consts.e/(sim.period*1e-4)**2)*y_integral
-            self.log.info('Sim %s Jsc Integrate Value: %f', sim.id, Jsc)
-
-
-    def Jsc_integrated(self):
-        """
-        Compute te photocurrent density by performing a volume integral of the
-        generation rate
-        """
-        fname = 'scalar_reduce_genRate.npy'
-        base = self.sims[0].conf['General']['results_dir']
-        self.log.info('Computing integrated Jsc for group at %s', base)
-        path = osp.join(base, fname)
-        try:
-            genRate = np.load(path)
-        except FileNotFoundError:
-            self.scalar_reduce('genRate')
-            genRate = np.load(path)
-        # Gen rate in cm^-3. Gotta convert lengths here from um to cm
-        z_vals = self.sims[0].Z
-        x_vals = self.sims[0].X
-        y_vals = self.sims[0].Y
-        z_integral = intg.trapz(genRate, x=z_vals, axis=0)
-        x_integral = intg.trapz(z_integral, x=x_vals, axis=0)
-        y_integral = intg.trapz(x_integral, x=y_vals, axis=0)
-        # z_integral = intg.simps(genRate, x=z_vals, axis=0)
-        # x_integral = intg.simps(z_integral, x=x_vals, axis=0)
-        # y_integral = intg.simps(x_integral, x=y_vals, axis=0)
-        # Convert period to cm and current to mA
-        Jsc = 1000*(consts.e/(self.sims[0].period*1e-4)**2)*y_integral
-        outf = osp.join(base, 'jsc_integrated.dat')
-        with open(outf, 'w') as out:
-            out.write('%f\n' % Jsc)
-        self.log.info('Jsc_integrated = %f', Jsc)
-        return Jsc
-
-    def weighted_transmissionData(self, port='Substrate'):
-        """Computes spectrally weighted absorption,transmission, and reflection"""
-
-        base = self.sims[0].conf['General']['results_dir']
-        self.log.info('Computing spectrally weighted transmission data for group at %s' % base)
-        abs_vals = np.zeros(self.num_sims)
-        ref_vals = np.zeros(self.num_sims)
-        trans_vals = np.zeros(self.num_sims)
-        freqs = np.zeros(self.num_sims)
-        wvlgths = np.zeros(self.num_sims)
-        spectra = np.zeros(self.num_sims)
-        # Get solar power from chosen spectrum
-        path = self.sims[0].conf['Simulation']['input_power_wv']
-        wv_vec, p_vec = np.loadtxt(path, usecols=(0, 2), unpack=True, delimiter=',')
-        # Get interpolating function for power
-        p_wv = interpolate.interp1d(wv_vec, p_vec, kind='linear',
-                                    bounds_error=False, fill_value='extrapolate')
-        # Assuming the leaves contain frequency values, sum over all of them
-        for i, sim in enumerate(self.sims):
-            ref, trans, absorb = sim.data['transmission_data'][port]
-            freq = sim.conf['Simulation']['params']['frequency']
-            wvlgth = consts.c / freq
-            wvlgth_nm = wvlgth * 1e9
-            freqs[i] = freq
-            wvlgths[i] = wvlgth
-            sun_pow = p_wv(wvlgth_nm)
-            spectra[i] = sun_pow * wvlgth_nm
-            abs_vals[i] = sun_pow * absorb * wvlgth_nm
-            ref_vals[i] = sun_pow * ref * wvlgth_nm
-            trans_vals[i] = sun_pow * trans * wvlgth_nm
-        # Now integrate all the weighted spectra and divide by the power of
-        # the spectra
-        wvlgths = wvlgths[::-1]
-        abs_vals = abs_vals[::-1]
-        ref_vals = ref_vals[::-1]
-        trans_vals = trans_vals[::-1]
-        spectra = spectra[::-1]
-        power = intg.trapz(spectra, x=wvlgths * 1e9)
-        wght_ref = intg.trapz(ref_vals, x=wvlgths * 1e9) / power
-        wght_abs = intg.trapz(abs_vals, x=wvlgths * 1e9) / power
-        wght_trans = intg.trapz(trans_vals, x=wvlgths) / power
-        out = osp.join(base, 'weighted_transmission_data.dat')
-        with open(out, 'w') as outf:
-            outf.write('# Reflection, Transmission, Absorbtion\n')
-            outf.write('%f,%f,%f' % (wght_ref, wght_trans, wght_abs))
-        return wght_ref, wght_trans, wght_abs
-
     def plot_power_absorbed(self, input_ax=None, plot_layer=None, quant=None,
                             sim_slice=(0, None), marker='--o', xlabel='',
                             ylabel='', title='', leg_label=''):
@@ -1528,7 +1366,6 @@ class SimulationGroup:
         if self.grouped_against is None:
             raise ValueError("Can only call plot_power_absorbed when "
                              "sims are grouped against a parameter")
-        results_dir = self.sims[0].conf['General']['results_dir']
         results_dict = {}
         xvals = np.zeros(len(self.sims[sim_slice[0]:sim_slice[1]]))
         for i, sim in enumerate(self.sims[sim_slice[0]:sim_slice[1]]):
@@ -1590,8 +1427,7 @@ class SimulationGroup:
                     fig, ax = plt.subplots()
                 else:
                     ax = input_ax
-                pfile = osp.join(results_dir,
-                                     '{}_{}.png'.format(layer, name))
+                pfile = osp.join(self.results_dir, '{}_{}.png'.format(layer, name))
                 print(np.amin(results[ind]))
                 ax.plot(xvals, results[ind], marker, label=leg_label)
                 ylims = ax.get_ylim()
@@ -1785,6 +1621,7 @@ class SimulationGroup:
             plt.legend(loc='best')
             plt.savefig(plot_path)
             plt.close()
+
 
 def scatter3d(x, y, z, cs=None, colorsMap='jet'):
     fig = plt.figure()

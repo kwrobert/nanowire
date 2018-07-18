@@ -511,6 +511,8 @@ class Simulation:
         # to actually correspond to the center of the nanowire
         rvec = Q_(np.linspace(0, rmax.magnitude, rsamp), rmax.units)
         thvec = Q_(np.linspace(0, 2 * np.pi, thsamp), 'radians')
+        self.data['radial_coords'] = rvec
+        self.data['angle_coords'] = thvec   
         cyl_coords = Q_(np.zeros((len(rvec) * len(thvec), 2)), rmax.units)
         start = 0
         for r in rvec:
@@ -1215,6 +1217,8 @@ class SimulationGroup:
         #     sim.get_layers()
         self.log = logging.getLogger(__name__)
         self.num_sims = len(self.sims)
+        fpath = osp.join(self.results_dir, 'data.hdf5')
+        self.data = HDF5DataManager(fpath, group_path='/', mode='a', logger=self.log)
 
     def get_group_info(self):
         all_ids = ''.join(conf.ID for conf in self.sim_confs)
@@ -1240,9 +1244,34 @@ class SimulationGroup:
 
     def save_group_info(self):
         fname = osp.join(self.results_dir, 'sims_in_group.txt')
+        # TODO: Add list saving to HDF5DataManager so this works
+        # sim_ids = [] 
         with open(fname, 'w') as f:
             for sim in self.sims:
                 f.write('{}\n'.format(sim.ID))
+                # sim_ids.append(sim.ID)
+        # self.data['sim_ids'] = sim_ids
+
+    def write_data(self, blacklist=('normE', 'normEsquared')):
+        """
+        Writes the data. This is a simple wrapper around the write_data()
+        method of the DataManager object, with some code to compute the time it
+        took to perform the write operation
+        """
+        self.data.write_data(blacklist=blacklist)
+
+    def clear_data(self):
+        """
+        Clears all the data from the self.data DataManager object to free up memory
+        """
+        if isinstance(self.data, DataManager):
+            self.data._update_keys(clear=True)
+        else:
+            self.data = {}
+        for sim in self.sims:
+            self.log.info("Saving and clearing data for Simulation %s", sim.ID)
+            sim.clear_data()
+            sim.data.close()
 
     def scalar_reduce(self, quantity, avg=False):
         """
@@ -1251,11 +1280,11 @@ class SimulationGroup:
         computed
         """
 
-        base = self.results_dir
-        self.log.info('Performing scalar reduction for group at %s' % base)
+        self.log.info('Performing scalar reduction for group at %s',
+                      self.results_dir)
         self.log.debug('Quantity to reduce: %s', quantity)
         group_comb = self.sims[0].get_scalar_quantity(quantity)
-        self.sims[0].clear_data()
+        # self.sims[0].clear_data()
         for sim in self.sims[1:]:
             self.log.debug(sim.ID)
             quant = sim.get_scalar_quantity(quantity)
@@ -1267,11 +1296,16 @@ class SimulationGroup:
             fname = 'scalar_reduce_avg_%s' % quantity
         else:
             fname = 'scalar_reduce_%s' % quantity
-            path = osp.join(base, fname)
         ftype = self.sims[0].conf['General']['save_as']
         if ftype == 'hdf5':
-            self.log.warning('FIX HDF5 SCALAR REDUCE SAVING')
-            np.save(path, group_comb)
+            self.data[fname] = group_comb
+            self.data['xcoords'] = self.sims[0].data['xcoords']
+            self.data['ycoords'] = self.sims[0].data['ycoords']
+            self.data['zcoords'] = self.sims[0].data['zcoords']
+            if 'radial_coords' in self.sims[0].data:
+                self.data['radial_coords'] = self.sims[0].data['radial_coords']
+            if 'angle_coords' in self.sims[0].data:
+                self.data['angle_coords'] = self.sims[0].data['angle_coords']
         else:
             raise ValueError('Invalid file type in config')
 
@@ -1916,11 +1950,10 @@ def execute_group_plan(sim_confs_and_dirs, base_dir, proc_config, bandwidth, gro
                     else:
                         _call_func(func, sim_group, [])
             log.info("Completed %s for group %s", task_name, sim_group.ID)
+        log.info("Writing data for SimulationGroup %s", sim_group.ID)
+        sim_group.write_data()
         log.info("Clearing data for SimulationGroup %s", sim_group.ID)
-        for sim in sim_group.sims:
-            log.info("Saving and clearing data for Simulation %s", sim.ID)
-            sim.clear_data()
-            sim.data.close()
+        sim_group.clear_data()
     except Exception as e:
         # log.error('Group {} raised exception'.format(sim_group.ID))
         log.error('Group raised exception')
@@ -2170,7 +2203,8 @@ class Processor:
                 bandwidth = abs(c1['Simulation/frequency'] -
                                 c2['Simulation/frequency'])
                 bandwidths.append(2*bandwidth)
-        if not all(el == bandwidths[0] for el in bandwidths[1:]):
+        print('BANDWIDTHS: ', bandwidths)
+        if not all(np.isclose(el, bandwidths[0]) for el in bandwidths[1:]):
             msg = 'Cannot currently handle nonuniform frequency sweeps'
             raise NotImplementedError(msg)
         return bandwidths[0]

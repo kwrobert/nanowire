@@ -9,6 +9,7 @@ from matplotlib.path import Path
 from collections import OrderedDict
 from nanowire.optics.utils.utils import get_nk
 from nanowire.utils.utils import sorted_dict
+from nanowire.utils.config import Config
 
 
 def get_mask_by_shape(shape, xcoords, ycoords):
@@ -52,7 +53,7 @@ def get_mask_by_material(layer, material, x, y):
     return mask
 
 
-def get_layers(sim):
+def get_layers(obj):
     """
     Creates an OrderedDict of layer objects sorted with the topmost layer first
 
@@ -64,12 +65,16 @@ def get_layers(sim):
     :rtype: OrderedDict
     """
 
-    ordered_layers = sorted_dict(sim.conf['Layers'])
-    base_unit = sim.conf['General/base_unit']
+    if isinstance(obj, Config):
+        conf = obj
+    else:
+        conf = obj.conf
+    ordered_layers = sorted_dict(conf['Layers'])
+    base_unit = conf['General/base_unit']
     start = 0*base_unit
     layers = OrderedDict()
-    materials = sim.conf['Materials']
-    max_depth = sim.conf['General/max_depth']
+    materials = conf['Materials']
+    max_depth = conf['General/max_depth']
     for layer, ldata in ordered_layers.items():
         # Dont add the layer if we don't have field data for it because its
         # beyond max_depth
@@ -85,7 +90,8 @@ def get_layers(sim):
             g = ldata['geometry']
         else:
             g = {}
-        layers[layer] = Layer(layer, start, end, sim.period,
+        layers[layer] = Layer(layer, start, end,
+                              conf['Simulation/array_period'],
                               base_material=ldata['base_material'],
                               materials=materials, geometry=g)
         start = end
@@ -267,3 +273,43 @@ class Layer:
             # print(n_matrix)
             k_matrix = np.where(mask, shape_kvals, k_matrix)
         return n_matrix, k_matrix
+
+    def get_mask_by_shape(self, shape, xcoords, ycoords):
+        """
+        Given a sympy shape object (Circle, Triangle, etc) and two 1D arrays
+        containing the x and y coordinates, return a mask that determines
+        whether or not a given (x, y) point in within the shape. True means
+        inside, False means outside
+        """
+        if isinstance(shape, Ellipse):
+            expr = shape.equation()
+            circ_f = lambdify((_x, _y), expr, modules='numpy', dummify=False)
+            xv, yv = np.meshgrid(ycoords, xcoords)
+            e = circ_f(xv, yv)
+            mask = np.where(e > 0, 0, 1)
+        else:
+            polygon = Path(shape.vertices)
+            mask = polygon.contains_points(list(itertools.product(xcoords,
+                                                                  ycoords)))
+        return mask.astype(int)
+
+    def get_mask_by_material(self, material, x, y):
+        """
+        Given a layer object, the name of a material in the layer and two 1D
+        arrays containing the x and y coordinates, return a mask that
+        determines whether or not a given (x, y) point in within the given
+        material. True means inside, False means outside
+        """
+
+        if material == self.base_material:
+            mask = np.ones((len(x), len(y)), dtype=int)
+        else:
+            mask = np.zeros((len(x), len(y)), dtype=int)
+
+        for shape_name, (shape_obj, mat_name) in self.shapes.items():
+            shape_mask = get_mask_by_shape(shape_obj, x, y)
+            if mat_name == material:
+                mask[shape_mask == 1] = 1
+            else:
+                mask[shape_mask == 1] = 0
+        return mask

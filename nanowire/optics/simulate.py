@@ -361,6 +361,7 @@ class SimulationManager:
             num_procs = len(to_run)
         self.log.info('Executing sims in parallel using %i cores ...', num_procs)
         pool = mp.Pool(processes=num_procs)
+        # pool = mp.Pool(processes=num_procs, maxtasksperchild=2)
         total_sims = len(to_run)
         remaining_sims = len(to_run)
         def callback(ind):
@@ -512,7 +513,7 @@ class SimulationManager:
             to_run = [(self.sim_confs[ID][0],
                        osp.dirname(self.sim_confs[ID][1])) for ID in to_run_ids]
         else:
-            to_run = list(self.sim_confs.values())
+            to_run = [(c, osp.dirname(p)) for c, p in self.sim_confs.values()]
         self.log.info('Total sims to execute: %i', len(to_run))
         # if self.gconf['General']['execution'] == 'serial':
         #     self.run_serial(to_run, func=func)

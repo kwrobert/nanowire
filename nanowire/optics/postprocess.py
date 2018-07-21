@@ -229,7 +229,7 @@ class Simulation:
         """
 
         ftype = self.conf['General']['save_as'].lower()
-        amplitude = get_incident_amplitude(
+        amplitude = get_incident_amplitude(
             self.spectrum,
             self.conf['Simulation/frequency'],
             self.conf['Simulation/polar_angle'],
@@ -808,10 +808,13 @@ class Simulation:
         else:
             flux_jph.ito(ureg.milliampere)
             integ_jph.ito(ureg.milliampere)
-        # self.log.info('Flux Method Jph = {}'.format(flux_jph))
-        # self.log.info('Integral Method Jph = {}'.format(integ_jph))
-        self.data['jph_flux_method'] = flux_jph
-        self.data['jph_integral_method'] = integ_jph
+        self.log.info('Flux Method Jph = {}'.format(flux_jph))
+        self.log.info('Integral Method Jph = {}'.format(integ_jph))
+        # Prevent numpy scalars from being stored inside the Quantity object
+        flux_jph = Q_(float(flux_jph.magnitude), flux_jph.units)
+        integ_jph = Q_(float(integ_jph.magnitude), integ_jph.units)
+        self.data['jph_flux_method'] = flux_jph 
+        self.data['jph_integral_method'] = integ_jph 
         return flux_jph, integ_jph
 
     def plot_q_values(self):
@@ -2202,7 +2205,7 @@ class Processor:
             for c1, c2 in pairwise(group):
                 bandwidth = abs(c1['Simulation/frequency'] -
                                 c2['Simulation/frequency'])
-                bandwidths.append(2*bandwidth)
+                bandwidths.append(bandwidth)
         print('BANDWIDTHS: ', bandwidths)
         if not all(np.isclose(el, bandwidths[0]) for el in bandwidths[1:]):
             msg = 'Cannot currently handle nonuniform frequency sweeps'

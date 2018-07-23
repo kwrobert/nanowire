@@ -1,5 +1,7 @@
 import shutil
 # import psutil
+import tracemalloc
+import linecache
 import os
 import os.path as osp
 import posixpath
@@ -165,9 +167,9 @@ def run_sim(conf, output_dir):
     if isinstance(conf, str):
         conf = Config.fromYAML(conf)
     log = logging.getLogger(__name__)
+    start = time.time()
+    sim = Simulator(conf, output_dir)
     try:
-        start = time.time()
-        sim = Simulator(copy.deepcopy(conf), output_dir)
         sim.setup()
         log.info('Executing sim %s', sim.ID[0:10])
         sim.save_all()
@@ -176,6 +178,9 @@ def run_sim(conf, output_dir):
         end = time.time()
         runtime = end - start
         log.info('Simulation %s completed in %.2f seconds!', sim.ID[0:10], runtime)
+        del sim
+    except KeyboardInterrupt:
+        raise
     except:
         trace = traceback.format_exc()
         msg = 'Sim {} raised the following exception:\n{}'.format(sim.ID,
@@ -346,11 +351,35 @@ class SimulationManager:
             A dict of extra keyword arguments to be passed to the provided
             callable
         """
+        # tracemalloc.start(10)
         self.log.info('Executing sims serially')
         counter = 0
         total = len(to_run)
+        snaps = []
         for conf, conf_path in to_run:
+            # print('#'*25)
+            # print('ITERATION {}'.format(counter))
             func(conf, conf_path)
+            # snap = tracemalloc.take_snapshot()
+            # snaps.append(snap)
+            # print('*'*25)
+            # print('Current statistics: ')
+            # display_top(snap)
+            # print('*'*25)
+            # print('Comparison: ')
+            # if len(snaps) > 1:
+            #     stats = snaps[-1].compare_to(snaps[-2], 'filename')
+            #     for i, stat in enumerate(stats[:10]):
+            #         print('-'*25)
+            #         print('Stats {}'.format(i))
+            #         msg = "New Mem (KiB): {}\nTotal Mem (KiB): {}\nNew Blocks: {}\nTotal Blocks: {}"
+            #         print(msg.format(stat.size_diff/1024,
+            #                          stat.size / 1024,
+            #                          stat.count_diff,
+            #                          stat.count))
+            #         print('Traceback: ')
+            #         for line in stat.traceback.format():
+            #             print(line)
             counter += 1
             self.log.info('%d out of %d simulations complete', counter, total)
 
@@ -562,13 +591,13 @@ class Simulator:
         self.lgth_unit = self.conf['General']['base_unit']
         self.period = period
 
-    def __del__(self):
-        """
-        Need to make sure we close the file descriptor for the fileHandler that
-        this instance attached to the module level logger. If we don't, we'll
-        eventually use up all the available file descriptors on the system
-        """
-        self._clean_logger()
+    # def __del__(self):
+    #     """
+    #     Need to make sure we close the file descriptor for the fileHandler that
+    #     this instance attached to the module level logger. If we don't, we'll
+    #     eventually use up all the available file descriptors on the system
+    #     """
+    #     self._clean_logger()
 
     def _clean_logger(self):
         """
@@ -749,10 +778,10 @@ class Simulator:
             self._clean_logger()
             del self.log
             del self.s4
+            self.data._update_keys(clear=True)
             self.data.close()
         except AttributeError:
             pass
-
 
     def set_numbasis(self, numbasis):
         """
@@ -848,13 +877,13 @@ class Simulator:
         if polarization == 'rhcp':
             # Right hand circularly polarized
             self.s4.SetExcitationPlanewave(IncidenceAngles=(polar, azimuth),
-                                           sAmplitude=complex(0, -1),
-                                           pAmplitude=complex(1, 0))
+                                           sAmplitude=complex(0, -1/np.sqrt(2)),
+                                           pAmplitude=complex(1/np.sqrt(2), 0))
         elif polarization == 'lhcp':
             # Left hand circularly polarized
             self.s4.SetExcitationPlanewave(IncidenceAngles=(polar, azimuth),
-                                           sAmplitude=complex(0, 1),
-                                           pAmplitude=complex(1, 0))
+                                           sAmplitude=complex(0, 1/np.sqrt(2)),
+                                           pAmplitude=complex(1/np.sqrt(2), 0))
         elif polarization == 'lpx':
             # Linearly polarized along x axis (TM polarixation)
             self.s4.SetExcitationPlanewave(IncidenceAngles=(polar, azimuth),
@@ -922,9 +951,14 @@ class Simulator:
             Hx, Hy, Hz = None, None, None
         for zcount, z in enumerate(zvals):
             if self.conf["General"]["compute_h"]:
-                E_arr, H_arr = self.s4.GetFieldsOnGridNumpy(z=z,
-                                                            NumSamples=(self.ysamps-1,
-                                                                        self.xsamps-1))
+                # E_arr, H_arr = self.s4.GetFieldsOnGridNumpy(z=z,
+                #                                             NumSamples=(self.ysamps-1,
+                #                                                         self.xsamps-1))
+                E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(self.ysamps-1, 
+                                                             self.xsamps-1),
+                                            Format='Array')
+                E_arr = np.array(E)
+                H_arr = np.array(H)
                 Hx[zcount, :-1, :-1] = H_arr[:, :, 0]
                 Hx[zcount, 0:self.xsamps-1, -1] = H_arr[:, 0, 0]
                 Hx[zcount, -1, 0:self.ysamps-1] = H_arr[0, :, 0]
@@ -939,9 +973,13 @@ class Simulator:
                 Hz[zcount, -1, -1] = H_arr[0, 0, 2]
             else:
                 start = time.time()
-                E_arr = self.s4.GetFieldsOnGridNumpy(z=z,
-                                                     NumSamples=(self.ysamps-1,
-                                                                 self.xsamps-1))[0]
+                # E_arr = self.s4.GetFieldsOnGridNumpy(z=z,
+                #                                      NumSamples=(self.ysamps-1,
+                #                                                  self.xsamps-1))[0]
+                E = self.s4.GetFieldsOnGrid(z=z, NumSamples=(self.ysamps-1, 
+                                                             self.xsamps-1),
+                                            Format='Array')[0]
+                E_arr = np.array(E)
                 end = time.time()
                 self.log.debug('Time for S4 GetFieldsOnGrid call: %f',
                                end-start)
@@ -1027,19 +1065,19 @@ class Simulator:
             Hx = np.zeros((xs, ys), dtype=np.complex128)
             Hy = np.zeros((xs, ys), dtype=np.complex128)
             Hz = np.zeros((xs, ys), dtype=np.complex128)
-            # E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(ys-1,
-            #                                                 xs-1),
-            #                                Format='Array')
-            # E_arr = np.array(E)
-            # H_arr = np.array(H)
-            E_arr, H_arr = self.s4.GetFieldsOnGridNumpy(z=z,
-                                                        NumSamples=(ys-1, xs-1))
+            # E_arr, H_arr = self.s4.GetFieldsOnGridNumpy(z=z,
+            #                                             NumSamples=(ys-1, xs-1))
+            E, H = self.s4.GetFieldsOnGrid(z=z, NumSamples=(ys-1,
+                                                            xs-1),
+                                           Format='Array')
+            E_arr = np.array(E)
+            H_arr = np.array(H)
         else:
-            E_arr = self.s4.GetFieldsOnGridNumpy(z=z,
-                                                 NumSamples=(ys-1, xs-1))[0]
-            # E = self.s4.GetFieldsOnGrid(z=z, NumSamples=(ys-1, xs-1),
-            #                             Format='Array')[0]
-            # E_arr = np.array(E)
+            # E_arr = self.s4.GetFieldsOnGridNumpy(z=z,
+            #                                      NumSamples=(ys-1, xs-1))[0]
+            E = self.s4.GetFieldsOnGrid(z=z, NumSamples=(ys-1, xs-1),
+                                        Format='Array')[0]
+            E_arr = np.array(E)
             # print(E_arr.shape)
             # return E_arr[0, :, :], E_arr[1, :, :], E_arr[2, :, :], None, None, None
             # Grab the periodic BC, which is always excluded from results
@@ -1453,3 +1491,28 @@ class Simulator:
                       ' seconds!'.format(self.ID[0:10], self.runtime))
         self.save_data()
         return None
+
+def display_top(snapshot, key_type='lineno', limit=10):
+    snapshot = snapshot.filter_traces((
+        tracemalloc.Filter(False, "<frozen importlib._bootstrap>"),
+        tracemalloc.Filter(False, "<unknown>"),
+    ))
+    top_stats = snapshot.statistics(key_type)
+
+    print("Top %s lines" % limit)
+    for index, stat in enumerate(top_stats[:limit], 1):
+        frame = stat.traceback[0]
+        # replace "/path/to/module/file.py" with "module/file.py"
+        filename = os.sep.join(frame.filename.split(os.sep)[-2:])
+        print("#%s: %s:%s: %.1f KiB"
+              % (index, filename, frame.lineno, stat.size / 1024))
+        line = linecache.getline(frame.filename, frame.lineno).strip()
+        if line:
+            print('    %s' % line)
+
+    other = top_stats[limit:]
+    if other:
+        size = sum(stat.size for stat in other)
+        print("%s other: %.1f KiB" % (len(other), size / 1024))
+    total = sum(stat.size for stat in top_stats)
+    print("Total allocated size: %.1f KiB" % (total / 1024))

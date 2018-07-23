@@ -125,7 +125,8 @@ def get_incident_power(spectrum, freq, polar_angle, bandwidth, logger=None):
     wvs = Q_(wvs[::-1], 'nanometers')
     power = Q_(power[::-1], 'W*m^-2*nm^-1')
     freq_vec = wvs.to('hertz')
-    # Convert the spectrum
+    # Convert the spectrum using the Laplacian to convert the spectrum from
+    # nm^-1 to Hz^-1
     p_vec = power * ureg.speed_of_light / freq_vec ** 2
     freq_vec = freq_vec.magnitude
     p_vec = p_vec.to('watts*meter^-2*hertz^-1').magnitude
@@ -180,9 +181,9 @@ def get_incident_power(spectrum, freq, polar_angle, bandwidth, logger=None):
     power_values = [left_power]+list(p_vec[inds])+[right_power]
     logger.info('Frequency points in bin: %s', str(freqs))
     logger.info('Power values in bin: %s', str(power_values))
-    # Just use a trapezoidal method to integrate the spectrum and multiply by
-    # angular factor
-    power = intg.trapz(power_values, x=freqs)*np.cos(polar_angle)
+    # Just use a trapezoidal method to integrate the spectrum and reduce power
+    # of the incident wave depending on incident polar angle
+    power = intg.trapz(power_values, x=freqs) * np.cos(polar_angle)
     logger.info('Incident Power/area: %s', str(power))
     return power
 
@@ -201,22 +202,13 @@ def get_incident_amplitude(spectrum, freq, polar_angle, bandwidth,
     = .5*\\sqrt{\\epsilon_0 / \\mu_0} | E_o |^2` where E_o is the amplitude of
     the plane wave and is not time averaged in any way, and S is the magnitude
     of the Poynting vector.
+
+    Also see Griffifths, Introduction to Electrodynamics, pg 399 Eq 9.61
     """
-    # print("ureg = {}".format(ureg))
-    # print("freq.units = {}".format(freq.units))
-    # print("freq.magnitude = {}".format(freq.magnitude))
-    # print("freq._REGISTRY = {}".format(freq._REGISTRY))
-    # print("bandwidth.units = {}".format(bandwidth.units))
-    # print("bandwidth.magnitude = {}".format(bandwidth.magnitude))
-    # print("bandwidth._REGISTRY = {}".format(bandwidth._REGISTRY))
     power_per_area = get_incident_power(spectrum, freq, polar_angle, bandwidth,
                                         logger=logger)
     logger.info('Incident Power/Area: %s', str(power_per_area))
-    # We need to reduce amplitude of the incident wave depending on
-    #  incident polar angle
-    # E = np.sqrt(2*constants.c*constants.mu_0*intensity)*np.cos(polar_angle)
-    E = np.sqrt(2 * ureg.speed_of_light * ureg.vacuum_permeability *
-                power_per_area)
+    E = np.sqrt(2 * ureg.impedance_of_free_space * power_per_area)
     E = E.to(ureg.volts / ureg.meter)
     logger.info('Incident Amplitude: %s', str(E))
     return E

@@ -512,7 +512,7 @@ class Simulation:
         rvec = Q_(np.linspace(0, rmax.magnitude, rsamp), rmax.units)
         thvec = Q_(np.linspace(0, 2 * np.pi, thsamp), 'radians')
         self.data['radial_coords'] = rvec
-        self.data['angle_coords'] = thvec   
+        self.data['angle_coords'] = thvec
         cyl_coords = Q_(np.zeros((len(rvec) * len(thvec), 2)), rmax.units)
         start = 0
         for r in rvec:
@@ -788,7 +788,7 @@ class Simulation:
         E_photon = ureg.planck_constant * freq
         # Unpack data for the port we passed in as an argument
         try:
-            arr = self.data['abs_per_layer']
+            arr = self.data['power_absorbed']
             # port, ref, trans, absorb = arr[arr.port == port.encode('utf-8')][0]
         except KeyError:
             arr = self.power_absorbed()
@@ -799,7 +799,7 @@ class Simulation:
         power_abs_integ = totals['int_method']
         # check if powers are per area or not. If not per area, there will be a
         # length squared in the dimensions
-        per_area = '[length]' not in power_abs_flux.dimensionality 
+        per_area = '[length]' not in power_abs_flux.dimensionality
         flux_jph = ureg.elementary_charge * power_abs_flux / E_photon
         integ_jph = ureg.elementary_charge * power_abs_integ / E_photon
         if per_area:
@@ -813,8 +813,8 @@ class Simulation:
         # Prevent numpy scalars from being stored inside the Quantity object
         flux_jph = Q_(float(flux_jph.magnitude), flux_jph.units)
         integ_jph = Q_(float(integ_jph.magnitude), integ_jph.units)
-        self.data['jph_flux_method'] = flux_jph 
-        self.data['jph_integral_method'] = integ_jph 
+        self.data['jph_flux_method'] = flux_jph
+        self.data['jph_integral_method'] = integ_jph
         return flux_jph, integ_jph
 
     def plot_q_values(self):
@@ -1208,6 +1208,7 @@ class SimulationGroup:
     def __init__(self, sim_confs_and_dirs, base_dir, bandwidth, grouped_against=None, grouped_by=None):
         if grouped_by is None and grouped_against is None:
             raise ValueError("Must know how this SimulationGroup is grouped")
+        self.log = logging.getLogger(__name__)
         self.base_dir = base_dir
         self.bandwidth = bandwidth
         self.grouped_by = grouped_by
@@ -1215,32 +1216,28 @@ class SimulationGroup:
         self.sim_confs = [tup[0] for tup in sim_confs_and_dirs]
         self.ID, self.results_dir = self.get_group_info()
         self.sims = [Simulation(outdir, bandwidth, conf=conf) for
-                     conf, outdir in sim_confs_and_dirs] 
+                     conf, outdir in sim_confs_and_dirs]
         # for sim in self.sims:
         #     sim.get_layers()
-        self.log = logging.getLogger(__name__)
         self.num_sims = len(self.sims)
         fpath = osp.join(self.results_dir, 'data.hdf5')
         self.data = HDF5DataManager(fpath, group_path='/', mode='a', logger=self.log)
 
     def get_group_info(self):
         all_ids = ''.join(conf.ID for conf in self.sim_confs)
-        print("all_ids = {}".format(all_ids))
         hasher = hashlib.md5()
         hasher.update(all_ids.encode('utf-8'))
         GID = hasher.hexdigest()
-        print("GID = {}".format(GID))
         if self.grouped_by is not None:
-            print('GROUPED BY')
-            print(self.grouped_by)
+            self.log.info('Simulations grouped by: %s', self.grouped_by)
             dname = self.grouped_by.replace('/', '_')
-            results_dir = osp.join(self.base_dir, 'grouped_by', dname, GID[0:10]) 
+            results_dir = osp.join(self.base_dir, 'grouped_by', dname, GID[0:10])
         elif self.grouped_against is not None:
-            print('GROUPED_AGAINST')
-            print(self.grouped_against)
+            self.log.info('Simulations grouped against: %s',
+                          self.grouped_against)
             dname = self.grouped_against.replace('/', '_')
-            results_dir = osp.join(self.base_dir, 'grouped_against', dname, GID[0:10]) 
-        print("results_dir = {}".format(results_dir))
+            results_dir = osp.join(self.base_dir, 'grouped_against', dname, GID[0:10])
+        self.log.info("Group results directory: %s", results_dir)
         if not os.path.isdir(results_dir):
             os.makedirs(results_dir)
         return GID, results_dir
@@ -1248,7 +1245,7 @@ class SimulationGroup:
     def save_group_info(self):
         fname = osp.join(self.results_dir, 'sims_in_group.txt')
         # TODO: Add list saving to HDF5DataManager so this works
-        # sim_ids = [] 
+        # sim_ids = []
         with open(fname, 'w') as f:
             for sim in self.sims:
                 f.write('{}\n'.format(sim.ID))
@@ -1359,14 +1356,14 @@ class SimulationGroup:
         self.log.info('Computing photocurrent density for group at %s', base)
         jph_vals = Q_(np.zeros(self.num_sims), units)
         freqs = Q_(np.zeros(self.num_sims), 'hertz')
-        for i, sim in enumerate(self.sims):
-            freq = sim.conf['Simulation/frequency']
-            freqs[i] = freq
+        # for i, sim in enumerate(self.sims):
+        #     freqs[i] = freq
         # Assuming the sims have been grouped by frequency, sum over all of
         # them
         for i, sim in enumerate(self.sims):
             # freq = sim.conf['Simulation']['params']['frequency']
-            # freqs[i] = freq
+            freq = sim.conf['Simulation/frequency']
+            freqs[i] = freq
             E_photon = ureg.planck_constant * freq
             try:
                 abs_arr = sim.data['power_absorbed']
@@ -1381,7 +1378,6 @@ class SimulationGroup:
             else:
                 key = 'int_method'
             row = get_record(abs_arr, 'layer', 'total')[0]
-            print('ROW: {}'.format(row))
             absorbed_power = row[key]
             jph_vals[i] = ureg.elementary_charge * absorbed_power / E_photon
             sim.clear_data()
@@ -1465,7 +1461,6 @@ class SimulationGroup:
                 else:
                     ax = input_ax
                 pfile = osp.join(self.results_dir, '{}_{}.png'.format(layer, name))
-                print(np.amin(results[ind]))
                 ax.plot(xvals, results[ind], marker, label=leg_label)
                 ylims = ax.get_ylim()
                 ax.set_ylim([0, ylims[-1]])
@@ -1913,23 +1908,19 @@ def execute_sim_plan(conf, outdir, proc_config, bandwidth, grouped_against=None,
         sim.clear_data()
         sim.data.close()
     except Exception as e:
-        if isinstance(conf, list) or isinstance(conf, tuple):
-            log.error('Group raised exception')
-        else:
-            log.error('Conf %s raised exception', conf.ID)
-        print(e)
+        log.error('Conf %s raised exception', conf.ID)
         raise
 
 
 def execute_group_plan(sim_confs_and_dirs, base_dir, proc_config, bandwidth, grouped_by=None,
                        grouped_against=None):
     log = logging.getLogger(__name__)
+    sim_group = SimulationGroup(sim_confs_and_dirs, base_dir, bandwidth,
+                                grouped_by=grouped_by,
+                                grouped_against=grouped_against)
+    plan = proc_config['Postprocessing']['Group']
     try:
         log.info("Executing SimulationGroup plan")
-        plan = proc_config['Postprocessing']['Group']
-        sim_group = SimulationGroup(sim_confs_and_dirs, base_dir, bandwidth,
-                                    grouped_by=grouped_by,
-                                    grouped_against=grouped_against)
         sim_group.save_group_info()
         for task_name in ('crunch', 'plot'):
             if task_name not in plan:
@@ -1959,9 +1950,9 @@ def execute_group_plan(sim_confs_and_dirs, base_dir, proc_config, bandwidth, gro
         sim_group.clear_data()
     except Exception as e:
         # log.error('Group {} raised exception'.format(sim_group.ID))
-        log.error('Group raised exception')
-        print(e)
-        raise
+        exc_type, exc_inst, trace = sys.exc_info()
+        log.error('Group %s raised exception:\n%s', sim_group.ID, trace)
+        raise exc_inst.with_traceback(trace)
 
 
 class Processor:
@@ -2206,7 +2197,6 @@ class Processor:
                 bandwidth = abs(c1['Simulation/frequency'] -
                                 c2['Simulation/frequency'])
                 bandwidths.append(bandwidth)
-        print('BANDWIDTHS: ', bandwidths)
         if not all(np.isclose(el, bandwidths[0]) for el in bandwidths[1:]):
             msg = 'Cannot currently handle nonuniform frequency sweeps'
             raise NotImplementedError(msg)

@@ -196,26 +196,30 @@ def run_sim(conf, output_dir):
 
 def run_sim_dispy(conf, outdir):
     try:
-        import sys
         import os
+        import traceback
         import logging
         import time
-        import copy
         import dispy
         import socket
-        from nanowire.optics.data_manager import HDF5DataManager, NPZDataManager
-        from nanowire.utils.utils import (
-            make_hash,
-            get_combos,
-            IdFilter,
-            find_inds,
-            merge_and_sort,
-            arithmetic_arange
-        )
-        from nanowire.optics.utils.utils import get_incident_amplitude
-        from nanowire.optics.utils.geometry import Layer, get_layers
-        from nanowire.preprocess import Config
         from nanowire.optics.simulate import Simulator
+        from nanowire.utils.config import Config
+        
+        #import sys
+        #import copy
+        #from nanowire.optics.data_manager import HDF5DataManager, NPZDataManager
+        #from nanowire.utils.utils import (
+        #    make_hash,
+        #    get_combos,
+        #    IdFilter,
+        #    find_inds,
+        #    merge_and_sort,
+        #    arithmetic_arange
+        #)
+        #from nanowire.optics.utils.utils import get_incident_amplitude
+        #from nanowire.optics.utils.geometry import Layer, get_layers
+        if isinstance(conf, str):
+    	    conf = Config.fromYAML(conf)
         log = logging.getLogger(__name__)
         start = time.time()
         # act_path = osp.expandvars('$HOME/.virtualenvs/nanowire/bin/activate_this.py')
@@ -227,7 +231,7 @@ def run_sim_dispy(conf, outdir):
         print("outdir = {}".format(outdir))
         print("subdir = {}".format(subdir))
         print("abs_path = {}".format(abs_path))
-        sim = Simulator(copy.deepcopy(conf), subdir)
+        sim = Simulator(conf, subdir)
         sim.setup()
         # rel_dir = osp.join('./', osp.basename(sim.dir))
         # rel_dir = osp.basename(sim.dir)
@@ -480,10 +484,13 @@ class SimulationManager:
         if ip == 'auto':
             pub_iface = get_public_iface()
             ip = get_public_ip(pub_iface)
+        log.info("Using IP %s for dispy", str(ip))
         node_allocs = []
+        log.info('Processing nodes %s', str(nodes))
         for node in nodes:
             # If its not a string, hopefully it's a length 2 list or tuple
             # with (str, int) = (ip_addr, port_number)
+            log.info('Allocating node %s', str(node))
             if not isinstance(node, str):
                 node_allocs.append(dispy.NodeAllocate(node[0], port=node[1]))
             # Use default port locally
@@ -492,17 +499,20 @@ class SimulationManager:
             else:
                 node_allocs.append(dispy.NodeAllocate(node))
         cluster = dispy.JobCluster(run_sim_dispy,
-                                   dest_path=time.strftime('%Y-%m-%d'),
+                                   # dest_path=time.strftime('%Y-%m-%d'),
                                    cleanup=True,
                                    # cleanup=False, loglevel=dispy.logger.DEBUG,
-                                   nodes=node_allocs, ip_addr=ip)
+                                   nodes=node_allocs, 
+                                   ip_addr=ip)
+                                   # ext_ip_addr=ip, 
+                                   #loglevel=dispy.logger.DEBUG)
         # Wait until we connect to at least one node
         while len(cluster.status().nodes) == 0:
             time.sleep(1)
         cluster.print_status()
         jobs = {}
         for i, (conf, outdir) in enumerate(to_run):
-            job = cluster.submit(conf, outdir)
+            job = cluster.submit(conf.dump(), outdir)
             job.id = i
             jobs[i] = job
             stat = DISPY_LOOKUP[job.status]

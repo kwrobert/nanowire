@@ -3,14 +3,13 @@ import posixpath
 import copy
 import re
 import logging
-import yaml
 import json
 import pint
+import yaml
 try:
     from yaml import CLoader as Loader, CDumper as Dumper
 except ImportError:
     from yaml import Loader, Dumper
-from yaml import load as yload, dump as ydump
 import tables as tb
 from dicthash import generate_hash_from_dict
 from collections import MutableMapping, OrderedDict
@@ -234,13 +233,22 @@ class Config(MutableMapping):
                                       '_d': conf._d})
 
     @classmethod
-    def fromYAML(cls, *args, skip_keys=None, **kwargs):
+    def fromYAML(cls, stream, skip_keys=None, **kwargs):
         """
         Return an instance of a Config object given a raw YAML string or a
         file-like object containing valid YAML syntax. Handles arbitrary YAML
         and YAML dumped by another Config object
         """
-        data = yload(*args, **kwargs)
+        # Use the _much_ faster C based loader imported above unless the user
+        # says otherwise
+        if 'Loader' not in kwargs:
+            kwargs['Loader'] = Loader
+        try:
+            stream = stream.decode()
+        except AttributeError:
+            print("Cannot decode stream")
+            pass
+        data = yaml.load(stream, **kwargs)
         skip_keys = skip_keys if skip_keys is not None else []
         if 'skip_keys' in data:
             for item in data['skip_keys']:
@@ -288,18 +296,19 @@ class Config(MutableMapping):
     def write(self, f):
         """
         Dumps this config object to its YAML representation given a path to a
-        file
+        file or an open file handle
         """
         if isinstance(f, str):
             f = os.path.expandvars(f)
             f = open(f, 'w')
-        ydump(self, stream=f, default_flow_style=False)
+        yaml.dump(self, stream=f, default_flow_style=False, Dumper=Dumper)
+        f.close()
 
     def dump(self):
         """
         Returns YAML representation of this particular config
         """
-        return ydump(self, default_flow_style=False)
+        return yaml.dump(self, default_flow_style=False, Dumper=Dumper)
 
 
 def represent_odict(dumper, data):
@@ -319,6 +328,12 @@ def construct_pint_quantity(loader, node):
     return Q_(d['magnitude'], d['units'])
 
 
+yaml.add_representer(OrderedDict, represent_odict, Dumper=Dumper)
+yaml.add_representer(Config, Config._to_yaml, Dumper=Dumper)
+yaml.add_multi_representer(pint.quantity._Quantity, represent_pint_quantity,
+                           Dumper=Dumper)
+yaml.add_constructor('!pintq', construct_pint_quantity, Loader=Loader)
+# Add to default, non-C loader just in case
 yaml.add_representer(OrderedDict, represent_odict)
 yaml.add_representer(Config, Config._to_yaml)
 yaml.add_multi_representer(pint.quantity._Quantity, represent_pint_quantity)
@@ -455,7 +470,7 @@ def group_by(confs, key, sort_key=None):
 
 # @add_logger(logging.getLogger(__name__))
 def load_confs(db, base_dir='', query='', table_path='/',
-               table_name='simulations'):
+               table_name='simulations', IDs=None):
     """
     Load configs from disk
 
@@ -484,8 +499,10 @@ def load_confs(db, base_dir='', query='', table_path='/',
 
     Returns
     -------
-    confs : list
-        A list of :py:class:`nanowire.preprocess.config.Config` objects
+    confs : dict
+        A dict whose keys are Config IDs and values are a tuple containing a 
+        :py:class:`nanowire.preprocess.config.Config` object as the first
+        element and the output path for the Config object as the second element
     t_sweeps : dict
         A dict describing which simulations are thickness sweeps. The key:value
         pairs are pairs of simulation IDs. The keys are sim IDs whose solution
@@ -514,24 +531,28 @@ def load_confs(db, base_dir='', query='', table_path='/',
         condvars = {k.replace('/', '__'): v
                     for k, v in table.colinstances.items()}
         for row in table.read_where(query, condvars=condvars):
-            short_id = row['ID'].decode()[0:10]
+            ID = row['ID'].decode()
+            short_id = ID[0:10]
             conf_path = os.path.join(base_dir, short_id, 'sim_conf.yml')
-            log.info('Loading config: %s', conf_path)
-            conf = Config.fromYAML(row['yaml'])
-            if row['ID'].decode() != conf.ID:
-                raise ValueError('ID in database and ID of loaded '
-                                 'config do not match')
-            confs[conf.ID] = (conf, conf_path)
+            if IDs is not None and ID in IDs:
+                log.info('Loading config: %s', conf_path)
+                conf = Config.fromYAML(row['yaml'])
+                if ID != conf.ID:
+                    raise ValueError('ID in database and ID of loaded '
+                                     'config do not match')
+                confs[conf.ID] = (conf, conf_path)
     else:
         for row in table.read():
-            short_id = row['ID'].decode()[0:10]
+            ID = row['ID'].decode()
+            short_id = ID[0:10]
             conf_path = os.path.join(base_dir, short_id, 'sim_conf.yml')
-            log.info('Loading config: %s', conf_path)
-            conf = Config.fromYAML(row['yaml'])
-            if row['ID'].decode() != conf.ID:
-                raise ValueError('ID in database and ID of loaded '
-                                 'config do not match')
-            confs[conf.ID] = (conf, conf_path)
+            if IDs is not None and ID in IDs:
+                log.info('Loading config: %s', conf_path)
+                conf = Config.fromYAML(row['yaml'])
+                if ID != conf.ID:
+                    raise ValueError('ID in database and ID of loaded '
+                                     'config do not match')
+                confs[conf.ID] = (conf, conf_path)
     confs_list = [tup[0] for tup in confs.values()]
     thickness_paths = find_keypaths(confs_list[0], 'thickness')
     # We need to handle the case of thickness sweeps to take advantage of

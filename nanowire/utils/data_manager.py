@@ -456,11 +456,11 @@ class HDF5DataManager(DataManager):
     """
     Data manager class for the HDF5 storage backend
     """
-    # DEFAULT_FILTER = tb.Filters(complevel=8, complib='zlib')
-    DEFAULT_FILTER = None
+    COMPLIB = 'zlib'
+    COMPLVL = 8
 
-    def __init__(self, store_path, *, group_path='/', filt=None, mode='a',
-                 logger=None, **kwargs):
+    def __init__(self, store_path, *, group_path='/', complib=None,
+                 complvl=None, mode='a', logger=None, **kwargs):
         """
         :param :class:`~utils.config.Config`: Config object for the simulation
         that this DataManager will be managing data for
@@ -471,7 +471,9 @@ class HDF5DataManager(DataManager):
                                               **kwargs)
         self.open_dstore(mode)
         self.gpath = group_path
-        self.filt = filt if filt is not None else self.DEFAULT_FILTER
+        complvl = complvl if complvl is not None else self.COMPLVL   
+        complib = complib if complib is not None else self.COMPLIB 
+        self.filt = tb.Filters(complevel=complvl, complib=complib)
         try:
             self.gobj = self._dstore.get_node(self.gpath, classname='Group')
         except tb.NoSuchNodeError:

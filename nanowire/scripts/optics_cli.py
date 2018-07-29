@@ -86,6 +86,39 @@ def run(config, output_dir):
     simul.run_sim(conf, output_dir)
     return None
 
+h1 = "The directory to dump all configs into. Defaults to " \
+     "the same directory as the provided DB file"
+@optics.command()
+@click.argument('db', type=exist_read_path)
+@click.option('-o', '--output-dir', type=exist_read_dir, default=None, help=h1)
+@click.option('-i', '--id', type=click.STRING , multiple=True,
+              help="Only dump these IDs. Can be specified multiple times")
+def dump_configs(db, output_dir, id):
+    """
+    Dump all configs stored in DB to files
+
+    DB must be a path to an HDF5 file containing the database of simulation
+    configs. All configs in the database are dumped to YAML files on disk, with
+    the files stored in subdirectories named using the first 10 characters of
+    the config ID
+    """
+
+    from nanowire.utils.config import load_confs
+
+    if output_dir is None:
+        output_dir = os.path.dirname(db)
+    click.secho('Loading configs from db ...')
+    confs, t_sweeps, db_hand = load_confs(db, base_dir=output_dir, IDs=id)
+    # if id:
+    #     IDs = set(id)
+    #     confs = {ID: confs[ID] for ID in confs.keys() if ID in IDs}
+    click.secho('Configs loaded!', fg='green')
+    click.secho('Dumping configs ...')
+    for conf_ID, (conf, conf_path) in confs.items():
+        click.secho('Dumping config {} to {}'.format(conf_ID, conf_path))
+        conf.write(conf_path)
+    click.secho("Dumping complete!", fg='green')
+    return None
 
 h0 = "Base directory that all simulations will dump their output data to. " \
      "If not specified, defaults to the directory of the input database"

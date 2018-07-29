@@ -1,4 +1,5 @@
 import shutil
+import gzip
 # import psutil
 import tracemalloc
 import linecache
@@ -324,6 +325,7 @@ class SimulationManager:
             pairs are pairs of simulation IDs. The keys are sim IDs whose solution
             files are hard links to the solution of the simulation ID value
         """
+        self.log.info("Loadings configs from %s", self.db.filename)
         confs, t_sweeps, db = load_confs(self.db, *args, **kwargs)
         self.t_sweeps = t_sweeps
         self.sim_confs = confs
@@ -464,11 +466,10 @@ class SimulationManager:
             pool.terminate()
             pool.join()
 
-    def run_dispy(self, to_run, func=run_sim_dispy):
+    def run_dispy(self, to_run, func=run_sim_dispy, retries=3):
         """
         Run jobs in parallel using dispy
         """
-        import time
         log = logging.getLogger(__name__)
         log.info('Executing jobs using dispy cluster')
         # log.info("Beginning dispy submit procedure")
@@ -498,44 +499,72 @@ class SimulationManager:
                 node_allocs.append(dispy.NodeAllocate(ip))
             else:
                 node_allocs.append(dispy.NodeAllocate(node))
+        # reentrant: Jobs scheduled on a node that goes down are automatically
+        # rescheduled to another available node
+        # cleanup: Leave any generated files on nodes 
+        # dest_path: Use the same subdirectory under the dest_path_prefix set
+        # by the dispynode server to store all simulation inputs/outputs. The
+        # default is to make a new directory for every run, which prevents sims
+        # from reusing solution files.
         cluster = dispy.JobCluster(run_sim_dispy,
-                                   # dest_path=time.strftime('%Y-%m-%d'),
-                                   cleanup=True,
-                                   # cleanup=False, loglevel=dispy.logger.DEBUG,
+                                   dest_path='optics_sims',
+                                   cleanup=False,
                                    nodes=node_allocs, 
-                                   ip_addr=ip)
+                                   ip_addr=ip,
+                                   reentrant=True)
                                    # ext_ip_addr=ip, 
                                    #loglevel=dispy.logger.DEBUG)
         # Wait until we connect to at least one node
+        cluster.print_status()
+        log.info('Waiting for connection to nodes ...')
         while len(cluster.status().nodes) == 0:
-            time.sleep(1)
+            time.sleep(3)
         cluster.print_status()
         jobs = {}
         for i, (conf, outdir) in enumerate(to_run):
             job = cluster.submit(conf.dump(), outdir)
-            job.id = i
-            jobs[i] = job
+            job.id = conf.ID
+            jobs[job.id] = (i, job, 1)
             stat = DISPY_LOOKUP[job.status]
-            log.info('Job ID: {}, Status: {}'.format(i, stat))
+            log.info('Job ID: {}, Status: {}'.format(job.id, stat))
         while jobs:
+            retry = []
             toremove = []
-            for job_id, job in jobs.items():
-                status = DISPY_LOOKUP[job.status]
-                if (job.status == dispy.DispyJob.Finished
-                        or job.status in (dispy.DispyJob.Terminated, dispy.DispyJob.Cancelled,
-                                          dispy.DispyJob.Abandoned)):
-                    toremove.append(job_id)
-            for job_id in toremove:
-                job = jobs[job_id]
+            for job_id, (ind, job, attempts) in jobs.items():
                 stat = DISPY_LOOKUP[job.status]
-                time = job.result
-                if job.status == dispy.DispyJob.Terminated:
+                runtime = job.result
+                if job.status == dispy.DispyJob.Finished:
+                    log.info('Job ID: %s, Status: %s, Runtime: %f s'
+                             ', Host: %s', job_id, stat, runtime, job.ip_addr)
+                    toremove.append(job_id)
+                elif job.status == dispy.DispyJob.Terminated:
                     log.info('Job ID: %i, Status: %s, Exception:\n%s',
                              job_id, stat, job.exception)
+                    retry.append(job_id)
+                elif job.status in {dispy.DispyJob.Cancelled,
+                                    dispy.DispyJob.Abandoned}:
+                    log.info('Job ID: %s, Status: %s, Host: %s', job_id, stat, job.ip_addr)
+                    retry.append(job_id)
                 else:
-                    log.info('Job ID: %i, Status: %s, Runtime: %f s'
-                             ', Host: %s', job_id, stat, time, job.ip_addr)
+                    log.info('Job ID: %s, Status: %s, Host: %s', job_id, stat, job.ip_addr)
+            for job_id in toremove:
                 del jobs[job_id]
+            for job_id in retry:
+                ind, job, attempts = jobs[job_id]
+                # Deallocate the node that failed the job
+                cluster.deallocate_node(job.ip_addr)
+                # Resubmit
+                if attempts <= retries:
+                    conf, outdir = to_run[ind]
+                    log.info('Resubmitting Job ID %s', job_id)
+                    new_job = cluster.submit(conf.dump(), outdir)
+                    new_job.id = job_id
+                    jobs[job_id] = (ind, new_job, attempts+1)
+                # Stop trying and remove the job
+                else:
+                    log.info('Job ID %s reached 3 attempts, giving up', job_id)
+                    del jobs[job_id]
+            time.sleep(10)
         return None
 
     def run(self, mode, *args, func=run_sim, **kwargs):
@@ -1314,7 +1343,6 @@ class Simulator:
         log = logging.getLogger(__name__)
         self.log.info("Loading simulation state")
         sfile = self.conf['General']['solution_file']
-        # sfile = 'solution.xml'
         fname = osp.join(self.path, sfile)
         if osp.isfile(fname):
             self.log.info("Loading from: %s", fname)

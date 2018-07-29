@@ -1389,6 +1389,51 @@ class SimulationGroup:
         self.log.info('Jph = {}'.format(Jph))
         return Jph
 
+
+    def convergence(self, quantity, err_type='global', scale='linear'):
+        """Plots the convergence of a field across all available simulations"""
+
+        self.log.info('Plotting convergence')
+        base = self.sims[0].conf['General']['base_dir']
+        if err_type == 'local':
+            fglob = osp.join(base, 'localerror_%s*.dat' % quantity)
+        elif err_type == 'global':
+            fglob = osp.join(base, 'globalerror_%s*.dat' % quantity)
+        elif err_type == 'adjacent':
+            fglob = osp.join(base, 'adjacenterror_%s*.dat' % quantity)
+        else:
+            self.log.error('Attempting to plot an unsupported error type')
+            raise ValueError
+        paths = glob.glob(fglob)
+        for path in paths:
+            labels = []
+            errors = []
+            with open(path, 'r') as datf:
+                for line in datf.readlines():
+                    lab, err = line.split(',')
+                    labels.append(lab)
+                    errors.append(err)
+            fig = plt.figure(figsize=(9, 7))
+            plt.ylabel('M.S.E of %s' % quantity)
+            plt.xlabel('Number of Fourier Terms')
+            plt.plot(labels, errors)
+            plt.yscale(scale)
+            # plt.xticks(x,labels,rotation='vertical')
+            plt.tight_layout()
+            plt.title(osp.basename(base))
+            if self.gconf['General']['save_plots']:
+                if '_excluded' in path:
+                    excluded = '_excluded'
+                else:
+                    excluded = ''
+                name = '%s_%sconvergence_%s%s.png' % (
+                    osp.basename(base), err_type, quantity, excluded)
+                path = osp.join(base, name)
+                fig.savefig(path)
+            if self.gconf['General']['show_plots']:
+                plt.show()
+            plt.close(fig)
+
     def plot_power_absorbed(self, input_ax=None, plot_layer=None, quant=None,
                             sim_slice=(0, None), marker='--o', xlabel='',
                             ylabel='', title='', leg_label=''):
@@ -1475,50 +1520,6 @@ class SimulationGroup:
                     plt.savefig(pfile)
         return ax, diff
 
-    def convergence(self, quantity, err_type='global', scale='linear'):
-        """Plots the convergence of a field across all available simulations"""
-
-        self.log.info('Plotting convergence')
-        base = self.sims[0].conf['General']['base_dir']
-        if err_type == 'local':
-            fglob = osp.join(base, 'localerror_%s*.dat' % quantity)
-        elif err_type == 'global':
-            fglob = osp.join(base, 'globalerror_%s*.dat' % quantity)
-        elif err_type == 'adjacent':
-            fglob = osp.join(base, 'adjacenterror_%s*.dat' % quantity)
-        else:
-            self.log.error('Attempting to plot an unsupported error type')
-            raise ValueError
-        paths = glob.glob(fglob)
-        for path in paths:
-            labels = []
-            errors = []
-            with open(path, 'r') as datf:
-                for line in datf.readlines():
-                    lab, err = line.split(',')
-                    labels.append(lab)
-                    errors.append(err)
-            fig = plt.figure(figsize=(9, 7))
-            plt.ylabel('M.S.E of %s' % quantity)
-            plt.xlabel('Number of Fourier Terms')
-            plt.plot(labels, errors)
-            plt.yscale(scale)
-            # plt.xticks(x,labels,rotation='vertical')
-            plt.tight_layout()
-            plt.title(osp.basename(base))
-            if self.gconf['General']['save_plots']:
-                if '_excluded' in path:
-                    excluded = '_excluded'
-                else:
-                    excluded = ''
-                name = '%s_%sconvergence_%s%s.png' % (
-                    osp.basename(base), err_type, quantity, excluded)
-                path = osp.join(base, name)
-                fig.savefig(path)
-            if self.gconf['General']['show_plots']:
-                plt.show()
-            plt.close(fig)
-
     def plot_scalar_reduce(self, quantity, plane, pval, draw=False, fixed=None):
         """Plot the result of a particular scalar reduction for each group"""
 
@@ -1577,8 +1578,12 @@ class SimulationGroup:
                 self.sims[0].heatmap2d(sim, x, y, cs, labels, plane, pval,
                                save_path=p, show=show, draw=draw, fixed=fixed)
 
-    def transmission_data(self, absorbance, reflectance, transmission, port='Substrate'):
-        """Plot transmissions, absorption, and reflectance assuming leaves are frequency"""
+    def plot_transmission_data(self, absorbance, reflectance, transmission,
+                               port='Substrate_bottom'):
+        """
+        Plot transmissions, absorption, and reflectance assuming leaves are
+        frequency
+        """
 
         base = self.sims[0].conf['General']['results_dir']
         self.log.info('Plotting transmission data for group at %s' % base)
@@ -1618,6 +1623,7 @@ class SimulationGroup:
         plt.ylim((0, 1.0))
         plt.savefig(figp)
         plt.close()
+
 
     def plot_q_values(self):
         """

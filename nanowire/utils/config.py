@@ -243,10 +243,10 @@ class Config(MutableMapping):
         # says otherwise
         if 'Loader' not in kwargs:
             kwargs['Loader'] = Loader
+        # Make sure we decode any byte-strings
         try:
             stream = stream.decode()
         except AttributeError:
-            print("Cannot decode stream")
             pass
         data = yaml.load(stream, **kwargs)
         skip_keys = skip_keys if skip_keys is not None else []
@@ -630,7 +630,8 @@ def dump_configs(db, table_path='/', table_name='simulations',
 
     if not os.path.isfile(db):
         raise ValueError('Arg {} is not a regular file'.format(db))
-    if IDs is not None and not isinstance(IDs, set):
+    print("IDS: ", IDs)
+    if IDs and not isinstance(IDs, set):
         IDs = set(IDs)
     outdir = outdir if outdir else os.path.dirname(db)
     if not os.path.isdir(outdir):
@@ -650,7 +651,7 @@ def dump_configs(db, table_path='/', table_name='simulations',
     for row in table.iterrows():
         stream = row['yaml'].decode()
         ID = row['ID'].decode()
-        if IDs is not None and ID not in IDs:
+        if IDs and ID not in IDs:
             continue
         if fname is not None:
             outname = fname(row)

@@ -29,6 +29,7 @@ import scipy.interpolate as spi
 import scipy.constants as constants
 # import gc3libs
 # from gc3libs.core import Core, Engine
+from functools import partial
 from sympy import Circle
 from lxml import etree
 from lxml.builder import E
@@ -271,7 +272,7 @@ class SimulationManager:
     """
 
     def __init__(self, db, nodes=None, ip=None, base_dir='', num_cores=None,
-                 log_level='INFO'):
+                 blas_threads=1, log_level='INFO'):
         self.runners = {'serial': self.run_serial,
                         'parallel': self.run_parallel,
                         'dispy': self.run_dispy}
@@ -282,6 +283,7 @@ class SimulationManager:
             self.num_cores = mp.cpu_count()
         else:
             self.num_cores = num_cores
+        self.blas_threads = blas_threads
         self.log_level = log_level
         lfile = osp.join(base_dir, 'logs/sim_manager.log')
         # self.log = configure_logger(level=log_level, console=True,
@@ -499,6 +501,11 @@ class SimulationManager:
                 node_allocs.append(dispy.NodeAllocate(ip))
             else:
                 node_allocs.append(dispy.NodeAllocate(node))
+        # Create the setup function that sets the number of OPENBLAS threads to
+        # use in a computation
+        def setup(threads):
+            import os
+            os.environ['OPENBLAS_NUM_THREADS'] = str(threads)
         # reentrant: Jobs scheduled on a node that goes down are automatically
         # rescheduled to another available node
         # cleanup: Leave any generated files on nodes 
@@ -506,12 +513,17 @@ class SimulationManager:
         # by the dispynode server to store all simulation inputs/outputs. The
         # default is to make a new directory for every run, which prevents sims
         # from reusing solution files.
+        # setup: A function that takes no arguments and prepares the
+        # environment for the computation. We use a partial function from
+        # functools to make the number of threads configurable while still
+        # satisfying the no-args requirement of dispy
         cluster = dispy.JobCluster(run_sim_dispy,
                                    dest_path='optics_sims',
                                    cleanup=False,
                                    nodes=node_allocs, 
                                    ip_addr=ip,
-                                   reentrant=True)
+                                   reentrant=True,
+                                   setup=partial(setup, self.blas_threads))
                                    # ext_ip_addr=ip, 
                                    #loglevel=dispy.logger.DEBUG)
         # Wait until we connect to at least one node

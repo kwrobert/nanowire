@@ -103,21 +103,18 @@ def dump_configs(db, output_dir, id):
     the config ID
     """
 
-    from nanowire.utils.config import load_confs
+    from nanowire.utils.config import dump_configs
 
     if output_dir is None:
         output_dir = os.path.dirname(db)
-    click.secho('Loading configs from db ...')
-    confs, t_sweeps, db_hand = load_confs(db, base_dir=output_dir, IDs=id)
-    # if id:
-    #     IDs = set(id)
-    #     confs = {ID: confs[ID] for ID in confs.keys() if ID in IDs}
-    click.secho('Configs loaded!', fg='green')
+    def get_fname(row):
+        ID = row['ID'].decode()
+        outdir = os.path.join(ID[0:10], 'sim_conf.yml')
+        return outdir
     click.secho('Dumping configs ...')
-    for conf_ID, (conf, conf_path) in confs.items():
-        click.secho('Dumping config {} to {}'.format(conf_ID, conf_path))
-        conf.write(conf_path)
-    click.secho("Dumping complete!", fg='green')
+    paths, db = dump_configs(db, outdir=output_dir, IDs=id,
+                             fname=get_fname)
+    db.close()
     return None
 
 h0 = "Base directory that all simulations will dump their output data to. " \

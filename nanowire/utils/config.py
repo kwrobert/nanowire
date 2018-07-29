@@ -591,7 +591,7 @@ def load_confs(db, base_dir='', query='', table_path='/',
 
 
 def dump_configs(db, table_path='/', table_name='simulations',
-                 outdir=''):
+                 outdir='', fname=None, IDs=None):
     """
     Dump all the Configs in an HDF5 database to YAML files
 
@@ -609,7 +609,15 @@ def dump_configs(db, table_path='/', table_name='simulations',
         Directory to dump the config files into. Defaults to the same directory
         as the HDF5 file. If you pass in a path that does not exist, it is
         created.
-
+    fname : callable, optional
+        A callable that determines the location of the outputted files beneath
+        outdir. The callable must accept a PyTables row object (dict-like) as
+        the only argument, and return a string representing the path beneath
+        `outdir` (including the filename) that the config file will be written
+        to. If not specified files are written directly beneath `outdir` named
+        by config ID with a '.yml' extension.
+    IDs : list/tuple/set, optional 
+        A container of IDs. Only the IDs in the container will be written
     Returns
     -------
 
@@ -622,6 +630,8 @@ def dump_configs(db, table_path='/', table_name='simulations',
 
     if not os.path.isfile(db):
         raise ValueError('Arg {} is not a regular file'.format(db))
+    if IDs is not None and not isinstance(IDs, set):
+        IDs = set(IDs)
     outdir = outdir if outdir else os.path.dirname(db)
     if not os.path.isdir(outdir):
         os.makedirs(outdir)
@@ -640,8 +650,14 @@ def dump_configs(db, table_path='/', table_name='simulations',
     for row in table.iterrows():
         stream = row['yaml'].decode()
         ID = row['ID'].decode()
-        fname = '{}.yml'.format(ID)
-        outpath = os.path.join(outdir, fname)
+        if IDs is not None and ID not in IDs:
+            continue
+        if fname is not None:
+            outname = fname(row)
+        else:
+            outname = '{}.yml'.format(ID)
+        outpath = os.path.join(outdir, outname)
+        print('Dumping config {} to {}'.format(ID, outpath))
         with open(outpath, 'w') as f:
             f.write(stream)
         paths.append(outpath)

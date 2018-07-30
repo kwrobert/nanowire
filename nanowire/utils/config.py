@@ -409,7 +409,10 @@ def group_against(confs, key, sort_key=None, skip_keys=None):
     for group in sim_groups:
         # Sort the individual sims within a group in increasing order of
         # the parameter we are grouping against a
-        group.sort(key=lambda aconf: aconf[key])
+        if isinstance(group[0][key], pint.quantity._Quantity):
+            group.sort(key=lambda aconf: aconf[key].magnitude)
+        else:
+            group.sort(key=lambda aconf: aconf[key])
     # Sort the groups in increasing order of the provided sort key
     if sort_key:
         sim_groups.sort(key=lambda agroup: agroup[0][sort_key])
@@ -512,8 +515,8 @@ def load_confs(db, base_dir='', query='', table_path='/',
         this is the same file handle you passed in
     """
 
-    if not base_dir:
-        base_dir = os.path.dirname(db)
+    if IDs and not isinstance(IDs, set):
+        IDs = set(IDs)
     # Open HDF5 database if its path or as PyTables file
     if isinstance(db, str):
         if not os.path.isfile(db):
@@ -524,6 +527,8 @@ def load_confs(db, base_dir='', query='', table_path='/',
             db = tb.open_file(db.filename, 'r')
     else:
         raise ValueError('Invalid HDF5 database argument: {}'.format(db))
+    if not base_dir:
+        base_dir = os.path.dirname(db.filename)
     table = db.get_node(table_path, name=table_name,
                         classname='Table')
     confs = {}
@@ -534,25 +539,27 @@ def load_confs(db, base_dir='', query='', table_path='/',
             ID = row['ID'].decode()
             short_id = ID[0:10]
             conf_path = os.path.join(base_dir, short_id, 'sim_conf.yml')
-            if IDs is not None and ID in IDs:
-                log.info('Loading config: %s', conf_path)
-                conf = Config.fromYAML(row['yaml'])
-                if ID != conf.ID:
-                    raise ValueError('ID in database and ID of loaded '
-                                     'config do not match')
-                confs[conf.ID] = (conf, conf_path)
+            if IDs and ID not in IDs:
+                continue
+            log.info('Loading config: %s', conf_path)
+            conf = Config.fromYAML(row['yaml'])
+            if ID != conf.ID:
+                raise ValueError('ID in database and ID of loaded '
+                                 'config do not match')
+            confs[conf.ID] = (conf, conf_path)
     else:
         for row in table.read():
             ID = row['ID'].decode()
             short_id = ID[0:10]
             conf_path = os.path.join(base_dir, short_id, 'sim_conf.yml')
-            if IDs is not None and ID in IDs:
-                log.info('Loading config: %s', conf_path)
-                conf = Config.fromYAML(row['yaml'])
-                if ID != conf.ID:
-                    raise ValueError('ID in database and ID of loaded '
-                                     'config do not match')
-                confs[conf.ID] = (conf, conf_path)
+            if IDs and ID not in IDs:
+                continue
+            log.info('Loading config: %s', conf_path)
+            conf = Config.fromYAML(row['yaml'])
+            if ID != conf.ID:
+                raise ValueError('ID in database and ID of loaded '
+                                 'config do not match')
+            confs[conf.ID] = (conf, conf_path)
     confs_list = [tup[0] for tup in confs.values()]
     thickness_paths = find_keypaths(confs_list[0], 'thickness')
     # We need to handle the case of thickness sweeps to take advantage of

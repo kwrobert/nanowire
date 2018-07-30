@@ -502,6 +502,8 @@ class HDF5DataManager(DataManager):
         Used to pull in keys for all the data items this simulation has stored
         on disk, without loading the actual items
         """
+        if not self._dstore.isopen:
+            return False
         for child in self.gobj._f_iter_nodes():
             if clear:
                 self._data[child._v_name] = None
@@ -520,6 +522,7 @@ class HDF5DataManager(DataManager):
                 if k not in self._data:
                     self._data[k] = None
                     self._updated[k] = False
+        return True
 
     def _check_equal(self, key, value):
         # np.array_equal is necessary in case we are dealing with numpy arrays
@@ -746,7 +749,8 @@ class HDF5DataManager(DataManager):
 
     def close(self):
         self._update_keys(clear=True)
-        self._dstore.close()
+        if self._dstore.isopen:
+            self._dstore.close()
 
 class NPZDataManager(DataManager):
 

@@ -1205,7 +1205,11 @@ class SimulationGroup:
     that is grouped against number of basis terms also doesn't make sense.
     """
 
-    def __init__(self, sim_confs_and_dirs, base_dir, bandwidth, grouped_against=None, grouped_by=None):
+    def __init__(self, base_dir, bandwidth, sims=None, sim_confs_and_dirs=None,
+                 grouped_against=None, grouped_by=None):
+        if sims is None and sim_confs_and_dirs is None:
+            raise ValueError("Must provide a list of Simulation objects or a "
+                             "list of tuples containing (Config, sim_dir)") 
         if grouped_by is None and grouped_against is None:
             raise ValueError("Must know how this SimulationGroup is grouped")
         self.log = logging.getLogger(__name__)
@@ -1213,12 +1217,14 @@ class SimulationGroup:
         self.bandwidth = bandwidth
         self.grouped_by = grouped_by
         self.grouped_against = grouped_against
-        self.sim_confs = [tup[0] for tup in sim_confs_and_dirs]
+        if sims is not None:
+            self.sims = sims
+            self.sim_confs = [sim.conf for sim in self.sims]
+        else:
+            self.sim_confs = [tup[0] for tup in sim_confs_and_dirs]
+            self.sims = [Simulation(outdir, bandwidth, conf=conf) for
+                         conf, outdir in sim_confs_and_dirs]
         self.ID, self.results_dir = self.get_group_info()
-        self.sims = [Simulation(outdir, bandwidth, conf=conf) for
-                     conf, outdir in sim_confs_and_dirs]
-        # for sim in self.sims:
-        #     sim.get_layers()
         self.num_sims = len(self.sims)
         fpath = osp.join(self.results_dir, 'data.hdf5')
         self.data = HDF5DataManager(fpath, group_path='/', mode='a', logger=self.log)
@@ -1272,6 +1278,10 @@ class SimulationGroup:
             self.log.info("Saving and clearing data for Simulation %s", sim.ID)
             sim.clear_data()
             sim.data.close()
+
+    def close(self):
+        self.clear_data()
+        self.data.close()
 
     def scalar_reduce(self, quantity, avg=False):
         """
@@ -1578,17 +1588,14 @@ class SimulationGroup:
                 self.sims[0].heatmap2d(sim, x, y, cs, labels, plane, pval,
                                save_path=p, show=show, draw=draw, fixed=fixed)
 
-    def plot_transmission_data(self, absorbance, reflectance, transmission,
-                               port='Substrate_bottom'):
-        """
-        Plot transmissions, absorption, and reflectance assuming leaves are
-        frequency
-        """
-
-        base = self.sims[0].conf['General']['results_dir']
-        self.log.info('Plotting transmission data for group at %s' % base)
+    def get_transmission_data(self, port='Substrate_bottom'):
+        if not self.grouped_against == 'Simulation/frequency':
+            raise ValueError('Can only retrieve transmission data when '
+                             'grouped against frequency')
+        base = self.results_dir
+        self.log.info('Retrieving transmission data for group at %s' % base)
         # Assuming the leaves contain frequency values, sum over all of them
-        freqs = np.zeros(self.num_sims)
+        freqs = Q_(np.zeros(self.num_sims), 'Hz')
         refl_l = np.zeros(self.num_sims)
         trans_l = np.zeros(self.num_sims)
         absorb_l = np.zeros(self.num_sims)
@@ -1596,16 +1603,29 @@ class SimulationGroup:
         for i, sim in enumerate(self.sims):
             # Unpack data for the port we passed in as an argument
             tdata = sim.data['transmission_data']
-            pdata = tdata[tdata.port == bport][0]
-            ref = pdata[1]
-            trans = pdata[2]
-            absorb = pdata[3]
-            freq = sim.conf['Simulation']['params']['frequency']
+            row = get_record(tdata, 'port', port)[0]
+            ref = row['reflection']
+            trans = row['transmission']
+            absorb = row['absorption']
+            freq = sim.conf['Simulation/frequency']
             freqs[i] = freq
             trans_l[i] = trans
             refl_l[i] = ref
             absorb_l[i] = absorb
-        freqs = (consts.c / freqs[::-1]) * 1e9
+        return freqs, refl_l, trans_l, absorb_l
+
+    def plot_transmission_data(self, absorbance, reflectance, transmission,
+                               port='Substrate_bottom'):
+        """
+        Plot transmissions, absorption, and reflectance assuming leaves are
+        frequency
+        """
+
+        base = self.results_dir
+        self.log.info('Plotting transmission data for group at %s' % base)
+        # Assuming the leaves contain frequency values, sum over all of them
+        freqs, refl_l, trans_l, absorb_l, self.get_transmission_data(port=port)
+        wvs = freqs.to('nm', 'spectroscopy')
         refl_l = refl_l[::-1]
         absorb_l = absorb_l[::-1]
         trans_l = trans_l[::-1]
@@ -1623,7 +1643,6 @@ class SimulationGroup:
         plt.ylim((0, 1.0))
         plt.savefig(figp)
         plt.close()
-
 
     def plot_q_values(self):
         """
@@ -1988,10 +2007,13 @@ class Processor:
         self.log = logging.getLogger(__name__)
         self.log.debug("Processor base init")
         self.num_cores = num_cores
-        self.sims = []
+        self.sim_confs = []
+        self.sims = {}
+        self.conf_groups = []
         self.sim_groups = []
         self.grouped_against = None
         self.grouped_by = None
+        self.bandwidth = None
 
     def load_confs(self, *args, **kwargs):
         """
@@ -2044,15 +2066,61 @@ class Processor:
             parser.update_names({'P': conf})
             plan = parser.parse(self.template)
             plans[conf.ID] = plan
-        # self.sims = [Simulation(conf=c) for c in self.sim_confs]
         self.log.info('Plan building complete!')
         return plans
 
+    def make_sims(self):
+        self.log.info("Making Simulation objects")
+        if self.bandwidth is None:
+            bandwidth = self.calculate_bandwidth()
+        else:
+            bandwidth = self.bandwidth
+        sims = {}
+        for conf, conf_path in self.sim_confs.values():
+            outdir = osp.dirname(conf_path)
+            sim = Simulation(outdir, bandwidth, conf=conf) 
+            sims[sim.ID] = sim
+        self.sims = sims
+        return self.sims
+
+    def make_groups(self):
+        self.log.info("Making SimulationGroup objects")
+        if self.bandwidth is None:
+            bandwidth = self.calculate_bandwidth()
+        else:
+            bandwidth = self.bandwidth
+        groups = []
+        if self.sims:
+            for conf_group in self.conf_groups:
+                group_ids = {conf.ID for conf in conf_group} 
+                sims = [self.sims[conf.ID] for conf in conf_group]
+                group = SimulationGroup(self.base_dir, bandwidth, sims=sims,
+                                        grouped_against=self.grouped_against,
+                                        grouped_by=self.grouped_by)
+                groups.append(group)
+        else:
+            for conf_group in self.conf_groups:
+                confs_and_dirs = [(conf, osp.dirname(self.sim_confs[conf.ID][1])) for conf in
+                                  conf_group] 
+                sim_group = SimulationGroup(confs_and_dirs, 
+                                            self.base_dir,
+                                            self.bandwidth, 
+                                            grouped_against=self.grouped_against,
+                                            grouped_by=self.grouped_by)
+                groups.append(sim_group)
+        self.sim_groups = groups
+        return self.sim_groups
+
     def close_all(self):
-        for sim in self.sims:
+        for sim in self.sims.values():
             if isinstance(sim, Simulation):
                 self.log.info('Closing sim %s', sim.ID[0:10])
                 sim.data.close()
+        for group in self.sim_groups:
+            self.log.info('Closing group %s', group.ID[0:10])
+            group.close()
+        self.log.info("Closing simulation database")
+        self.db.close()
 
     def group_against(self, key, **kwargs):
         """
@@ -2096,7 +2164,7 @@ class Processor:
         """
 
         confs = [tup[0] for tup in self.sim_confs.values()]
-        self.sim_groups = _group_against(confs, key, **kwargs)
+        self.conf_groups = _group_against(confs, key, **kwargs)
         self.grouped_against = key
 
     def group_by(self, key, **kwargs):
@@ -2129,7 +2197,7 @@ class Processor:
             simulations.
         """
         confs = [tup[0] for tup in self.sim_confs.values()]
-        self.sim_groups = _group_by(confs, key, **kwargs)
+        self.conf_groups = _group_by(confs, key, **kwargs)
         self.grouped_by = key
 
     def param_vals(self, parseq):
@@ -2206,7 +2274,24 @@ class Processor:
         if not all(np.isclose(el, bandwidths[0]) for el in bandwidths[1:]):
             msg = 'Cannot currently handle nonuniform frequency sweeps'
             raise NotImplementedError(msg)
+        self.bandwidth = bandwidths[0]
         return bandwidths[0]
+
+    def call_sim_method(self, method_name, args, parallel=True):
+        """
+        Run the method with the given name on all Simulation objects with the
+        given args
+        """
+
+        if not self.sims:
+            self.make_sims()
+        if parallel:
+            self.log.warning('Not actually running in parallel. Fix it!')
+            for sim in self.sims.values():
+                _call_func(method_name, sim, args)
+        else:
+            for sim in self.sims.values():
+                _call_func(method_name, sim, args)
 
     def process(self, crunch=True, plot=True, gcrunch=True, gplot=True,
                 grouped_against=None, grouped_by=None):
@@ -2235,10 +2320,10 @@ class Processor:
         else:
             self.log.info("No processing to do for individual simulations!")
         # Process groups
-        if (gcrunch or gplot) and self.sim_groups:
+        if (gcrunch or gplot) and self.conf_groups:
             self.log.info('Processing simulation groups')
-            group_configs = [configs[group[0].ID] for group in self.sim_groups]
-            if len(group_configs) != len(self.sim_groups):
+            group_configs = [configs[group[0].ID] for group in self.conf_groups]
+            if len(group_configs) != len(self.conf_groups):
                 raise ValueError('Must have same number of group plans as groups!')
             for config in group_configs:
                 if not gcrunch:
@@ -2249,17 +2334,17 @@ class Processor:
             # needs to know the directory where its data file is stored. This
             # will go away when all the data is stored in a single master HDF5
             # file
-            for i in range(len(self.sim_groups)):
-                self.sim_groups[i] = [(conf,
+            for i in range(len(self.conf_groups)):
+                self.conf_groups[i] = [(conf,
                                        osp.dirname(self.sim_confs[conf.ID][1]))
-                                      for conf in self.sim_groups[i]]
+                                      for conf in self.conf_groups[i]]
             args_list = [(group, self.base_dir, plan, bandwidth) for group, plan in
-                         zip(self.sim_groups, group_configs)]
+                         zip(self.conf_groups, group_configs)]
             kws_list = [{'grouped_by': grouped_by, 'grouped_against':
                          grouped_against} for i in range(len(args_list))]
             self._process(execute_group_plan, args_list, kws_list)
         else:
-            if not self.sim_groups:
+            if not self.conf_groups:
                 self.log.info("No available simulation groups to process!")
             else:
                 self.log.info("No processing to do for simulation groups!")

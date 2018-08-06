@@ -140,6 +140,8 @@ class Preprocessor:
                               skip_keys=skip_keys)
                 self.confs.append(conf)
         else:
+            names = Config({'P': in_pars})
+            parser.update_names(names)
             conf = Config(parser.load(self.template),
                           skip_keys=skip_keys)
             self.confs.append(conf)

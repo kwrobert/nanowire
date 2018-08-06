@@ -267,6 +267,7 @@ class Parser:
             # TODO: feature T2
             self.errors.append(ex)
             msg = "Expression: {}".format(expr)
+            print(msg)
             ex.args = ex.args + (msg,)
             raise
         # TODO: feature T4: include this part of the classes so user could override

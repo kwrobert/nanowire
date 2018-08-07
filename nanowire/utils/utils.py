@@ -610,7 +610,7 @@ def get_pytables_desc(data, skip_keys=[], keypath=''):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 fields[key] = tb.Col.from_dtype(dtype)
-    return fields, meta
+    return tb.Description(fields), meta
 
 
 def _recurse_row(row, base, data):
@@ -628,7 +628,8 @@ def _recurse_row(row, base, data):
 
 
 def add_row(tbl, data, skip_keys=[]):
-    """Add a new row to a table based on the contents of a dict.
+    """
+    Add a new row to a table based on the contents of a dict.
     """
     row = tbl.row
     for (key, value) in data.items():
@@ -645,6 +646,25 @@ def add_row(tbl, data, skip_keys=[]):
             row[key] = value
     row.append()
     tbl.flush()
+
+
+def update_row(row, data, skip_keys=[]):
+    """
+    Update a row already in a table with the contents of a dict.
+    """
+    for (key, value) in data.items():
+        if key in skip_keys:
+            continue
+        if isinstance(value, MutableMapping):
+            _recurse_row(row, key + '/', value)
+        # elif isinstance(value, list) and type(value[0]) == str:
+        #     value = [el.encode('utf-8') for el in value]
+        #     row[key] = np.array(value)
+        elif isinstance(value, pint.quantity._Quantity):
+            row[key] = value.magnitude
+        else:
+            row[key] = value
+    return row
 
 
 def view_fields(a, names):

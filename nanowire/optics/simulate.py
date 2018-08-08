@@ -7,6 +7,7 @@ import os
 import os.path as osp
 import posixpath
 import sys
+import unqlite
 import copy
 from multiprocessing.pool import Pool
 import multiprocessing as mp
@@ -81,7 +82,7 @@ formatter = logging.Formatter('%(asctime)s [%(name)s:%(levelname)s]'
                               ' - %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
 # Create logger
 logger = logging.getLogger(__name__)
-logger.setLevel(info)
+logger.setLevel(debug)
 log_dir, logfile = osp.split(osp.expandvars(logfile))
 # Set up file handler
 try:
@@ -278,9 +279,12 @@ class SimulationManager:
                         'dispy': self.run_dispy}
         self.send_solutions = send_solutions
         self.nodes = nodes
-        if not base_dir:
-            self.base_dir = osp.dirname(osp.abspath(db))
-        self.db = open_pytables_file(db, 'r')
+        self.db = unqlite.UnQLite(osp.abspath(db))
+        self.ip_addr = ip
+        if num_cores is None:
+            self.num_cores = mp.cpu_count()
+        else:
+            self.num_cores = num_cores
         self.ip_addr = ip
         if num_cores is None:
             self.num_cores = mp.cpu_count()

@@ -1,4 +1,5 @@
 import os
+import re
 import six
 import sys
 import posixpath
@@ -14,11 +15,12 @@ import pint
 import tempfile as tmp
 import numpy as np
 import tables as tb
-from functools import wraps
+from functools import wraps, partial
 from line_profiler import LineProfiler
 from contextlib import contextmanager
 from itertools import accumulate, repeat, chain, product, tee
 from collections import Iterable, OrderedDict, MutableMapping
+from boltons.iterutils import remap, get_path
 
 ureg = pint.UnitRegistry()
 Q_ = ureg.Quantity
@@ -876,7 +878,71 @@ def open_pytables_file(hdf, mode):
 
 
 def pairwise(iterable):
-    "s -> (s0,s1), (s1,s2), (s2, s3), ..."
+    """s -> (s0,s1), (s1,s2), (s2, s3), ..."""
     a, b = tee(iterable)
     next(b, None)
     return zip(a, b)
+
+
+def decode_bytes(d, skip_paths=None, encoding='utf-8'):
+    """
+    Decode all bytes objects found in a dict recursively
+
+    Parameters
+    ----------
+
+    d : dict
+        The dictionary to transform
+    skip_paths : set/list/tuple, optional
+        A container of tuples indicating paths that should not be decoded
+    encoding : str, optional
+        The encoding to use
+    """
+
+    skip_paths = set(skip_paths) if skip_paths is not None else set()
+    def visit(encoding, path, key, value):
+        if isinstance(value, bytes) and path not in skip_paths:
+            return key, value.decode(encoding)
+        return key, value
+    return remap(d, visit=partial(visit, encoding))
+
+
+def make_filter(query):
+    """
+    Build an return a function that will evaluate a query string on a nested
+    mapping object. The query string must be a valid python conditional in
+    string form, and entries in the dict may be referred to by a path separated
+    string.
+
+    Example
+    -------
+
+    >>> query_str = "/a/b/a > 3 or a/c/a/ == 2"
+    >>> records = [{'a': {'b': {'a': random.randint(0, 5)},
+                    'c': {'a': random.randint(0, 5)}}} for i in range(50)]
+    >>> myfilter = make_filter(query_str)
+    >>> matches = [record for record in records if myfilter(record)]
+    >>> print(matches)
+
+    Return
+    ------
+
+    filter_func : function
+        A function that accepts a single dictionary as an argument. This
+        function returns True if the items in the dictionary satisfy the
+        provided condition, False otherwise.
+    """
+    pat = re.compile('(/?(\S+/)+\S+)')
+    paths = [match[0] for match in re.findall(pat, query)]
+    path_tups = [tuple(path.strip('/').split('/')) for path in paths]
+    expr = query
+    for path, tup in zip(paths, path_tups):
+        expr = re.sub(path, 'get_path(record, {})'.format(str(tup)), expr)
+    func_str = """
+def f(record):
+    record = record["_d"]
+    ret = bool({})
+    return ret
+""".format(expr)
+    exec(func_str)
+    return locals()['f']

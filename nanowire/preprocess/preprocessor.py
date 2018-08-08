@@ -6,6 +6,7 @@ import logging
 import ast
 import operator as op
 import pint
+import unqlite
 from collections import MutableMapping
 from nanowire.utils.utils import (
     get_pytables_desc,
@@ -166,79 +167,37 @@ class Preprocessor:
                 os.makedirs(outdir)
             conf.write(outfile)
 
-    def add_to_database(self, db, tb_path='/', tb_name='simulations',
+    def add_to_database(self, db, tb_name='simulations',
                         skip_keys=None, update=False):
         """
         Add the generated configs to table located immediately beneath path
-        `tb_path` with name 'tb_name' inside an HDF5 file `db`.
+        `tb_path` with name 'tb_name' inside an UnQLite database `db`.
 
         Parameters
         ----------
 
-        db : str, :py:class:`tb.file.File`
-            Either a path to an HDF5 file as a string, or a PyTables file
-            handle. The file handle may be open or closed. If it's open, it
-            just gets passed through unmodified. If it's closed, it gets
-            reopened. If `db` is a string representing a path that does not yet
-            exist, it is created. If no table with matching location exists
-            inside the HDF5 file, all intermediate groups along the path and
-            the table at the end of the path are created
+        db : str
+            A path to the database file. If it does not exist, it is created
+            automatically.
 
         update : bool
             Update configs that already exist in the database
         """
 
         skip_keys = skip_keys if skip_keys is not None else []
-        # Generate table description
-        # flat_conf = self.confs[0].flatten(sep='__')
-        desc_dict = {'ID': self.confs[0].ID, 'yaml': self.confs[0].dump()}
-        # desc_dict.update(flat_conf)
-        desc_dict.update(self.confs[0])
-        # desc = get_pytables_desc(desc_dict, skip_keys=skip_keys)
-        desc, meta = get_pytables_desc(desc_dict)
-        desc._v_colobjects['ID']._v_pos = 0
-        # Open in append mode!
-        hdf = open_pytables_file(db, 'a')
-        try:
-            table = hdf.create_table(where=tb_path, name=tb_name,
-                                     description=desc, createparents=True)
-            existing_ids = []
-        # Table already exists
-        except tb.NodeError:
-            table = hdf.get_node(where=tb_path, name=tb_name,
-                                 classname='Table')
-            existing_ids = set(table.read(field='ID'))
-        # conf_row = table.row
+        db = unqlite.UnQLite(db)
+        col = db.collection(tb_name)
+        # Only creates a new collection if one does not already exist
+        col.create()
+        existing_ids = set(rec['ID'] for rec in col.all())
         for conf in self.confs:
-            if conf.ID.encode('utf-8') in existing_ids and not update:
+            ID = conf.ID.encode('utf-8')
+            if ID in existing_ids and not update:
                 self.log.info('ID %s already in table, skipping', conf.ID)
                 continue
-            elif conf.ID.encode('utf-8') in existing_ids and update:
+            elif (ID in existing_ids) and update:
                 self.log.info('Updating ID %s', conf.ID)
-                write_dict = {'ID': conf.ID, 'yaml': conf.dump()}
-                write_dict.update(conf)
-                count = 0
-                for row in table.where('ID == b"{}"'.format(conf.ID)):
-                    print("Updating row {}".format(row))
-                    print('Config: ', conf['General/sample_dict'])
-                    if count >= 1:
-                        raise ValueError("More than 1 entry in the DB with "
-                                         "the same ID")
-                    row = update_row(row, write_dict)
-                    print('ROW: ', row['General/sample_dict'])
-                    row.update()
-                    table.flush()
-                    count += 1
+                conf.update_collection(col)
             else:
                 self.log.info('Adding new ID %s ', conf.ID)
-                print('Adding new ID %s ', conf.ID)
-                write_dict = {'ID': conf.ID, 'yaml': conf.dump()}
-                write_dict.update(conf)
-                add_row(table, write_dict)
-            # conf_row['ID'] = conf.ID
-            # flat = conf.flatten(skip_branch=skip_keys, sep='__')
-            # for k, v in flat.items():
-            #     conf_row[k] = v
-            # conf_row.append()
-        table.flush()
-        hdf.close()
+                conf.store_in_collection(db, col)

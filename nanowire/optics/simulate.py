@@ -7,6 +7,7 @@ import os
 import os.path as osp
 import posixpath
 import sys
+import unqlite
 import copy
 from multiprocessing.pool import Pool
 import multiprocessing as mp
@@ -277,7 +278,7 @@ class SimulationManager:
                         'parallel': self.run_parallel,
                         'dispy': self.run_dispy}
         self.nodes = nodes
-        self.db = open_pytables_file(db, 'r')
+        self.db = unqlite.UnQLite(osp.abspath(db))
         self.ip_addr = ip
         if num_cores is None:
             self.num_cores = mp.cpu_count()

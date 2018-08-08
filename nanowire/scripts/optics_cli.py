@@ -31,20 +31,21 @@ h4 = "A list of keys within the configs to skip when generating the config ID"
 @click.argument('template', type=exist_read_path)
 @click.argument('db', type=cli_path)
 @click.option('-p', '--params', default=None, type=exist_read_path, help=h1)
-@click.option('-t', '--table-path', default='/', help=h2, show_default=True)
 @click.option('-n', '--table-name', default='simulations', help=h3,
               show_default=True)
 @click.option('-s', '--skip-keys', default=['General', 'Materials'], help=h4,
               show_default=True)
-def preprocess(template, db, params, table_path, table_name, skip_keys):
+@click.option('--update/--no-update', default=False,
+              help="Update any configs that already exist in the database")
+def preprocess(template, db, params, table_name, skip_keys, update):
     """
     Preprocess the template file located at path TEMPLATE.
 
     The preprocessor consumes a YAML template and an optional params file. For
     each unique combination of parameters in the params file (Cartesian product
     of the parameters), a Config object is generated from the template and
-    stored in the HDF5 file DB, as well as on disk in a subdirectory named
-    using the first 10 characters of the Config ID
+    stored in the UnQlite database DB, as well as on disk in a subdirectory
+    named using the first 10 characters of the Config ID
     """
 
     import nanowire.preprocess as prep
@@ -55,8 +56,8 @@ def preprocess(template, db, params, table_path, table_name, skip_keys):
     click.echo('Writing configs to disk ...')
     pp.write_configs()
     click.echo('Writing configs to database ...')
-    pp.add_to_database(db, tb_path=table_path, tb_name=table_name,
-                       skip_keys=skip_keys)
+    pp.add_to_database(db, tb_name=table_name, skip_keys=skip_keys,
+                       update=update)
     click.secho('Preprocessing complete!', fg='green')
 
 
@@ -97,7 +98,7 @@ def dump_configs(db, output_dir, id):
     """
     Dump all configs stored in DB to files
 
-    DB must be a path to an HDF5 file containing the database of simulation
+    DB must be a path to an UnQLite file containing the database of simulation
     configs. All configs in the database are dumped to YAML files on disk, with
     the files stored in subdirectories named using the first 10 characters of
     the config ID
@@ -139,7 +140,6 @@ h4 = "Name of the table at the end of table_path for storing configurations"
               help="Optional params for the config file parser")
 @click.option('-q', '--query', type=click.STRING, help=h1)
 @click.option('-u', '--update', default=False, is_flag=True, help=h2)
-@click.option('-t', '--table-path', default='/', help=h3, show_default=True)
 @click.option('-m', '--table-name', default='simulations', help=h4,
               show_default=True)
 @click.option('-n', '--nodes', type=click.STRING, multiple=True,
@@ -153,7 +153,7 @@ h4 = "Name of the table at the end of table_path for storing configurations"
               default='info',
               help="Set verbosity of logging")
 
-def run_all(db, exec_mode, base_dir, params, query, update, table_path,
+def run_all(db, exec_mode, base_dir, params, query, update,
             table_name, nodes, ip_addr, num_cores, log_level):
     """
     Run all simulations matching QUERY located in the HDF5 DB
@@ -167,8 +167,7 @@ def run_all(db, exec_mode, base_dir, params, query, update, table_path,
     manager = simul.SimulationManager(db, nodes=nodes, ip=ip_addr,
                                       num_cores=num_cores,
                                       log_level=log_level.upper())
-    manager.load_confs(base_dir=base_dir, query=query, table_path=table_path,
-                       table_name=table_name)
+    manager.load_confs(base_dir=base_dir, query=query, table_name=table_name)
     if update:
         manager.run(exec_mode, func=simul.update_sim, load=True)
     else:
@@ -183,7 +182,6 @@ def run_all(db, exec_mode, base_dir, params, query, update, table_path,
 @click.option('-p', '--params', default=None, type=exist_read_path,
               help="Optional params for the config file parser")
 @click.option('-q', '--query', type=str, help=h1)
-@click.option('-t', '--table-path', default='/', help=h3, show_default=True)
 @click.option('-n', '--table-name', default='simulations', help=h4,
               show_default=True)
 @click.option('--crunch/--no-crunch', default=True,
@@ -237,7 +235,7 @@ def postprocess(db, template, base_dir, params, query, table_path, table_name,
     # conf = parsed_dicts[0]
     proc = post.Processor(db, template, base_dir=base_dir, num_cores=num_cores)
     proc.load_confs(base_dir=base_dir, query=query,
-                    table_path=table_path, table_name=table_name)
+                    table_name=table_name)
     if group_against:
         proc.group_against(group_against)
     elif group_against:

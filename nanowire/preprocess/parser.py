@@ -446,6 +446,12 @@ class Parser:
             vals.append(vals[-1] + delta)
         return vals
 
+    def fn_sum(self, *args):
+        return sum(args)
+
+    def fn_round(self, num, digits=10):
+        return round(num, digits)
+
     def fn_extend(self, val, val2):
         val = copy.deepcopy(val)
         if isinstance(val, list) and isinstance(val2, list):

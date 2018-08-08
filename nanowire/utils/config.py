@@ -6,19 +6,24 @@ import logging
 import json
 import pint
 import yaml
+import pickle
+import unqlite
 try:
     from yaml import CLoader as Loader, CDumper as Dumper
 except ImportError:
     from yaml import Loader, Dumper
 import tables as tb
+from boltons.iterutils import remap, default_enter
 from dicthash import generate_hash_from_dict
-from collections import MutableMapping, OrderedDict
+from collections import MutableMapping, OrderedDict, ItemsView
 from nanowire.utils.utils import (
     remove_fields,
     numpy_arr_to_dict,
     Q_,
     cmp_dicts,
     find_keypaths,
+    decode_bytes,
+    make_filter,
 )
 from nanowire.utils.logging import add_logger
 
@@ -232,6 +237,39 @@ class Config(MutableMapping):
                                       'skip_keys': conf.skip_keys,
                                       '_d': conf._d})
 
+    def update_collection(self, db, col):
+        """
+        Update the document in collection `col` contained in this config to the collection `col` in the
+        UnQLite database `db`
+        """
+        ID = conf.ID.encode('utf-8')
+        docs = col.filter(lambda rec: rec['ID'] == ID)
+        if len(docs) > 1:
+            raise ValueError("More than 1 entry in the DB with "
+                             "the same ID")
+        elif len(docs) < 1:
+            raise RuntimeError("Config does not exist in db")
+        doc = docs.pop()
+        doc_id = doc['__id']
+        write_dict = {'ID': self.ID, 'skip_keys': self.skip_keys, '_d': self._d}
+        write_dict = prepare_for_db(write_dict)
+        with db.transaction():
+            success = col.update(doc_id, write_dict)
+            if not isinstance(success, int):
+                raise Exception("Unable to update collection")
+
+    def store_in_collection(self, db, col):
+        ID = self.ID.encode('utf-8')
+        docs = col.filter(lambda rec: rec['ID'] == ID)
+        if len(docs) != 0:
+            raise ValueError("Config already exists in db")
+        write_dict = {'ID': self.ID, 'skip_keys': self.skip_keys, '_d': self._d}
+        write_dict = prepare_for_db(write_dict)
+        with db.transaction():
+            success = col.store(write_dict)
+            if not isinstance(success, int):
+                raise Exception("Unable to store in collection")
+
     @classmethod
     def fromYAML(cls, stream, skip_keys=None, **kwargs):
         """
@@ -284,6 +322,29 @@ class Config(MutableMapping):
         d = {'yaml': cls.fromYAML, 'json': cls.fromJSON}
         with open(path, 'r') as stream:
             inst = d[syntax](stream, **kwargs)
+        return inst
+
+    @classmethod
+    def fromDocument(cls, doc, skip_keys=None):
+        """
+        Load config from a document retrieved from an UnQLite DB
+        """
+        schema = doc['__schema']
+        data = prepare_from_db(schema, doc)
+        skip_keys = skip_keys if skip_keys is not None else []
+        if 'skip_keys' in data:
+            for item in data['skip_keys']:
+                if isinstance(item, list):
+                    skip_keys.append(tuple(item))
+                else:
+                    skip_keys.append(item)
+            del data['skip_keys']
+        if 'ID' in data and '_d' in data:
+            inst = cls(data['_d'], skip_keys=skip_keys)
+        else:
+            inst = cls(data, skip_keys=skip_keys)
+        # if doc['ID'].decode('utf-8') != inst.ID:
+        #     raise ValueError("Loaded config does not have same ID as DB entry")
         return inst
 
     @classmethod
@@ -472,8 +533,7 @@ def group_by(confs, key, sort_key=None):
     return groups
 
 # @add_logger(logging.getLogger(__name__))
-def load_confs(db, base_dir='', query='', table_path='/',
-               table_name='simulations', IDs=None):
+def load_confs(db, base_dir='', query='', table_name='simulations', IDs=None):
     """
     Load configs from disk
 
@@ -503,7 +563,7 @@ def load_confs(db, base_dir='', query='', table_path='/',
     Returns
     -------
     confs : dict
-        A dict whose keys are Config IDs and values are a tuple containing a 
+        A dict whose keys are Config IDs and values are a tuple containing a
         :py:class:`nanowire.preprocess.config.Config` object as the first
         element and the output path for the Config object as the second element
     t_sweeps : dict
@@ -517,45 +577,41 @@ def load_confs(db, base_dir='', query='', table_path='/',
 
     if IDs and not isinstance(IDs, set):
         IDs = set(IDs)
-    # Open HDF5 database if its path or as PyTables file
     if isinstance(db, str):
-        if not os.path.isfile(db):
-            raise ValueError('Database {} is not a file'.format(db))
-        db = tb.open_file(db, 'r')
-    elif isinstance(db, tb.file.File):
-        if not db.isopen:
-            db = tb.open_file(db.filename, 'r')
+        db = unqlite.UnQLite(db)
     else:
-        raise ValueError('Invalid HDF5 database argument: {}'.format(db))
+        db.open()
+    col = db.collection(table_name)
+    # Only creates a new collection if one does not already exist
+    col.create()
     if not base_dir:
         base_dir = os.path.dirname(db.filename)
-    table = db.get_node(table_path, name=table_name,
-                        classname='Table')
     confs = {}
     if query:
-        condvars = {k.replace('/', '__'): v
-                    for k, v in table.colinstances.items()}
-        for row in table.read_where(query, condvars=condvars):
-            ID = row['ID'].decode()
+        filter_func = make_filter(query)
+        print('function: ', filter_func)
+        for doc in col.filter(filter_func):
+            ID = doc['ID'].decode()
             short_id = ID[0:10]
             conf_path = os.path.join(base_dir, short_id, 'sim_conf.yml')
             if IDs and ID not in IDs:
                 continue
+            print('Loading config: %s', conf_path)
             log.info('Loading config: %s', conf_path)
-            conf = Config.fromYAML(row['yaml'])
+            conf = Config.fromDocument(doc)
             if ID != conf.ID:
                 raise ValueError('ID in database and ID of loaded '
                                  'config do not match')
             confs[conf.ID] = (conf, conf_path)
     else:
-        for row in table.read():
-            ID = row['ID'].decode()
+        for doc in col.all():
+            ID = doc['ID'].decode()
             short_id = ID[0:10]
             conf_path = os.path.join(base_dir, short_id, 'sim_conf.yml')
             if IDs and ID not in IDs:
                 continue
             log.info('Loading config: %s', conf_path)
-            conf = Config.fromYAML(row['yaml'])
+            conf = Config.fromDocument(doc)
             if ID != conf.ID:
                 raise ValueError('ID in database and ID of loaded '
                                  'config do not match')
@@ -597,7 +653,7 @@ def load_confs(db, base_dir='', query='', table_path='/',
     return confs, t_sweeps, db
 
 
-def dump_configs(db, table_path='/', table_name='simulations',
+def dump_configs(db, table_name='simulations',
                  outdir='', fname=None, IDs=None):
     """
     Dump all the Configs in an HDF5 database to YAML files
@@ -618,13 +674,14 @@ def dump_configs(db, table_path='/', table_name='simulations',
         created.
     fname : callable, optional
         A callable that determines the location of the outputted files beneath
-        outdir. The callable must accept a PyTables row object (dict-like) as
-        the only argument, and return a string representing the path beneath
-        `outdir` (including the filename) that the config file will be written
-        to. If not specified files are written directly beneath `outdir` named
-        by config ID with a '.yml' extension.
-    IDs : list/tuple/set, optional 
+        outdir. The callable must accept a dict as the only argument, and
+        return a string representing the path beneath `outdir` (including the
+        filename) that the config file will be written to. If not specified
+        files are written directly beneath `outdir` named by config ID with a
+        '.yml' extension.
+    IDs : list/tuple/set, optional
         A container of IDs. Only the IDs in the container will be written
+
     Returns
     -------
 
@@ -643,30 +700,83 @@ def dump_configs(db, table_path='/', table_name='simulations',
     outdir = outdir if outdir else os.path.dirname(db)
     if not os.path.isdir(outdir):
         os.makedirs(outdir)
-    # Open HDF5 database if its path or as PyTables file
-    if isinstance(db, str):
-        if not os.path.isfile(db):
-            raise ValueError('Database {} is not a file'.format(db))
-        db = tb.open_file(db, 'r')
-    elif isinstance(db, tb.file.File):
-        if not db.isopen:
-            db = tb.open_file(db.filename, 'r')
-    else:
-        raise ValueError('Invalid HDF5 database argument: {}'.format(db))
-    table = db.get_node(table_path, name=table_name, classname='Table')
+    db = unqlite.UnQLite(db)
+    col = db.collection(table_name)
+    col.create()
     paths = []
-    for row in table.iterrows():
-        stream = row['yaml'].decode()
-        ID = row['ID'].decode()
+    for doc in col.all():
+        ID = doc['ID'].decode()
         if IDs and ID not in IDs:
             continue
         if fname is not None:
-            outname = fname(row)
+            outname = fname(doc)
         else:
             outname = '{}.yml'.format(ID)
         outpath = os.path.join(outdir, outname)
-        print('Dumping config {} to {}'.format(ID, outpath))
-        with open(outpath, 'w') as f:
-            f.write(stream)
+        filedir = os.path.dirname(outpath)
+        if not os.path.isdir(filedir):
+            os.makedirs(filedir)
+        conf = Config.fromDocument(doc)
+        conf.write(outpath)
         paths.append(outpath)
     return paths, db
+
+def prepare_for_db(d):
+    schema = {}
+    good_types = {float, int, list, dict, bool}
+
+    def visit(path, key, value):
+        fullpath = posixpath.join(*[str(el) for el in path], str(key))
+        if type(value) in good_types or value is None:
+            return key, value
+        elif isinstance(value, str):
+            schema[fullpath] = 'str'
+            return key, value
+        elif isinstance(value, pint.quantity._Quantity):
+            if isinstance(value.magnitude, int):
+                schema[fullpath] = 'pintq int {}'.format(value.units)
+            else:
+                schema[fullpath] = 'pintq float {}'.format(value.units)
+            return key, value.magnitude
+        else:
+            schema[fullpath] = 'pickle'
+            ret = pickle.dumps(value)
+            print("DUMPED: {}".format(ret))
+            return key, ret
+
+    def enter(path, key, value, **kwargs):
+        if isinstance(value, MutableMapping):
+            return value, ItemsView(value)
+        else:
+            return default_enter(path, key, value)
+    # d = remap(d, visit=visit, enter=enter)
+    d = remap(d, visit=visit)
+    d['__schema'] = schema
+    return d
+
+def prepare_from_db(schema, d):
+
+    def visit(path, key, value):
+        fullpath = posixpath.join(*[str(el) for el in path], str(key))
+        if fullpath in schema:
+            method = schema[fullpath].decode('utf-8')
+            if method == 'str':
+                return key, value.decode('utf-8')
+            if 'pintq' in method:
+                data = method.split(None, 2)
+                klass = data[1]
+                units = data[2]
+                print(klass)
+                if klass == 'int':
+                    return key, Q_(int(value), units)
+                else:
+                    return key, Q_(float(value), units)
+            elif method == 'pickle':
+                ret = pickle.loads(value)
+                return key, ret
+            else:
+                raise ValueError("Invalid entry {} in schema".format(method))
+        else:
+            return key, value
+    d = remap(d, visit=visit)
+    return d

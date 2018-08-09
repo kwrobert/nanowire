@@ -7,6 +7,7 @@ import ast
 import operator as op
 import pint
 import unqlite
+import pickle
 from collections import MutableMapping
 from nanowire.utils.utils import (
     get_pytables_desc,
@@ -197,7 +198,7 @@ class Preprocessor:
                 continue
             elif (ID in existing_ids) and update:
                 self.log.info('Updating ID %s', conf.ID)
-                conf.update_collection(col)
+                conf.update_in_db(db, col)
             else:
                 self.log.info('Adding new ID %s ', conf.ID)
-                conf.store_in_collection(db, col)
+                conf.store_in_db(db, col)

@@ -7,6 +7,7 @@ import json
 import pint
 import yaml
 import pickle
+import warnings
 import unqlite
 try:
     from yaml import CLoader as Loader, CDumper as Dumper
@@ -237,38 +238,34 @@ class Config(MutableMapping):
                                       'skip_keys': conf.skip_keys,
                                       '_d': conf._d})
 
-    def update_collection(self, db, col):
+    def update_in_db(self, db, col):
         """
         Update the document in collection `col` contained in this config to the collection `col` in the
         UnQLite database `db`
         """
         ID = conf.ID.encode('utf-8')
-        docs = col.filter(lambda rec: rec['ID'] == ID)
-        if len(docs) > 1:
-            raise ValueError("More than 1 entry in the DB with "
-                             "the same ID")
-        elif len(docs) < 1:
-            raise RuntimeError("Config does not exist in db")
-        doc = docs.pop()
-        doc_id = doc['__id']
+        pkl_data = db[ID]
+        idkey = '{}_docid'.format(ID)
+        doc_id = db[idkey]
         write_dict = {'ID': self.ID, 'skip_keys': self.skip_keys, '_d': self._d}
         write_dict = prepare_for_db(write_dict)
         with db.transaction():
             success = col.update(doc_id, write_dict)
             if not isinstance(success, int):
                 raise Exception("Unable to update collection")
+            db[self.ID] = pickle.dumps(self)
+            db[idkey] = success
 
-    def store_in_collection(self, db, col):
+    def store_in_db(self, db, col):
         ID = self.ID.encode('utf-8')
-        docs = col.filter(lambda rec: rec['ID'] == ID)
-        if len(docs) != 0:
-            raise ValueError("Config already exists in db")
         write_dict = {'ID': self.ID, 'skip_keys': self.skip_keys, '_d': self._d}
         write_dict = prepare_for_db(write_dict)
         with db.transaction():
             success = col.store(write_dict)
             if not isinstance(success, int):
                 raise Exception("Unable to store in collection")
+            db[self.ID] = pickle.dumps(self)
+            db['{}_docid'.format(self.ID)] = success
 
     @classmethod
     def fromYAML(cls, stream, skip_keys=None, **kwargs):
@@ -324,28 +321,28 @@ class Config(MutableMapping):
             inst = d[syntax](stream, **kwargs)
         return inst
 
-    @classmethod
-    def fromDocument(cls, doc, skip_keys=None):
-        """
-        Load config from a document retrieved from an UnQLite DB
-        """
-        schema = doc['__schema']
-        data = prepare_from_db(schema, doc)
-        skip_keys = skip_keys if skip_keys is not None else []
-        if 'skip_keys' in data:
-            for item in data['skip_keys']:
-                if isinstance(item, list):
-                    skip_keys.append(tuple(item))
-                else:
-                    skip_keys.append(item)
-            del data['skip_keys']
-        if 'ID' in data and '_d' in data:
-            inst = cls(data['_d'], skip_keys=skip_keys)
-        else:
-            inst = cls(data, skip_keys=skip_keys)
-        # if doc['ID'].decode('utf-8') != inst.ID:
-        #     raise ValueError("Loaded config does not have same ID as DB entry")
-        return inst
+    # @classmethod
+    # def fromDocument(cls, doc, skip_keys=None):
+    #     """
+    #     Load config from a document retrieved from an UnQLite DB
+    #     """
+    #     # schema = doc['__schema']
+    #     data = prepare_from_db(schema, doc)
+    #     skip_keys = skip_keys if skip_keys is not None else []
+    #     if 'skip_keys' in data:
+    #         for item in data['skip_keys']:
+    #             if isinstance(item, list):
+    #                 skip_keys.append(tuple(item))
+    #             else:
+    #                 skip_keys.append(item)
+    #         del data['skip_keys']
+    #     if 'ID' in data and '_d' in data:
+    #         inst = cls(data['_d'], skip_keys=skip_keys)
+    #     else:
+    #         inst = cls(data, skip_keys=skip_keys)
+    #     if doc['ID'].decode('utf-8') != inst.ID:
+    #         raise ValueError("Loaded config does not have same ID as DB entry")
+    #     return inst
 
     @classmethod
     def from_array(cls, array, skip_fields=[], **kwargs):
@@ -589,7 +586,6 @@ def load_confs(db, base_dir='', query='', table_name='simulations', IDs=None):
     confs = {}
     if query:
         filter_func = make_filter(query)
-        print('function: ', filter_func)
         for doc in col.filter(filter_func):
             ID = doc['ID'].decode()
             short_id = ID[0:10]
@@ -598,20 +594,22 @@ def load_confs(db, base_dir='', query='', table_name='simulations', IDs=None):
                 continue
             print('Loading config: %s', conf_path)
             log.info('Loading config: %s', conf_path)
-            conf = Config.fromDocument(doc)
+            # conf = Config.fromDocument(doc)
+            conf = pickle.loads(db[ID])
             if ID != conf.ID:
                 raise ValueError('ID in database and ID of loaded '
                                  'config do not match')
             confs[conf.ID] = (conf, conf_path)
     else:
-        for doc in col.all():
-            ID = doc['ID'].decode()
+        for ID, pkl_data in db.items():
+            ID = ID.decode()
             short_id = ID[0:10]
             conf_path = os.path.join(base_dir, short_id, 'sim_conf.yml')
             if IDs and ID not in IDs:
                 continue
             log.info('Loading config: %s', conf_path)
-            conf = Config.fromDocument(doc)
+            # conf = Config.fromDocument(doc)
+            conf = pickle.loads(pkl_data)
             if ID != conf.ID:
                 raise ValueError('ID in database and ID of loaded '
                                  'config do not match')
@@ -722,7 +720,7 @@ def dump_configs(db, table_name='simulations',
     return paths, db
 
 def prepare_for_db(d):
-    schema = {}
+    # schema = {}
     good_types = {float, int, list, dict, bool}
 
     def visit(path, key, value):
@@ -730,19 +728,17 @@ def prepare_for_db(d):
         if type(value) in good_types or value is None:
             return key, value
         elif isinstance(value, str):
-            schema[fullpath] = 'str'
+            # schema[fullpath] = 'str'
             return key, value
         elif isinstance(value, pint.quantity._Quantity):
-            if isinstance(value.magnitude, int):
-                schema[fullpath] = 'pintq int {}'.format(value.units)
-            else:
-                schema[fullpath] = 'pintq float {}'.format(value.units)
+            # if isinstance(value.magnitude, int):
+            #     schema[fullpath] = 'pintq int {}'.format(value.units)
+            # else:
+            #     schema[fullpath] = 'pintq float {}'.format(value.units)
             return key, value.magnitude
         else:
-            schema[fullpath] = 'pickle'
-            ret = pickle.dumps(value)
-            print("DUMPED: {}".format(ret))
-            return key, ret
+            msg = "Cannot serialize type {}, will store None".format(type(value))
+            warnings.warn(msg, RuntimeWarning)
 
     def enter(path, key, value, **kwargs):
         if isinstance(value, MutableMapping):
@@ -751,32 +747,31 @@ def prepare_for_db(d):
             return default_enter(path, key, value)
     # d = remap(d, visit=visit, enter=enter)
     d = remap(d, visit=visit)
-    d['__schema'] = schema
+    # d['__schema'] = schema
     return d
 
-def prepare_from_db(schema, d):
+# def prepare_from_db(schema, d):
 
-    def visit(path, key, value):
-        fullpath = posixpath.join(*[str(el) for el in path], str(key))
-        if fullpath in schema:
-            method = schema[fullpath].decode('utf-8')
-            if method == 'str':
-                return key, value.decode('utf-8')
-            if 'pintq' in method:
-                data = method.split(None, 2)
-                klass = data[1]
-                units = data[2]
-                print(klass)
-                if klass == 'int':
-                    return key, Q_(int(value), units)
-                else:
-                    return key, Q_(float(value), units)
-            elif method == 'pickle':
-                ret = pickle.loads(value)
-                return key, ret
-            else:
-                raise ValueError("Invalid entry {} in schema".format(method))
-        else:
-            return key, value
-    d = remap(d, visit=visit)
-    return d
+#     def visit(path, key, value):
+#         fullpath = posixpath.join(*[str(el) for el in path], str(key))
+#         if fullpath in schema:
+#             method = schema[fullpath].decode('utf-8')
+#             if method == 'str':
+#                 return key, value.decode('utf-8')
+#             if 'pintq' in method:
+#                 data = method.split(None, 2)
+#                 klass = data[1]
+#                 units = data[2]
+#                 if klass == 'int':
+#                     return key, Q_(int(value), units)
+#                 else:
+#                     return key, Q_(float(value), units)
+#             elif method == 'pickle':
+#                 ret = pickle.loads(value)
+#                 return key, ret
+#             else:
+#                 raise ValueError("Invalid entry {} in schema".format(method))
+#         else:
+#             return key, value
+#     d = remap(d, visit=visit)
+#     return d

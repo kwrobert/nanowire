@@ -285,11 +285,6 @@ class SimulationManager:
             self.num_cores = mp.cpu_count()
         else:
             self.num_cores = num_cores
-        self.ip_addr = ip
-        if num_cores is None:
-            self.num_cores = mp.cpu_count()
-        else:
-            self.num_cores = num_cores
         self.blas_threads = blas_threads
         self.log_level = log_level
         lfile = osp.join(base_dir, 'logs/sim_manager.log')

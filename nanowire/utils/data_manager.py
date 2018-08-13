@@ -484,6 +484,8 @@ class HDF5DataManager(DataManager):
         self.writable = {np.ndarray: self.write_numpy_array,
                          str: self.write_string,
                          float: self.write_float,
+                         # We write ints the same way as floats
+                         int: self.write_float,
                          pint.quantity._Quantity: self.write_pint_quantity}
 
     def _get_writer(self, obj):

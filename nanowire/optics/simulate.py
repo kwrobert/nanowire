@@ -81,7 +81,7 @@ formatter = logging.Formatter('%(asctime)s [%(name)s:%(levelname)s]'
                               ' - %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
 # Create logger
 logger = logging.getLogger(__name__)
-logger.setLevel(debug)
+logger.setLevel(info)
 log_dir, logfile = osp.split(osp.expandvars(logfile))
 # Set up file handler
 try:
@@ -272,11 +272,14 @@ class SimulationManager:
     """
 
     def __init__(self, db, nodes=None, ip=None, base_dir='', num_cores=None,
-                 blas_threads=1, log_level='INFO'):
+                 blas_threads=1, log_level='INFO', send_solutions=False):
         self.runners = {'serial': self.run_serial,
                         'parallel': self.run_parallel,
                         'dispy': self.run_dispy}
+        self.send_solutions = send_solutions
         self.nodes = nodes
+        if not base_dir:
+            self.base_dir = osp.dirname(osp.abspath(db))
         self.db = open_pytables_file(db, 'r')
         self.ip_addr = ip
         if num_cores is None:
@@ -472,8 +475,7 @@ class SimulationManager:
         """
         Run jobs in parallel using dispy
         """
-        log = logging.getLogger(__name__)
-        log.info('Executing jobs using dispy cluster')
+        self.log.info('Executing jobs using dispy cluster')
         # log.info("Beginning dispy submit procedure")
         try:
             nodes = self.nodes
@@ -487,13 +489,13 @@ class SimulationManager:
         if ip == 'auto':
             pub_iface = get_public_iface()
             ip = get_public_ip(pub_iface)
-        log.info("Using IP %s for dispy", str(ip))
+        self.log.info("Using IP %s for dispy", str(ip))
         node_allocs = []
-        log.info('Processing nodes %s', str(nodes))
+        self.log.info('Processing nodes %s', str(nodes))
         for node in nodes:
             # If its not a string, hopefully it's a length 2 list or tuple
             # with (str, int) = (ip_addr, port_number)
-            log.info('Allocating node %s', str(node))
+            self.log.info('Allocating node %s', str(node))
             if not isinstance(node, str):
                 node_allocs.append(dispy.NodeAllocate(node[0], port=node[1]))
             # Use default port locally
@@ -503,9 +505,11 @@ class SimulationManager:
                 node_allocs.append(dispy.NodeAllocate(node))
         # Create the setup function that sets the number of OPENBLAS threads to
         # use in a computation
+        # NOTE: Must return 0 on successful completion!!
         def setup(threads):
             import os
             os.environ['OPENBLAS_NUM_THREADS'] = str(threads)
+            return 0
         # reentrant: Jobs scheduled on a node that goes down are automatically
         # rescheduled to another available node
         # cleanup: Leave any generated files on nodes 
@@ -528,53 +532,67 @@ class SimulationManager:
                                    #loglevel=dispy.logger.DEBUG)
         # Wait until we connect to at least one node
         cluster.print_status()
-        log.info('Waiting for connection to nodes ...')
+        self.log.info('Waiting for connection to nodes ...')
         while len(cluster.status().nodes) == 0:
             time.sleep(3)
+        self.log.info("Nodes are up!")
         cluster.print_status()
+        if self.send_solutions:
+            self.log.info('Sending solution files to nodes')
+            glob_path = osp.join(self.base_dir, '*/solution.bin')
+            sol_files = glob.glob(glob_path) 
+            self.log.info('Sending %i files ...', len(sol_files)) 
+            for node in cluster.status().nodes:
+                self.log.info("Sending files to node %s", node.ip_addr)
+                for f in sol_files:
+                    cluster.send_file(f, node)
         jobs = {}
         for i, (conf, outdir) in enumerate(to_run):
             job = cluster.submit(conf.dump(), outdir)
             job.id = conf.ID
-            jobs[job.id] = (i, job, 1)
             stat = DISPY_LOOKUP[job.status]
-            log.info('Job ID: {}, Status: {}'.format(job.id, stat))
+            # (index, job object, number of attempts, last status)
+            jobs[job.id] = [i, job, 1, stat]
+            self.log.info('Job ID: {}, Status: {}'.format(job.id, stat))
         while jobs:
             retry = []
             toremove = []
-            for job_id, (ind, job, attempts) in jobs.items():
+            for job_id, (ind, job, attempts, last_stat) in jobs.items():
                 stat = DISPY_LOOKUP[job.status]
                 runtime = job.result
                 if job.status == dispy.DispyJob.Finished:
-                    log.info('Job ID: %s, Status: %s, Runtime: %f s'
+                    self.log.info('Job ID: %s, Status: %s, Runtime: %f s'
                              ', Host: %s', job_id, stat, runtime, job.ip_addr)
                     toremove.append(job_id)
                 elif job.status == dispy.DispyJob.Terminated:
-                    log.info('Job ID: %i, Status: %s, Exception:\n%s',
+                    self.log.info('Job ID: %i, Status: %s, Exception:\n%s',
                              job_id, stat, job.exception)
                     retry.append(job_id)
                 elif job.status in {dispy.DispyJob.Cancelled,
                                     dispy.DispyJob.Abandoned}:
-                    log.info('Job ID: %s, Status: %s, Host: %s', job_id, stat, job.ip_addr)
+                    self.log.info('Job ID: %s, Status: %s, Host: %s', job_id, stat, job.ip_addr)
                     retry.append(job_id)
                 else:
-                    log.info('Job ID: %s, Status: %s, Host: %s', job_id, stat, job.ip_addr)
+                    if stat != last_stat:
+                        self.log.info('Status Change! Job ID: %s, Status: %s, Host: %s', job_id, stat, job.ip_addr)
+                        jobs[job_id][-1] = stat
             for job_id in toremove:
                 del jobs[job_id]
             for job_id in retry:
-                ind, job, attempts = jobs[job_id]
+                ind, job, attempts, last_stat = jobs[job_id]
                 # Deallocate the node that failed the job
                 cluster.deallocate_node(job.ip_addr)
                 # Resubmit
                 if attempts <= retries:
                     conf, outdir = to_run[ind]
-                    log.info('Resubmitting Job ID %s', job_id)
+                    self.log.info('Resubmitting Job ID %s', job_id)
                     new_job = cluster.submit(conf.dump(), outdir)
                     new_job.id = job_id
-                    jobs[job_id] = (ind, new_job, attempts+1)
+                    stat = DISPY_LOOKUP[new_job.status]
+                    jobs[job_id] = [ind, new_job, attempts+1, stat]
                 # Stop trying and remove the job
                 else:
-                    log.info('Job ID %s reached 3 attempts, giving up', job_id)
+                    self.log.info('Job ID %s reached 3 attempts, giving up', job_id)
                     del jobs[job_id]
             time.sleep(10)
         return None
@@ -628,7 +646,7 @@ class SimulationManager:
 
 class Simulator:
 
-    def __init__(self, conf, outdir):
+    def __init__(self, conf, outdir, loglevel=logging.DEBUG):
         self.conf = conf
         numbasis = self.conf['Simulation']['numbasis']
         period = self.conf['Simulation']['array_period']
@@ -641,6 +659,7 @@ class Simulator:
         self.runtime = 0
         self.lgth_unit = self.conf['General']['base_unit']
         self.period = period
+        self.loglevel = loglevel
 
     # def __del__(self):
     #     """
@@ -690,7 +709,7 @@ class Simulator:
         self.fhandler.addFilter(IdFilter(ID=self.ID))
         formatter = logging.Formatter('%(asctime)s [%(name)s:%(levelname)s] - %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
         self.fhandler.setFormatter(formatter)
-        self.fhandler.setLevel(logging.DEBUG)
+        self.fhandler.setLevel(self.loglevel)
         log = logging.getLogger(__name__)
         log.addHandler(self.fhandler)
         # Store the logger adapter to the module level logger as an attribute.

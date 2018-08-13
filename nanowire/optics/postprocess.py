@@ -145,12 +145,14 @@ class Simulation:
         if it cannot be found.
     """
 
-    def __init__(self, outdir, bandwidth, spectrum='am1.5g', conf=None, simulator=None):
+    def __init__(self, outdir, bandwidth, spectrum='am1.5g', conf=None,
+                 simulator=None, skip_rescale=False):
         """
         :param :class:`~utils.config.Config`: Config object for this simulation
 
         """
         self.spectrum = spectrum
+        self.skip_rescale = True
         if conf is None and simulator is None:
             raise ValueError('Must pass in either a Config object or a'
                              ' Simulator object')
@@ -229,20 +231,25 @@ class Simulation:
         """
 
         ftype = self.conf['General']['save_as'].lower()
-        amplitude = get_incident_amplitude(
-            self.spectrum,
-            self.conf['Simulation/frequency'],
-            self.conf['Simulation/polar_angle'],
-            self.bandwidth,
-            logger=self.log
-        )
-        power = get_incident_power(
-            self.spectrum,
-            self.conf['Simulation/frequency'],
-            self.conf['Simulation/polar_angle'],
-            self.bandwidth,
-            logger=self.log
-        )
+        if self.skip_rescale:
+            self.log.warning("Skipping rescaling to spectrum!")
+            power = Q_(1.0, ureg.watt / ureg.meter**2)
+            amplitude = Q_(1.0, ureg.volts / ureg.meter)
+        else:
+            amplitude = get_incident_amplitude(
+                self.spectrum,
+                self.conf['Simulation/frequency'],
+                self.conf['Simulation/polar_angle'],
+                self.bandwidth,
+                logger=self.log
+            )
+            power = get_incident_power(
+                self.spectrum,
+                self.conf['Simulation/frequency'],
+                self.conf['Simulation/polar_angle'],
+                self.bandwidth,
+                logger=self.log
+            )
         # Create the rescaling hook for the data manager that rescales all
         # powers and fields using the power/amplitude of the incident spectrum
         hook = create_rescaling_hook(power, amplitude, self.log)
@@ -340,6 +347,10 @@ class Simulation:
         else:
             self.data = {}
 
+    def close(self):
+        if isinstance(self.data, DataManager):
+            self.data.close()
+
     def normE(self):
         """
         Calculates the norm of E. Adds it to the data dict for the simulation
@@ -358,7 +369,7 @@ class Simulation:
             d = self.data[comp]
             E_mag += np.absolute(self.data[comp])**2
         E_mag = np.sqrt(E_mag)
-        self.extend_data('normE', np.sqrt(E_mag))
+        self.extend_data('normE', E_mag)
         return np.sqrt(E_mag)
 
     def normEsquared(self):
@@ -1588,10 +1599,13 @@ class SimulationGroup:
                 self.sims[0].heatmap2d(sim, x, y, cs, labels, plane, pval,
                                save_path=p, show=show, draw=draw, fixed=fixed)
 
-    def get_transmission_data(self, port='Substrate_bottom'):
+    def get_transmission_data(self, port='Substrate_bottom', method='flux'):
         if not self.grouped_against == 'Simulation/frequency':
             raise ValueError('Can only retrieve transmission data when '
                              'grouped against frequency')
+        if method not in {'flux', 'integral'}:
+            raise ValueError("Invalid method {}. Must be one of ['flux', "
+                             "'integral']")
         base = self.results_dir
         self.log.info('Retrieving transmission data for group at %s' % base)
         # Assuming the leaves contain frequency values, sum over all of them
@@ -1599,19 +1613,32 @@ class SimulationGroup:
         refl_l = np.zeros(self.num_sims)
         trans_l = np.zeros(self.num_sims)
         absorb_l = np.zeros(self.num_sims)
-        bport = port.encode('utf-8')
-        for i, sim in enumerate(self.sims):
-            # Unpack data for the port we passed in as an argument
-            tdata = sim.data['transmission_data']
-            row = get_record(tdata, 'port', port)[0]
-            ref = row['reflection']
-            trans = row['transmission']
-            absorb = row['absorption']
-            freq = sim.conf['Simulation/frequency']
-            freqs[i] = freq
-            trans_l[i] = trans
-            refl_l[i] = ref
-            absorb_l[i] = absorb
+        if method == 'flux':
+            for i, sim in enumerate(self.sims):
+                # Unpack data for the port we passed in as an argument
+                tdata = sim.data['transmission_data']
+                row = get_record(tdata, 'port', port)[0]
+                ref = row['reflection']
+                trans = row['transmission']
+                absorb = row['absorption']
+                freq = sim.conf['Simulation/frequency']
+                freqs[i] = freq
+                trans_l[i] = trans
+                refl_l[i] = ref
+                absorb_l[i] = absorb
+        else:
+            self.log.warning("Ignoring port argument, computing total "
+                             "absorbance")
+            self.log.warning("Not computing reflectance or transmittance")
+            for i, sim in enumerate(self.sims):
+                freq = sim.conf['Simulation/frequency']
+                angle = sim.conf['Simulation/polar_angle']
+                Pin = get_incident_power('am1.5g', freq, angle, sim.bandwidth) 
+                absorb_rec = get_record(sim.data['power_absorbed'], 'layer', 'total')[0] 
+                Pabs = absorb_rec['int_method']
+                A = Pabs/Pin
+                freqs[i] = freq
+                absorb_l[i] = A.magnitude
         return freqs, refl_l, trans_l, absorb_l
 
     def plot_transmission_data(self, absorbance, reflectance, transmission,
@@ -2288,6 +2315,7 @@ class Processor:
         if parallel:
             self.log.warning('Not actually running in parallel. Fix it!')
             for sim in self.sims.values():
+                self.log.info("Calling %s on sim %s", method_name, sim.ID[0:10])
                 _call_func(method_name, sim, args)
         else:
             for sim in self.sims.values():

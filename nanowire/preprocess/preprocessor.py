@@ -10,6 +10,7 @@ from collections import MutableMapping
 from nanowire.utils.utils import (
     get_pytables_desc,
     add_row,
+    update_row,
     ureg,
     Q_,
     find_lists,
@@ -166,7 +167,7 @@ class Preprocessor:
             conf.write(outfile)
 
     def add_to_database(self, db, tb_path='/', tb_name='simulations',
-                        skip_keys=None):
+                        skip_keys=None, update=False):
         """
         Add the generated configs to table located immediately beneath path
         `tb_path` with name 'tb_name' inside an HDF5 file `db`.
@@ -183,6 +184,8 @@ class Preprocessor:
             inside the HDF5 file, all intermediate groups along the path and
             the table at the end of the path are created
 
+        update : bool
+            Update configs that already exist in the database
         """
 
         skip_keys = skip_keys if skip_keys is not None else []
@@ -193,7 +196,7 @@ class Preprocessor:
         desc_dict.update(self.confs[0])
         # desc = get_pytables_desc(desc_dict, skip_keys=skip_keys)
         desc, meta = get_pytables_desc(desc_dict)
-        desc['ID']._v_pos = 0
+        desc._v_colobjects['ID']._v_pos = 0
         # Open in append mode!
         hdf = open_pytables_file(db, 'a')
         try:
@@ -204,15 +207,34 @@ class Preprocessor:
         except tb.NodeError:
             table = hdf.get_node(where=tb_path, name=tb_name,
                                  classname='Table')
-            existing_ids = table.read(field='ID')
+            existing_ids = set(table.read(field='ID'))
         # conf_row = table.row
         for conf in self.confs:
-            write_dict = {'ID': conf.ID, 'yaml': conf.dump()}
-            write_dict.update(conf)
-            if conf.ID.encode('utf-8') in existing_ids:
-                self.log.info('ID %s already in table', conf.ID)
+            if conf.ID.encode('utf-8') in existing_ids and not update:
+                self.log.info('ID %s already in table, skipping', conf.ID)
                 continue
-            add_row(table, write_dict)
+            elif conf.ID.encode('utf-8') in existing_ids and update:
+                self.log.info('Updating ID %s', conf.ID)
+                write_dict = {'ID': conf.ID, 'yaml': conf.dump()}
+                write_dict.update(conf)
+                count = 0
+                for row in table.where('ID == b"{}"'.format(conf.ID)):
+                    print("Updating row {}".format(row))
+                    print('Config: ', conf['General/sample_dict'])
+                    if count >= 1:
+                        raise ValueError("More than 1 entry in the DB with "
+                                         "the same ID")
+                    row = update_row(row, write_dict)
+                    print('ROW: ', row['General/sample_dict'])
+                    row.update()
+                    table.flush()
+                    count += 1
+            else:
+                self.log.info('Adding new ID %s ', conf.ID)
+                print('Adding new ID %s ', conf.ID)
+                write_dict = {'ID': conf.ID, 'yaml': conf.dump()}
+                write_dict.update(conf)
+                add_row(table, write_dict)
             # conf_row['ID'] = conf.ID
             # flat = conf.flatten(skip_branch=skip_keys, sep='__')
             # for k, v in flat.items():

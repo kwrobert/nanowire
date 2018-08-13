@@ -36,7 +36,9 @@ h4 = "A list of keys within the configs to skip when generating the config ID"
               show_default=True)
 @click.option('-s', '--skip-keys', default=['General', 'Materials'], help=h4,
               show_default=True)
-def preprocess(template, db, params, table_path, table_name, skip_keys):
+@click.option('--update/--no-update', default=False,
+              help="Update IDs if they already exist in the DB")
+def preprocess(template, db, params, table_path, table_name, skip_keys, update):
     """
     Preprocess the template file located at path TEMPLATE.
 
@@ -56,7 +58,7 @@ def preprocess(template, db, params, table_path, table_name, skip_keys):
     pp.write_configs()
     click.echo('Writing configs to database ...')
     pp.add_to_database(db, tb_path=table_path, tb_name=table_name,
-                       skip_keys=skip_keys)
+                       skip_keys=skip_keys, update=update)
     click.secho('Preprocessing complete!', fg='green')
 
 

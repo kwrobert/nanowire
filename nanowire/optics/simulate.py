@@ -830,10 +830,10 @@ class Simulator:
             self._clean_logger()
             del self.log
             del self.s4
-            self.data._update_keys(clear=True)
-            self.data.close()
         except AttributeError:
             pass
+        self.data.clear_data()
+        self.data.close()
 
     def set_numbasis(self, numbasis):
         """
@@ -1408,7 +1408,7 @@ class Simulator:
         elif self.conf['General']['save_as'] == 'hdf5':
             start = time.time()
             self.save_time()
-            self.data.write_data(clear=True)
+            self.data.write_data()
             end = time.time()
             self.log.info('Write time: %.2f seconds', end - start)
         else:

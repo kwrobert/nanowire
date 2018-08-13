@@ -243,29 +243,41 @@ class Config(MutableMapping):
         Update the document in collection `col` contained in this config to the collection `col` in the
         UnQLite database `db`
         """
-        ID = conf.ID.encode('utf-8')
-        pkl_data = db[ID]
-        idkey = '{}_docid'.format(ID)
+        # ID = self.ID.encode('utf-8')
+        idkey = '{}_docid'.format(self.ID)
         doc_id = db[idkey]
         write_dict = {'ID': self.ID, 'skip_keys': self.skip_keys, '_d': self._d}
         write_dict = prepare_for_db(write_dict)
         with db.transaction():
             success = col.update(doc_id, write_dict)
-            if not isinstance(success, int):
-                raise Exception("Unable to update collection")
+            print("DB Return Code: {}".format(success))
+            if success is False:
+                for i in range(3):
+                    success = col.update(doc_id, write_dict)
+                    if success:
+                        break
+                else:
+                    raise Exception("Unable to update collection")
             db[self.ID] = pickle.dumps(self)
-            db[idkey] = success
+        return success
 
     def store_in_db(self, db, col):
-        ID = self.ID.encode('utf-8')
+        # ID = self.ID.encode('utf-8')
         write_dict = {'ID': self.ID, 'skip_keys': self.skip_keys, '_d': self._d}
         write_dict = prepare_for_db(write_dict)
         with db.transaction():
             success = col.store(write_dict)
-            if not isinstance(success, int):
-                raise Exception("Unable to store in collection")
+            print("DB Return Code: {}".format(success))
+            if success is False:
+                for i in range(3):
+                    success = col.update(doc_id, write_dict)
+                    if success:
+                        break
+                else:
+                    raise Exception("Unable to update collection")
             db[self.ID] = pickle.dumps(self)
             db['{}_docid'.format(self.ID)] = success
+        return success
 
     @classmethod
     def fromYAML(cls, stream, skip_keys=None, **kwargs):
@@ -584,6 +596,7 @@ def load_confs(db, base_dir='', query='', table_name='simulations', IDs=None):
     if not base_dir:
         base_dir = os.path.dirname(db.filename)
     confs = {}
+    confs_list = []
     if query:
         filter_func = make_filter(query)
         for doc in col.filter(filter_func):
@@ -592,7 +605,6 @@ def load_confs(db, base_dir='', query='', table_name='simulations', IDs=None):
             conf_path = os.path.join(base_dir, short_id, 'sim_conf.yml')
             if IDs and ID not in IDs:
                 continue
-            print('Loading config: %s', conf_path)
             log.info('Loading config: %s', conf_path)
             # conf = Config.fromDocument(doc)
             conf = pickle.loads(db[ID])
@@ -600,10 +612,12 @@ def load_confs(db, base_dir='', query='', table_name='simulations', IDs=None):
                 raise ValueError('ID in database and ID of loaded '
                                  'config do not match')
             confs[conf.ID] = (conf, conf_path)
+            confs_list.append(conf)
     else:
-        for ID, pkl_data in db.items():
-            ID = ID.decode()
+        for doc in col.all():
+            ID = doc['ID'].decode()
             short_id = ID[0:10]
+            pkl_data = db[ID]
             conf_path = os.path.join(base_dir, short_id, 'sim_conf.yml')
             if IDs and ID not in IDs:
                 continue
@@ -614,8 +628,8 @@ def load_confs(db, base_dir='', query='', table_name='simulations', IDs=None):
                 raise ValueError('ID in database and ID of loaded '
                                  'config do not match')
             confs[conf.ID] = (conf, conf_path)
-    confs_list = [tup[0] for tup in confs.values()]
-    thickness_paths = find_keypaths(confs_list[0], 'thickness')
+            confs_list.append(conf)
+        print("Confs loaded!")
     # We need to handle the case of thickness sweeps to take advantage of
     # a core efficiency of RCWA, which is that thickness sweeps should come
     # for free. t_sweeps is a dict whose keys and values are both
@@ -625,18 +639,35 @@ def load_confs(db, base_dir='', query='', table_name='simulations', IDs=None):
     # actually run, and the keys are simulations whose solution will just
     # point to the corresponding value. The keys are all unique (by
     # definition in a dict), but there may be duplicate values
+    thickness_paths = set(p for c in confs_list
+                          for p in find_keypaths(c, 'thickness'))
+    print(thickness_paths)
     t_sweeps = {}
+    # Speed things up by only checking paths that have multiple values
+    vals_check = {path: set() for path in thickness_paths}
+    for path in thickness_paths:
+        for conf in confs_list:
+            val = conf.get(path, None)
+            if val is not None:
+                if isinstance(val, pint.quantity._Quantity):
+                    vals_check[path].add(val.to_base_units().magnitude)
+                else:
+                    vals_check[path].add(val)
+    # If, after checking all the configs, there is only 1 value for the
+    # thickness, we didn't sweep thru it and we need not worry
+    for path, val_set in vals_check.items():
+        if len(val_set) == 1:
+            thickness_paths.remove(path)
+    print("Swept through following thicknesses: {}".format(thickness_paths))
     for path in thickness_paths:
         # Skip max_depth when comparing because it depends on layer
         # thicknesses
         groups = group_against(confs_list, path,
                                skip_keys=['General/max_depth'])
-        for i, b in enumerate([len(group) > 1 for group in groups]):
-            if b:
-                log.info('Found thickness sweep over %s', path)
-                keep_id = groups[i][0].ID
-                for c in groups[i][1:]:
-                    t_sweeps[c.ID] = keep_id
+        for group in groups:
+            keep_id = group[0].ID
+            for c in group[1:]:
+                t_sweeps[c.ID] = keep_id
     # self.t_sweeps = t_sweeps
     # for root, dirs, files in os.walk(base_dir):
     #     if os.path.basename(root) in short_ids and 'sim_conf.yml' in files:

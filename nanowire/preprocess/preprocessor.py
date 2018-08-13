@@ -86,6 +86,7 @@ class Preprocessor:
 
     def __init__(self, template):
         self.log = logging.getLogger(__name__)
+        self.log.setLevel(logging.INFO)
         if not os.path.isfile(template):
             raise ValueError('Template must be a path to a regular file')
         self.template = template
@@ -166,6 +167,7 @@ class Preprocessor:
             outfile = os.path.join(outdir, 'sim_conf.yml')
             if not os.path.isdir(outdir):
                 os.makedirs(outdir)
+            self.log.info('Writing conf %s to %s', conf.ID, outfile)
             conf.write(outfile)
 
     def add_to_database(self, db, tb_name='simulations',
@@ -190,10 +192,10 @@ class Preprocessor:
         col = db.collection(tb_name)
         # Only creates a new collection if one does not already exist
         col.create()
-        existing_ids = set(rec['ID'] for rec in col.all())
+        existing_ids = set(rec['ID'].decode() for rec in col.all())
         for conf in self.confs:
-            ID = conf.ID.encode('utf-8')
-            if ID in existing_ids and not update:
+            ID = conf.ID
+            if (ID in existing_ids) and not update:
                 self.log.info('ID %s already in table, skipping', conf.ID)
                 continue
             elif (ID in existing_ids) and update:
@@ -202,3 +204,4 @@ class Preprocessor:
             else:
                 self.log.info('Adding new ID %s ', conf.ID)
                 conf.store_in_db(db, col)
+        db.close()

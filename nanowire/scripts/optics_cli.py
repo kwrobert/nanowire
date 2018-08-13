@@ -1,5 +1,6 @@
 import os
 import click
+import logging
 # from nanowire.optics.simulate import SimulationManager, run_sim, update_sim
 # from nanowire.optics.utils.config import Config
 
@@ -49,6 +50,15 @@ def preprocess(template, db, params, table_name, skip_keys, update):
     """
 
     import nanowire.preprocess as prep
+    # Logging to console
+    logger = logging.getLogger()
+    fmt = logging.Formatter('%(asctime)s [%(name)s:%(levelname)s]'
+                            ' - %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(fmt)
+    logger.addHandler(ch)
+    logging.getLogger('conff').setLevel(logging.CRITICAL)
 
     pp = prep.Preprocessor(template)
     click.echo('Generating configs ...')
@@ -214,7 +224,7 @@ def run_all(db, exec_mode, base_dir, params, query, update,
 @click.option('-v', '--log-level', help="Set verbosity of logging",
               type=click.Choice(['info', 'debug', 'warning', 'critical', 'error']),
               default='info')
-def postprocess(db, template, base_dir, params, query, table_path, table_name,
+def postprocess(db, template, base_dir, params, query, table_name,
                 crunch, gcrunch, plot, gplot, group_by, group_against,
                 print_ids, num_cores, log_level):
     """

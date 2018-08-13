@@ -471,8 +471,8 @@ class HDF5DataManager(DataManager):
                                               **kwargs)
         self.open_dstore(mode)
         self.gpath = group_path
-        complvl = complvl if complvl is not None else self.COMPLVL   
-        complib = complib if complib is not None else self.COMPLIB 
+        complvl = complvl if complvl is not None else self.COMPLVL
+        complib = complib if complib is not None else self.COMPLIB
         self.filt = tb.Filters(complevel=complvl, complib=complib)
         try:
             self.gobj = self._dstore.get_node(self.gpath, classname='Group')
@@ -499,31 +499,24 @@ class HDF5DataManager(DataManager):
             msg = 'No writer available for class {}'.format(obj.__class__)
             raise ValueError(msg)
 
-    def _update_keys(self, clear=False):
+    def _update_keys(self):
         """
         Used to pull in keys for all the data items this simulation has stored
-        on disk, without loading the actual items
+        on disk, without loading the actual items or overwriting any existing
+        items already stored in memory
         """
         if not self._dstore.isopen:
             return False
         for child in self.gobj._f_iter_nodes():
-            if clear:
+            if child._v_name not in self._data:
                 self._data[child._v_name] = None
                 self._updated[child._v_name] = False
-            else:
-                if child._v_name not in self._data:
-                    self._data[child._v_name] = None
-                    self._updated[child._v_name] = False
         # Returns only user set attributes, and none of the special system
         # attributes used internally by pytables
         for k in self.gobj._v_attrs._f_list(attrset='user'):
-            if clear:
+            if k not in self._data:
                 self._data[k] = None
                 self._updated[k] = False
-            else:
-                if k not in self._data:
-                    self._data[k] = None
-                    self._updated[k] = False
         return True
 
     def _check_equal(self, key, value):
@@ -583,6 +576,43 @@ class HDF5DataManager(DataManager):
 
     def open_dstore(self, mode):
         self._dstore = tb.open_file(self.store_path, mode)
+
+    def clear_data(self, blacklist=(,)):
+        """
+        Clears loaded data from memory without writing it to disk
+        """
+
+        blacklist = set(blacklist)
+        for key in self._data.keys():
+            if key not in blacklist:
+                del self._data[key]
+                self._data[key] = None
+                self._updated[key] = False
+
+    def write_data(self, blacklist=('normE', 'normEsquared')):
+        """
+        Writes all necessary data out to the HDF5 file
+
+        :param blacklist: A tuple of strings indicating keys that should not be
+        saved to disk
+        :type blacklist: tuple
+        :param clear: Clear data after writing to free memory. Default: False
+        :type clear: bool
+        """
+
+        blacklist = set(blacklist).union(self._blacklist)
+        self.log.info('Beginning HDF5 data writing procedure')
+        # Filter out the original data so we don't resave it
+        keys = [key for key in self._data.keys() if key not in blacklist and
+                self._updated[key]]
+        self.log.info(keys)
+        print("Saving keys {}".format(keys))
+        for key in keys:
+            obj = self._data[key]
+            writer = self._get_writer(obj)
+            writer(obj, key)
+            # Flush to disk after every write operation, HDF5 has no journaling
+            self._dstore.flush()
 
     def write_struct_array(self, recarr, name):
         """
@@ -722,34 +752,10 @@ class HDF5DataManager(DataManager):
             node._v_attrs[key] = q
         self._update_keys()
 
-    def write_data(self, blacklist=('normE', 'normEsquared'), clear=False):
-        """
-        Writes all necessary data out to the HDF5 file
-
-        :param blacklist: A tuple of strings indicating keys that should not be
-        saved to disk
-        :type blacklist: tuple
-        :param clear: Clear data after writing to free memory. Default: False
-        :type clear: bool
-        """
-
-        blacklist = set(blacklist).union(self._blacklist)
-        self.log.info('Beginning HDF5 data writing procedure')
-        # Filter out the original data so we don't resave it
-        keys = [key for key in self._data.keys() if key not in blacklist and
-                self._updated[key]]
-        self.log.info(keys)
-        for key in keys:
-            obj = self._data[key]
-            writer = self._get_writer(obj)
-            writer(obj, key)
-            # Flush to disk after every write operation, HDF5 has no journaling
-            self._dstore.flush()
-            if clear:
-                del obj
-                del self._data[key]
 
     def close(self):
+        if self._dstore.isopen:
+            self._dstore.flush()
         self._update_keys(clear=True)
         if self._dstore.isopen:
             self._dstore.close()

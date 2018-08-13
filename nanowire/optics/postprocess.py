@@ -7,6 +7,7 @@ import copy
 import logging
 import pint
 import hashlib
+import unqlite
 import tables as tb
 import multiprocessing as mp
 import matplotlib
@@ -258,7 +259,7 @@ class Simulation:
             gpath = '/sim_{}'.format(self.conf.ID)
             # Add a get_hook to the data manager that rescales the field
             # components using the incident amplitude
-            manager = HDF5DataManager(file_path, group_path=gpath, mode='r+',
+            manager = HDF5DataManager(file_path, group_path=gpath, mode='a',
                                       logger=self.log, get_hooks=[hook])
             for k in ('Ex', 'Ey', 'Ez', 'fluxes'):
                 manager.add_to_blacklist(k)
@@ -343,7 +344,7 @@ class Simulation:
         Clears all the data from the self.data DataManager object to free up memory
         """
         if isinstance(self.data, DataManager):
-            self.data._update_keys(clear=True)
+            self.data.clear_data()
         else:
             self.data = {}
 
@@ -1277,18 +1278,19 @@ class SimulationGroup:
         """
         self.data.write_data(blacklist=blacklist)
 
-    def clear_data(self):
+    def clear_data(self, clear_sims=True):
         """
         Clears all the data from the self.data DataManager object to free up memory
         """
         if isinstance(self.data, DataManager):
-            self.data._update_keys(clear=True)
+            self.data.clear_data()
         else:
             self.data = {}
-        for sim in self.sims:
-            self.log.info("Saving and clearing data for Simulation %s", sim.ID)
-            sim.clear_data()
-            sim.data.close()
+        if clear_sims:
+            for sim in self.sims:
+                self.log.info("Saving and clearing data for Simulation %s", sim.ID)
+                sim.clear_data()
+                sim.data.close()
 
     def close(self):
         self.clear_data()
@@ -2017,7 +2019,7 @@ class Processor:
         if not osp.isfile(db):
             raise ValueError("Path {} to conf file doesn't "
                              "exist".format(db))
-        self.db = open_pytables_file(db, 'r')
+        self.db = unqlite.UnQLite(db)
         # if isinstance(conf, str):
         #     if not osp.isfile(conf):
         #         raise ValueError("Path {} to conf file doesn't "
@@ -2086,7 +2088,7 @@ class Processor:
         self.log.info('Building simulation plans from template plan')
         ops = {'simpleeval': {'operators': UNSAFE_OPERATORS}}
         parser = Parser(fns={'Q': fn_pint_quantity,
-                                   'mag': fn_pint_magnitude},
+                             'mag': fn_pint_magnitude},
                         params=ops, cache_graph=True)
         plans = {}
         for ID, (conf, conf_path) in self.sim_confs.items():

@@ -575,17 +575,20 @@ class HDF5DataManager(DataManager):
     def open_dstore(self, mode):
         self._dstore = tb.open_file(self.store_path, mode)
 
-    def clear_data(self, blacklist=(,)):
+    def clear_data(self, blacklist=None):
         """
         Clears loaded data from memory without writing it to disk
         """
 
-        blacklist = set(blacklist)
-        for key in self._data.keys():
-            if key not in blacklist:
-                del self._data[key]
-                self._data[key] = None
-                self._updated[key] = False
+        if blacklist is not None:
+            blacklist = set(blacklist)
+        else:
+            blacklist = set()
+        to_delete = [k for k in self._data.keys() if k not in blacklist]
+        for key in to_delete:
+            del self._data[key]
+            self._data[key] = None
+            self._updated[key] = False
 
     def write_data(self, blacklist=('normE', 'normEsquared')):
         """

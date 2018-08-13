@@ -629,7 +629,7 @@ def load_confs(db, base_dir='', query='', table_name='simulations', IDs=None):
                                  'config do not match')
             confs[conf.ID] = (conf, conf_path)
             confs_list.append(conf)
-        print("Confs loaded!")
+        log.info("Confs loaded!")
     # We need to handle the case of thickness sweeps to take advantage of
     # a core efficiency of RCWA, which is that thickness sweeps should come
     # for free. t_sweeps is a dict whose keys and values are both
@@ -641,7 +641,6 @@ def load_confs(db, base_dir='', query='', table_name='simulations', IDs=None):
     # definition in a dict), but there may be duplicate values
     thickness_paths = set(p for c in confs_list
                           for p in find_keypaths(c, 'thickness'))
-    print(thickness_paths)
     t_sweeps = {}
     # Speed things up by only checking paths that have multiple values
     vals_check = {path: set() for path in thickness_paths}

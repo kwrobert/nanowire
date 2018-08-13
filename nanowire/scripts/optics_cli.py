@@ -224,9 +224,11 @@ def run_all(db, exec_mode, base_dir, params, query, update,
 @click.option('-v', '--log-level', help="Set verbosity of logging",
               type=click.Choice(['info', 'debug', 'warning', 'critical', 'error']),
               default='info')
+@click.option('--run-ids', default=False, type=exist_read_path,
+              help="File of IDs of simulations to be processed, one per line")
 def postprocess(db, template, base_dir, params, query, table_name,
                 crunch, gcrunch, plot, gplot, group_by, group_against,
-                print_ids, num_cores, log_level):
+                print_ids, num_cores, log_level, run_ids):
     """
     Postprocess all simulations matching QUERY located in the HDF5 DB
 
@@ -256,6 +258,14 @@ def postprocess(db, template, base_dir, params, query, table_name,
         for conf in proc.sim_confs:
             print(conf.ID)
         return
+    if run_ids:
+        to_run = set()
+        with open(run_ids, 'r') as f:
+            for line in f.readlines():
+                to_run.add(line.strip())
+        proc.log.info("Will postprocess %i simulations", len(to_run))
     else:
-        proc.process(crunch=crunch, gcrunch=gcrunch, plot=plot, gplot=gplot,
-                     grouped_against=group_against, grouped_by=group_by)
+        to_run = False
+    proc.process(crunch=crunch, gcrunch=gcrunch, plot=plot, gplot=gplot,
+                 grouped_against=group_against, grouped_by=group_by,
+                 run_ids=to_run)

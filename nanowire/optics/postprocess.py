@@ -2324,7 +2324,7 @@ class Processor:
                 _call_func(method_name, sim, args)
 
     def process(self, crunch=True, plot=True, gcrunch=True, gplot=True,
-                grouped_against=None, grouped_by=None):
+                grouped_against=None, grouped_by=None, run_ids=False):
         # We need to calculate the bandwidth
         bandwidth = self.calculate_bandwidth()
         configs = self.make_processing_configs()
@@ -2340,6 +2340,15 @@ class Processor:
                     del config['Postprocessing']['Single']['plot']
             if len(configs) != len(self.sim_confs):
                 raise ValueError('Must have same number of plans as simulations!')
+            # If we passed in run_IDs, only postprocess sims with those IDs
+            if run_ids:
+                self.log.info("Number of sims before filtering: %i",
+                              len(configs))
+                run_IDs = set(run_ids)
+                configs = {ID: conf for ID, conf in configs.items() if ID in
+                           run_IDs}
+                self.log.info("Number of sims after filtering: %i",
+                              len(configs))
             # NOTE: self.sim_confs[ID] = (Config_object, conf_path)
             args_list = [(self.sim_confs[ID][0],
                           osp.dirname(self.sim_confs[ID][1]), configs[ID],

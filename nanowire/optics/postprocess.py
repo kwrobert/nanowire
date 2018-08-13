@@ -1210,7 +1210,7 @@ class SimulationGroup:
                  grouped_against=None, grouped_by=None):
         if sims is None and sim_confs_and_dirs is None:
             raise ValueError("Must provide a list of Simulation objects or a "
-                             "list of tuples containing (Config, sim_dir)") 
+                             "list of tuples containing (Config, sim_dir)")
         if grouped_by is None and grouped_against is None:
             raise ValueError("Must know how this SimulationGroup is grouped")
         self.log = logging.getLogger(__name__)
@@ -1934,6 +1934,7 @@ def execute_sim_plan(conf, outdir, proc_config, bandwidth, grouped_against=None,
         sim.write_data()
         sim.clear_data()
         sim.data.close()
+        log.info("Data writing for Simulation %s complete!", sim.ID)
     except Exception as e:
         log.error('Conf %s raised exception', conf.ID)
         raise
@@ -2050,6 +2051,9 @@ class Processor:
         confs, t_sweeps, db = load_confs(self.db, *args, **kwargs)
         self.t_sweeps = t_sweeps
         self.sim_confs = confs
+        self.sims = {}
+        self.conf_groups = []
+        self.sim_groups = []
         return confs, t_sweeps
 
     def make_processing_configs(self):
@@ -2080,7 +2084,7 @@ class Processor:
         sims = {}
         for conf, conf_path in self.sim_confs.values():
             outdir = osp.dirname(conf_path)
-            sim = Simulation(outdir, bandwidth, conf=conf) 
+            sim = Simulation(outdir, bandwidth, conf=conf)
             sims[sim.ID] = sim
         self.sims = sims
         return self.sims
@@ -2094,7 +2098,7 @@ class Processor:
         groups = []
         if self.sims:
             for conf_group in self.conf_groups:
-                group_ids = {conf.ID for conf in conf_group} 
+                group_ids = {conf.ID for conf in conf_group}
                 sims = [self.sims[conf.ID] for conf in conf_group]
                 group = SimulationGroup(self.base_dir, bandwidth, sims=sims,
                                         grouped_against=self.grouped_against,
@@ -2103,10 +2107,10 @@ class Processor:
         else:
             for conf_group in self.conf_groups:
                 confs_and_dirs = [(conf, osp.dirname(self.sim_confs[conf.ID][1])) for conf in
-                                  conf_group] 
-                sim_group = SimulationGroup(confs_and_dirs, 
+                                  conf_group]
+                sim_group = SimulationGroup(confs_and_dirs,
                                             self.base_dir,
-                                            self.bandwidth, 
+                                            self.bandwidth,
                                             grouped_against=self.grouped_against,
                                             grouped_by=self.grouped_by)
                 groups.append(sim_group)
@@ -2234,27 +2238,30 @@ class Processor:
                           str(self.num_cores))
             with mp.Pool(processes=self.num_cores) as pool:
                 results = {}
-                for i, (a, kw) in enumerate(zip(args_list, kwargs_list)):
+                for a, kw in zip(args_list, kwargs_list):
+                    ID = a[0].ID
                     res = pool.apply_async(func, a, kw)
-                    results[i] = res
+                    results[ID] = res
                 while results:
-                    inds = list(results.keys())
-                    for ind in inds:
-                        res = results[ind]
-                        self.log.debug('Sim #%i', ind)
+                    IDs = list(results.keys())
+                    for ID in IDs:
+                        res = results[ID]
+                        self.log.debug('Sim %s', ID)
                         if res.ready():
                             success = res.successful()
+                            self.log.info("SUCCESS RETURN: %s", str(success))
                             if success:
-                                self.log.debug('Sim #%i completed successfully!', ind)
+                                self.log.debug('Sim %s completed successfully!',
+                                               ID)
                                 res.get(10)
-                                self.log.debug('Done getting Sim #%i', ind)
+                                self.log.debug('Done getting Sim %s', ID)
                             else:
-                                self.log.warning('Sim #%i raised exception!',
-                                                 ind)
+                                self.log.warning('Sim %s raised exception!',
+                                                 ID)
                                 res.wait(10)
-                            del results[ind]
+                            del results[ID]
                         else:
-                            self.log.debug('Sim #%i not ready', ind)
+                            self.log.debug('Sim %s not ready', ID)
                     self.log.debug('Cleaned results: %s',
                                    str(list(results.keys())))
                     time.sleep(1)

@@ -404,7 +404,7 @@ class DataManager(MutableMapping, metaclass=ABCMeta):
         """
         Here is where the fancy lazy loading is implemented
         """
-        if self._data[key] is None:
+        if self._data.get(key, None) is None:
             self._load_data(key)
         val = self._data[key]
         for hook in self.get_hooks:
@@ -757,7 +757,7 @@ class HDF5DataManager(DataManager):
     def close(self):
         if self._dstore.isopen:
             self._dstore.flush()
-        self._update_keys(clear=True)
+        self._update_keys()
         if self._dstore.isopen:
             self._dstore.close()
 

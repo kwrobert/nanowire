@@ -932,7 +932,7 @@ def make_filter(query):
         function returns True if the items in the dictionary satisfy the
         provided condition, False otherwise.
     """
-    pat = re.compile('(/?(\S+/)+\S+)')
+    pat = re.compile('(/(\w+)(/\w+)*/?)')
     paths = [match[0] for match in re.findall(pat, query)]
     path_tups = [tuple(path.strip('/').split('/')) for path in paths]
     expr = query
@@ -940,7 +940,6 @@ def make_filter(query):
         expr = re.sub(path, 'get_path(record, {})'.format(str(tup)), expr)
     func_str = """
 def f(record):
-    record = record["_d"]
     ret = bool({})
     return ret
 """.format(expr)

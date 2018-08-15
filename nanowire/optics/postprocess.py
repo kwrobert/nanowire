@@ -61,7 +61,8 @@ from nanowire.utils.logging import (
 from nanowire.utils.data_manager import (
     DataManager,
     HDF5DataManager,
-    create_rescaling_hook,
+    create_power_rescaling_hook,
+    create_field_rescaling_hook,
 )
 from nanowire.optics.utils.geometry import (
     Layer,
@@ -147,13 +148,13 @@ class Simulation:
     """
 
     def __init__(self, outdir, bandwidth, spectrum='am1.5g', conf=None,
-                 simulator=None, skip_rescale=False):
+                 simulator=None, skip_power_rescale_hook=False, rescale_method=False):
         """
         :param :class:`~utils.config.Config`: Config object for this simulation
-
         """
         self.spectrum = spectrum
-        self.skip_rescale = True
+        self.skip_power_rescale_hook = skip_power_rescale_hook
+        self.use_rescale_method = rescale_method
         if conf is None and simulator is None:
             raise ValueError('Must pass in either a Config object or a'
                              ' Simulator object')
@@ -172,15 +173,16 @@ class Simulation:
         #         e.args = (msg,)
         #         raise
         # else:
-        if isinstance(bandwidth, pint.quantity._Quantity):
+        if bandwidth is None:
+            self.bandwidth = None
+            self.skip_power_rescale_hook = True
+        elif isinstance(bandwidth, pint.quantity._Quantity):
             self.bandwidth = bandwidth.to('hertz', 'spectroscopy')
-        elif isinstance(bandwidth, float):
+        elif isinstance(bandwidth, (float, int)):
             self.bandwidth = Q_(bandwidth, 'hertz')
         else:
             msg = 'Invalid bandwidth argument: {}'.format(bandwidth)
             raise ValueError(msg)
-        if not isinstance(self.bandwidth, pint.quantity._Quantity):
-            raise ValueError("Bandwidth must be a pint Quantity")
         self.ID = self.conf.ID
         self.path = osp.abspath(osp.normpath(osp.expandvars(outdir)))
         self.base, self.dir = osp.split(self.path)
@@ -224,6 +226,12 @@ class Simulation:
         self.period = self.conf['Simulation/array_period']
         self.layers = get_layers(self)
         self.height = self.get_height()
+        if self.use_rescale_method:
+            ratios = self.get_rescaling_factors()
+            hook = create_field_rescaling_hook(ratios, self.layers)
+            self.data.add_get_hook(hook)
+            self.clear_data()
+        print('GET HOOKS: ', self.data.get_hooks)
 
     def _get_data_manager(self):
         """
@@ -232,7 +240,7 @@ class Simulation:
         """
 
         ftype = self.conf['General']['save_as'].lower()
-        if self.skip_rescale:
+        if self.skip_power_rescale_hook:
             self.log.warning("Skipping rescaling to spectrum!")
             power = Q_(1.0, ureg.watt / ureg.meter**2)
             amplitude = Q_(1.0, ureg.volts / ureg.meter)
@@ -251,16 +259,18 @@ class Simulation:
                 self.bandwidth,
                 logger=self.log
             )
+            hook = create_power_rescaling_hook(power, amplitude, self.log)
         # Create the rescaling hook for the data manager that rescales all
         # powers and fields using the power/amplitude of the incident spectrum
-        hook = create_rescaling_hook(power, amplitude, self.log)
         if ftype == 'hdf5':
             file_path = os.path.join(self.path, 'sim.hdf5')
             gpath = '/sim_{}'.format(self.conf.ID)
             # Add a get_hook to the data manager that rescales the field
             # components using the incident amplitude
             manager = HDF5DataManager(file_path, group_path=gpath, mode='a',
-                                      logger=self.log, get_hooks=[hook])
+                                      logger=self.log)
+            if not self.skip_power_rescale_hook:
+                manager.add_get_hook(hook)
             for k in ('Ex', 'Ey', 'Ez', 'fluxes'):
                 manager.add_to_blacklist(k)
             return manager
@@ -388,9 +398,7 @@ class Simulation:
         E_magsq = Q_(np.zeros_like(self.data['Ex'], dtype=np.float64),
                      ureg.volt ** 2 / ureg.meter ** 2)
         for comp in ('Ex', 'Ey', 'Ez'):
-            d = self.data[comp]
             E_magsq += np.absolute(self.data[comp])**2
-            # E_magsq += self.data[comp].real**2
         self.extend_data('normEsquared', E_magsq)
         return E_magsq
 
@@ -584,15 +592,22 @@ class Simulation:
         """
 
         fluxes = self.data['fluxes']
-        Esq = self.get_scalar_quantity('normEsquared')
+        Esq = self.normEsquared()
         freq = self.conf['Simulation/frequency']
         # object type for pint Quantities
         dt = [('layer', 'S25'), ('flux_method', 'O'), ('int_method', 'O'),
               ('difference', 'O')]
-        num_rows = len(list(self.layers.keys()))
+        num_rows = len(self.layers)
         absorb_arr = np.recarray((num_rows,), dtype=dt)
         counter = 0
         for layer_name, layer_obj in self.layers.items():
+            if layer_name == 'Air':
+                absorb_arr[counter] = (layer_name,
+                                       Q_(0.0, ureg.watts / ureg.meter**2),
+                                       Q_(0.0, ureg.watts / ureg.meter**2),
+                                       Q_(0.0, ureg.dimensionless))
+                counter += 1
+                continue
             # Method 1: Go through power flux
             bottom = layer_name+'_bottom'
             layers = [el.decode('utf-8') for el in fluxes['layer']]
@@ -712,6 +727,24 @@ class Simulation:
             arr[-1] = (port, reflectance, transmission, absorbance)
         self.data['transmission_data'] = arr
         return reflectance, transmission, absorbance
+
+    def get_rescaling_factors(self):
+        data = self.power_absorbed()
+        ratios = {}
+        for record in data:
+            layer = record['layer'].decode('utf-8')
+            if layer == 'total':
+                continue
+            flux = record['flux_method']
+            integral = record['int_method']
+            try:
+                ratio = np.abs(flux/integral)
+            except ZeroDivisionError:
+                self.log.warning("Integral method is zero, setting rescaling factor to 1")
+                ratio = 1
+            ratios[layer] = ratio
+        self.log.debug("Rescaling factors: {}".format(ratios))
+        return ratios
 
     def integrate_quantity(self, q, layer=None, mask=None, **kwargs):
         """
@@ -1006,7 +1039,8 @@ class Simulation:
             plt.show()
         plt.close(fig)
 
-    def plane_2d(self, quantity, plane, pval, draw=False, fixed=None):
+    def plane_2d(self, quantity, plane, pval, draw=False, fixed=None,
+                 name_mod=''):
         """Plots a heatmap of a fixed 2D plane"""
         self.log.info('Plotting plane')
         pval = int(pval)
@@ -1033,7 +1067,8 @@ class Simulation:
                       quantity,
                       title)
             if self.conf['General']['save_plots']:
-                fname = '%s_plane_2d_yz_pval%s.png' % (quantity, str(pval))
+                fname = '%s_plane_2d_yz_pval%s' % (quantity, str(pval))
+                fname += '{}.png'.format(name_mod)
                 p = osp.join(self.path, fname)
             self.heatmap2d(y, z, cs, labels, plane, pval,
                            save_path=p, show=show, draw=draw, fixed=fixed)
@@ -1043,7 +1078,8 @@ class Simulation:
                       quantity,
                       title)
             if self.conf['General']['save_plots']:
-                fname = '%s_plane_2d_xz_pval%s.png' % (quantity, str(pval))
+                fname = '%s_plane_2d_xz_pval%s' % (quantity, str(pval))
+                fname += '{}.png'.format(name_mod)
                 p = osp.join(self.path, fname)
             self.heatmap2d(x, z, cs, labels, plane, pval,
                            save_path=p, show=show, draw=draw, fixed=fixed)
@@ -1053,7 +1089,9 @@ class Simulation:
                       quantity,
                       title)
             if self.conf['General']['save_plots']:
-                fname = '%s_plane_2d_xy_pval%s.png' % (quantity, str(pval))
+                fname = '%s_plane_2d_xy_pval%s' % (quantity, str(pval))
+                fname += '{}.png'.format(name_mod)
+                p = osp.join(self.path, fname)
                 p = osp.join(self.path, fname)
             self.heatmap2d(x, y, cs, labels, plane, pval,
                            save_path=p, show=show, draw=draw, fixed=fixed)
@@ -1270,13 +1308,18 @@ class SimulationGroup:
                 # sim_ids.append(sim.ID)
         # self.data['sim_ids'] = sim_ids
 
-    def write_data(self, blacklist=('normE', 'normEsquared')):
+    def write_data(self, blacklist=('normE', 'normEsquared'), write_sims=False):
         """
         Writes the data. This is a simple wrapper around the write_data()
         method of the DataManager object, with some code to compute the time it
         took to perform the write operation
         """
         self.data.write_data(blacklist=blacklist)
+        if write_sims:
+            for sim in self.sims:
+                self.log.info("Writing data for Simulation %s", sim.ID)
+                sim.write_data()
+                sim.data.close()
 
     def clear_data(self, clear_sims=True):
         """
@@ -1288,7 +1331,7 @@ class SimulationGroup:
             self.data = {}
         if clear_sims:
             for sim in self.sims:
-                self.log.info("Saving and clearing data for Simulation %s", sim.ID)
+                self.log.info("Clearing data for Simulation %s", sim.ID)
                 sim.clear_data()
                 sim.data.close()
 
@@ -1331,6 +1374,7 @@ class SimulationGroup:
                 self.data['angle_coords'] = self.sims[0].data['angle_coords']
         else:
             raise ValueError('Invalid file type in config')
+        return group_comb
 
     def photocurrent_density(self, method='flux', units='mA/cm^2'):
         """
@@ -1635,8 +1679,8 @@ class SimulationGroup:
             for i, sim in enumerate(self.sims):
                 freq = sim.conf['Simulation/frequency']
                 angle = sim.conf['Simulation/polar_angle']
-                Pin = get_incident_power('am1.5g', freq, angle, sim.bandwidth) 
-                absorb_rec = get_record(sim.data['power_absorbed'], 'layer', 'total')[0] 
+                Pin = get_incident_power('am1.5g', freq, angle, sim.bandwidth)
+                absorb_rec = get_record(sim.data['power_absorbed'], 'layer', 'total')[0]
                 Pabs = absorb_rec['int_method']
                 A = Pabs/Pin
                 freqs[i] = freq
@@ -1924,16 +1968,9 @@ def execute_sim_plan(conf, outdir, proc_config, bandwidth, grouped_against=None,
     try:
         log.info("Executing Simulation plan")
         plan = proc_config['Postprocessing']['Single']
-        sim = Simulation(outdir, bandwidth, conf=conf)
-        # Concatenate the field components in each layer into a single 3D
-        # array, but add to blacklist so the concatenated arrays don't get
-        # written to disk
-        # FIXME: This is grossly memory-inefficient
-        # for f in ('Ex', 'Ey', 'Ez'):
-        #     ks = ['{}_{}'.format(lname, f) for lname in sim.layers.keys()]
-        #     sim.data[f] = np.concatenate([sim.data[k] for k in ks])
-        #     sim.data.add_to_blacklist(f)
-
+        sim = Simulation(outdir, bandwidth, conf=conf,
+                         spectrum=proc_config['Postprocessing']['spectrum'],
+                         rescale_method=proc_config['Postprocessing']['rescale_method'])
         for task_name in ('crunch', 'plot'):
             if task_name not in plan:
                 continue
@@ -1967,10 +2004,11 @@ def execute_sim_plan(conf, outdir, proc_config, bandwidth, grouped_against=None,
         raise
 
 
-def execute_group_plan(sim_confs_and_dirs, base_dir, proc_config, bandwidth, grouped_by=None,
-                       grouped_against=None):
+def execute_group_plan(sim_confs_and_dirs, base_dir, proc_config, bandwidth,
+                       grouped_by=None, grouped_against=None):
     log = logging.getLogger(__name__)
-    sim_group = SimulationGroup(sim_confs_and_dirs, base_dir, bandwidth,
+    sim_group = SimulationGroup(base_dir, bandwidth,
+                                sim_confs_and_dirs=sim_confs_and_dirs,
                                 grouped_by=grouped_by,
                                 grouped_against=grouped_against)
     plan = proc_config['Postprocessing']['Group']
@@ -2102,16 +2140,17 @@ class Processor:
         self.log.info('Plan building complete!')
         return plans
 
-    def make_sims(self):
-        self.log.info("Making Simulation objects")
+    def make_sims(self, *args, **kwargs):
+        self.log.info("Making %i Simulation objects", len(self.sim_confs))
         if self.bandwidth is None:
             bandwidth = self.calculate_bandwidth()
         else:
             bandwidth = self.bandwidth
+        self.sims = None
         sims = {}
         for conf, conf_path in self.sim_confs.values():
             outdir = osp.dirname(conf_path)
-            sim = Simulation(outdir, bandwidth, conf=conf)
+            sim = Simulation(outdir, bandwidth, *args, conf=conf, **kwargs)
             sims[sim.ID] = sim
         self.sims = sims
         return self.sims
@@ -2122,10 +2161,10 @@ class Processor:
             bandwidth = self.calculate_bandwidth()
         else:
             bandwidth = self.bandwidth
+        self.sim_groups = []
         groups = []
         if self.sims:
             for conf_group in self.conf_groups:
-                group_ids = {conf.ID for conf in conf_group}
                 sims = [self.sims[conf.ID] for conf in conf_group]
                 group = SimulationGroup(self.base_dir, bandwidth, sims=sims,
                                         grouped_against=self.grouped_against,
@@ -2310,8 +2349,12 @@ class Processor:
         if not all(np.isclose(el, bandwidths[0]) for el in bandwidths[1:]):
             msg = 'Cannot currently handle nonuniform frequency sweeps'
             raise NotImplementedError(msg)
-        self.bandwidth = bandwidths[0]
-        return bandwidths[0]
+        if bandwidths:
+            self.bandwidth = bandwidths[0]
+            return bandwidths[0]
+        else:
+            self.bandwidth = None
+            return None
 
     def call_sim_method(self, method_name, args, parallel=True):
         """

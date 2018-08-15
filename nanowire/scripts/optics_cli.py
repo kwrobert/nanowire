@@ -162,9 +162,12 @@ h4 = "Name of the table at the end of table_path for storing configurations"
               type=click.Choice(['info', 'debug', 'warning', 'critical', 'error']),
               default='info',
               help="Set verbosity of logging")
+@click.option('--print-ids', is_flag=True, default=False,
+              help="Print IDs of simulations to be processed, without running "
+                   "anything")
 
 def run_all(db, exec_mode, base_dir, params, query, update,
-            table_name, nodes, ip_addr, num_cores, log_level):
+            table_name, nodes, ip_addr, num_cores, log_level, print_ids):
     """
     Run all simulations matching QUERY located in the HDF5 DB
 
@@ -178,6 +181,13 @@ def run_all(db, exec_mode, base_dir, params, query, update,
                                       num_cores=num_cores,
                                       log_level=log_level.upper())
     manager.load_confs(base_dir=base_dir, query=query, table_name=table_name)
+    if print_ids:
+        count = 0
+        for ID in manager.sim_confs.keys():
+            print(ID)
+            count += 1
+        print("Total: {}".format(count))
+        return
     if update:
         manager.run(exec_mode, func=simul.update_sim, load=True)
     else:
@@ -224,11 +234,11 @@ def run_all(db, exec_mode, base_dir, params, query, update,
 @click.option('-v', '--log-level', help="Set verbosity of logging",
               type=click.Choice(['info', 'debug', 'warning', 'critical', 'error']),
               default='info')
-@click.option('--run-ids', default=False, type=exist_read_path,
+@click.option('--run-ids', type=exist_read_path,
               help="File of IDs of simulations to be processed, one per line")
 def postprocess(db, template, base_dir, params, query, table_name,
                 crunch, gcrunch, plot, gplot, group_by, group_against,
-                print_ids, num_cores, log_level, run_ids):
+                num_cores, print_ids, log_level, run_ids=None):
     """
     Postprocess all simulations matching QUERY located in the HDF5 DB
 
@@ -255,10 +265,13 @@ def postprocess(db, template, base_dir, params, query, table_name,
     else:
         click.secho('WARNING: No grouping specified', fg='yellow')
     if print_ids:
-        for conf in proc.sim_confs:
-            print(conf.ID)
+        count = 0
+        for ID in proc.sim_confs.keys():
+            print(ID)
+            count += 1
+        print("Total: {}".format(count))
         return
-    if run_ids:
+    if run_ids is not None:
         to_run = set()
         with open(run_ids, 'r') as f:
             for line in f.readlines():
@@ -269,3 +282,20 @@ def postprocess(db, template, base_dir, params, query, table_name,
     proc.process(crunch=crunch, gcrunch=gcrunch, plot=plot, gplot=gplot,
                  grouped_against=group_against, grouped_by=group_by,
                  run_ids=to_run)
+
+
+@optics.command()
+@click.argument('db', type=exist_read_path)
+@click.argument('query', type=click.STRING)
+@click.option('-n', '--table-name', default='simulations', help=h3,
+              show_default=True)
+@click.option('-p', '--params', multiple=True, help="Print these params")
+def query(db, query, table_name, params):
+    from nanowire.utils.config import load_confs
+    confs, tsweeps, db = load_confs(db, query=query, table_name=table_name)
+    for conf, _ in confs.values():
+        print('-'*25)
+        print('ID: {}'.format(conf.ID))
+        for param in params:
+            print("{} = {}".format(param, conf[param]))
+    print("Total: {}".format(len(confs)))

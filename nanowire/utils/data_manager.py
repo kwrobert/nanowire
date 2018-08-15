@@ -4,6 +4,7 @@ import posixpath
 import logging
 import pint
 import numpy as np
+from functools import partial
 import tables as tb
 from tables.file import _checkfilters
 from tables.parameters import EXPECTED_ROWS_TABLE
@@ -331,8 +332,8 @@ class DataManager(MutableMapping, metaclass=ABCMeta):
         self.store_path = store_path
         self._dstore = None
         self._blacklist = set()
-        self.get_hooks = get_hooks if get_hooks is not None else []
-        self.set_hooks = set_hooks if set_hooks is not None else []
+        self.get_hooks = get_hooks if get_hooks is not None else {}
+        self.set_hooks = set_hooks if set_hooks is not None else {}
 
     def add_to_blacklist(self, key):
         """
@@ -340,6 +341,38 @@ class DataManager(MutableMapping, metaclass=ABCMeta):
         """
         assert(isinstance(key, str))
         self._blacklist.add(key)
+
+    def add_get_hook(self, hook, name=None):
+        """
+        Add a getter hook to this DataManager instance
+        """
+        if name is not None:
+            self.get_hooks[name] = hook
+            return
+        try:
+            self.get_hooks[hook.__name__] = hook
+        # Handle functools.partial objects
+        except AttributeError:
+            self.get_hooks[hook.func.__name__] = hook
+
+    def remove_get_hook(self, hook_name):
+        del self.get_hooks[hook_name]
+
+    def add_set_hook(self, hook, name=None):
+        """
+        Add a set hook to this DataManager instance
+        """
+        if name is not None:
+            self.set_hooks[name] = hook
+            return
+        try:
+            self.set_hooks[hook.__name__] = hook
+        # Handle functools.partial objects
+        except AttributeError:
+            self.set_hooks[hook.func.__name__] = hook
+
+    def remove_set_hook(self, hook_name):
+        del self.set_hooks[hook_name]
 
     def remove_from_blacklist(self, key):
         """
@@ -407,7 +440,7 @@ class DataManager(MutableMapping, metaclass=ABCMeta):
         if self._data.get(key, None) is None:
             self._load_data(key)
         val = self._data[key]
-        for hook in self.get_hooks:
+        for hook in self.get_hooks.values():
             val = hook(self, key, val)
         return val
 
@@ -428,7 +461,7 @@ class DataManager(MutableMapping, metaclass=ABCMeta):
             self.log.info('Data in %s unchanged, not updating', key)
             return
         self.log.info('Updating %s', key)
-        for hook in self.set_hooks:
+        for hook in self.set_hooks.values():
             value = hook(self, key, value)
         self._data[key] = value
         self._updated[key] = True
@@ -829,7 +862,7 @@ class NPZDataManager(DataManager):
             np.savez_compressed(out, **self._avgs)
 
 
-def create_rescaling_hook(power, amplitude, log):
+def create_power_rescaling_hook(power, amplitude, log):
     """
     Create a function that rescales the field amplitudes and power fluxes using
     the provided power and amplitude scaling factors
@@ -860,34 +893,76 @@ def create_rescaling_hook(power, amplitude, log):
 
     # Some attributes are set on this function after definition. Scroll down to
     # see where hook.log comes from
-    def hook(inst, key, value):
-        hook.log.debug('Calling rescaling hook!')
+    def power_rescale_hook(power, amplitude, log, inst, key, value):
+        log.debug('Calling rescaling hook!')
         # Do not rescale twice
-        if hasattr(inst, 'rescaled'):
-            if key in inst.rescaled:
-                if inst.rescaled[key]:
-                    hook.log.debug('Key {} already scaled!'.format(key))
-                    return value
+        if hasattr(inst, 'power_rescaled'):
+            if key in inst.power_rescaled and inst.power_rescaled[key]:
+                log.debug('Key {} already scaled!'.format(key))
+                return value
         else:
-            inst.rescaled = {}
+            inst.power_rescaled = {}
         if key in {'Ex', 'Ey', 'Ez'}:
-            hook.log.info('Rescaling field %s!', key)
-            value = value.magnitude * hook.amplitude
-            inst.rescaled[key] = True
+            log.info('Rescaling field %s!', key)
+            value = value.magnitude * amplitude
+            inst.power_rescaled[key] = True
         elif key in {'Hx', 'Hy', 'Hz'}:
-            hook.log.info('Rescaling field %s!', key)
+            log.info('Rescaling field %s!', key)
             # Need to divide by impedance of free space
-            value = value.magnitude * hook.amplitude / ureg.Z_0
+            value = value.magnitude * amplitude / ureg.Z_0
             value = value.to_base_units()
-            inst.rescaled[key] = True
+            inst.power_rescaled[key] = True
         elif key == 'fluxes':
-            value['forward'] = [.5*el.magnitude*hook.power for el in value['forward']]
-            value['backward'] = [.5*el.magnitude*hook.power for el in value['backward']]
-            inst.rescaled[key] = True
+            value['forward'] = [.5*el.magnitude*power for el in value['forward']]
+            value['backward'] = [.5*el.magnitude*power for el in value['backward']]
+            inst.power_rescaled[key] = True
         inst[key] = value
         return value
-    hook.amplitude = amplitude
-    hook.power = power
-    hook.log = log
-    return hook
+    return partial(power_rescale_hook, power, amplitude, log)
 
+def create_field_rescaling_hook(factors, layers):
+    """
+    Create a function that rescales the field components on a per layer basis
+    using the scaling factors provided in the factors dict. Keys must be layer
+    names and values must be floats. The layers arg must be a dict whose keys
+    are layer names and whose values are Layer objects.
+
+    Parameters
+    ----------
+
+    factors : dict
+    layers : dict
+
+    Returns
+    -------
+
+    function
+        A function that can be used as a get hook in a DataManager.  It will
+        rescale any keys in {'Ex', 'Ey', 'Ez'} using the provided factors and
+        layers
+
+    Notes
+    -----
+
+    This function in written such that if the fields have already been scaled,
+    they do not get rescaled again on subsequent accesses
+    """
+
+    def field_rescale_hook(ratios, layers, inst, key, value):
+        print("Inside field rescaling hook!")
+        if hasattr(inst, 'rescaled'):
+            if key in inst.rescaled and inst.rescaled[key]:
+                print('Key {} already scaled!'.format(key))
+                return value
+        else:
+            inst.rescaled = {}
+        if key in {"Ex", "Ey", "Ez"}:
+            print("Running rescaling method!")
+            for layer, factor in ratios.items():
+                layer_obj = layers[layer]
+                lslice = layer_obj.get_slice(inst._data['zcoords'])
+                value[lslice] *= np.sqrt(factor)
+            inst.rescaled[key] = True
+            inst[key] = value
+        return value
+    return partial(field_rescale_hook, factors, layers)

@@ -52,6 +52,7 @@ from nanowire.utils.utils import (
     arithmetic_arange,
     open_pytables_file,
     get_record,
+    numpy_arr_to_dict,
     ureg,
     Q_,
 )
@@ -148,7 +149,8 @@ class Simulation:
     """
 
     def __init__(self, outdir, bandwidth, spectrum='am1.5g', conf=None,
-                 simulator=None, skip_power_rescale_hook=False, rescale_method=False):
+                 simulator=None, skip_power_rescale_hook=False,
+                 rescale_method=False):
         """
         :param :class:`~utils.config.Config`: Config object for this simulation
         """
@@ -227,11 +229,24 @@ class Simulation:
         self.layers = get_layers(self)
         self.height = self.get_height()
         if self.use_rescale_method:
-            ratios = self.get_rescaling_factors()
-            hook = create_field_rescaling_hook(ratios, self.layers)
+            self.rescaled_keys = {'power_absorbed', 'normE', 'normEsquared',
+                                  'genRate', 'jph_integral_method'}
+            print("GET HOOKS: ", self.data.get_hooks)
+            try:
+                print("GETTING RESCALING FACTORS")
+                factors = self.get_quantity('rescaling_factors')[0]
+            except KeyError:
+                print('RECOMPUTING RESCALING FACTORS')
+                factors = self.rescaling_factors()
+                self.write_data()
+            else:
+                factors = numpy_arr_to_dict(factors)
+            hook = create_field_rescaling_hook(factors, self.layers)
             self.data.add_get_hook(hook)
             self.clear_data()
-        print('GET HOOKS: ', self.data.get_hooks)
+            # A set of keys that are affected by the rescaled fields. They will
+            # be written and read by appending '_rescaled' to their name when
+            # using get_quantity and extend_data
 
     def _get_data_manager(self):
         """
@@ -241,7 +256,7 @@ class Simulation:
 
         ftype = self.conf['General']['save_as'].lower()
         if self.skip_power_rescale_hook:
-            self.log.warning("Skipping rescaling to spectrum!")
+            self.log.warning("Rescaling to unit spectrum!!!")
             power = Q_(1.0, ureg.watt / ureg.meter**2)
             amplitude = Q_(1.0, ureg.volts / ureg.meter)
         else:
@@ -259,7 +274,7 @@ class Simulation:
                 self.bandwidth,
                 logger=self.log
             )
-            hook = create_power_rescaling_hook(power, amplitude, self.log)
+        hook = create_power_rescaling_hook(power, amplitude, self.log)
         # Create the rescaling hook for the data manager that rescales all
         # powers and fields using the power/amplitude of the incident spectrum
         if ftype == 'hdf5':
@@ -269,8 +284,7 @@ class Simulation:
             # components using the incident amplitude
             manager = HDF5DataManager(file_path, group_path=gpath, mode='a',
                                       logger=self.log)
-            if not self.skip_power_rescale_hook:
-                manager.add_get_hook(hook)
+            manager.add_get_hook(hook)
             for k in ('Ex', 'Ey', 'Ez', 'fluxes'):
                 manager.add_to_blacklist(k)
             return manager
@@ -293,7 +307,7 @@ class Simulation:
         """Returns the total height of the device"""
         return sum(layer.thickness for layer in self.layers.values())
 
-    def get_scalar_quantity(self, quantity):
+    def get_quantity(self, quantity):
         """
         Retrieves the entire 3D matrix for some scalar quantity.
 
@@ -323,16 +337,21 @@ class Simulation:
             class
         """
 
+        if self.use_rescale_method and quantity in self.rescaled_keys:
+            key = quantity + '_rescaled'
+        else:
+            key = quantity
         self.log.debug('Retrieving scalar quantity %s', str(quantity))
         try:
-            return self.data[quantity]
+            return self.data[key]
         except KeyError:
             self.log.error('You attempted to retrieve a quantity that does not'
                            ' exist in the data dict. Attempting to calculate')
+            print("Key {} does not exist! Computing ...".format(key))
         try:
             result = getattr(self, quantity)()
-            self.extend_data(quantity, result)
-            return self.data[quantity]
+            self.extend_data(key, result)
+            return result
         except:
             self.log.error('Unable to calculate following quantity: %s',
                            quantity)
@@ -342,6 +361,9 @@ class Simulation:
         """
         Adds a new key, value pair to the DataManager object
         """
+
+        if self.use_rescale_method and quantity in self.rescaled_keys:
+            quantity += '_rescaled'
         if quantity in self.data:
             self.log.debug("Quantity %s exists in matrix, updating", quantity)
             self.data[quantity] = new_data
@@ -351,7 +373,7 @@ class Simulation:
 
     def clear_data(self):
         """
-        Clears all the data from the self.data DataManager object to free up memory
+        Clears all the data key the self.data DataManager object to free up memory
         """
         if isinstance(self.data, DataManager):
             self.data.clear_data()
@@ -377,8 +399,8 @@ class Simulation:
         E_mag = Q_(np.zeros_like(self.data['Ex'], dtype=np.float64),
                    ureg.volt ** 2 / ureg.meter ** 2)
         for comp in ('Ex', 'Ey', 'Ez'):
-            d = self.data[comp]
-            E_mag += np.absolute(self.data[comp])**2
+            d = self.get_quantity(comp)
+            E_mag += np.absolute(d)**2
         E_mag = np.sqrt(E_mag)
         self.extend_data('normE', E_mag)
         return np.sqrt(E_mag)
@@ -398,7 +420,8 @@ class Simulation:
         E_magsq = Q_(np.zeros_like(self.data['Ex'], dtype=np.float64),
                      ureg.volt ** 2 / ureg.meter ** 2)
         for comp in ('Ex', 'Ey', 'Ez'):
-            E_magsq += np.absolute(self.data[comp])**2
+            d = self.get_quantity(comp)
+            E_magsq += np.absolute(d)**2
         self.extend_data('normEsquared', E_magsq)
         return E_magsq
 
@@ -431,7 +454,7 @@ class Simulation:
 
         # We need to compute normEsquared before we can compute the generation
         # rate
-        normEsq = self.get_scalar_quantity('normEsquared')
+        normEsq = self.get_quantity('normEsquared')
         # Prefactor for generation rate. Note we gotta convert from m^3 to
         # cm^3, hence 1e6 factor
         fact = 1.0 * ureg.vacuum_permittivity / ureg.hbar
@@ -463,10 +486,10 @@ class Simulation:
         """
 
         try:
-            quant = self.get_scalar_quantity(quantity)
+            quant = self.get_quantity(quantity)
         except KeyError:
             getattr(self, quantity)()
-            quant = self.get_scalar_quantity(quantity)
+            quant = self.get_quantity(quantity)
             # Make sure we don't compute it twice
             try:
                 self.conf['Postprocessing']['Cruncher'][
@@ -531,8 +554,8 @@ class Simulation:
         # to actually correspond to the center of the nanowire
         rvec = Q_(np.linspace(0, rmax.magnitude, rsamp), rmax.units)
         thvec = Q_(np.linspace(0, 2 * np.pi, thsamp), 'radians')
-        self.data['radial_coords'] = rvec
-        self.data['angle_coords'] = thvec
+        self.extend_data('radial_coords', rvec)
+        self.extend_data('angle_coords', thvec)
         cyl_coords = Q_(np.zeros((len(rvec) * len(thvec), 2)), rmax.units)
         start = 0
         for r in rvec:
@@ -555,7 +578,7 @@ class Simulation:
         avgs = avgs[:, ::-1]
         # Save to avgs dict for this sim
         key = quantity + '_angularAvg'
-        self.data[key] = avgs
+        self.extend_data(key, avgs)
         return avgs
 
     def power_absorbed(self, per_area=True, order=(0, 1, 2)):
@@ -591,8 +614,8 @@ class Simulation:
         :type per_area: bool
         """
 
-        fluxes = self.data['fluxes']
-        Esq = self.normEsquared()
+        fluxes = self.get_quantity('fluxes')
+        Esq = self.get_quantity('normEsquared')
         freq = self.conf['Simulation/frequency']
         # object type for pint Quantities
         dt = [('layer', 'S25'), ('flux_method', 'O'), ('int_method', 'O'),
@@ -665,7 +688,7 @@ class Simulation:
         absorb_arr = np.append(absorb_arr, new_rec)
         self.log.info("Integration Order: %s, Layer absorption arr: %s",
                       str(order), str(absorb_arr))
-        self.data['power_absorbed'] = absorb_arr
+        self.extend_data('power_absorbed', absorb_arr)
         return absorb_arr
 
     def transmissionData(self, port='Substrate_bottom'):
@@ -679,7 +702,7 @@ class Simulation:
                          self.data['fluxes']
         """
 
-        data = self.data['fluxes']
+        data = self.get_quantity('fluxes')
         # self.log.info('SORTED LAYERS: %s', str(sorted_layers))
         first_layer = list(self.layers.items())[0]
         self.log.info('FIRST LAYER: %s', str(first_layer))
@@ -710,7 +733,7 @@ class Simulation:
         # Try to get a prexisting array if it exists
         try:
             # If array has been computed before get it
-            arr = self.data['transmission_data']
+            arr = self.get_quantity('transmission_data')
             # If we already have data at this port update that row, otherwise
             # resize the array to accomodate the new row and insert the data
             ind = np.where(arr.port == port.encode('utf-8'))[0]
@@ -725,25 +748,37 @@ class Simulation:
                   ('transmission', 'O'), ('absorption', 'O')]
             arr = np.recarray((1,), dtype=dt)
             arr[-1] = (port, reflectance, transmission, absorbance)
-        self.data['transmission_data'] = arr
+        self.extend_data('transmission_data', arr)
         return reflectance, transmission, absorbance
 
-    def get_rescaling_factors(self):
+    def rescaling_factors(self):
         data = self.power_absorbed()
-        ratios = {}
+        dt = [(layer.decode(), np.float64) for layer in data['layer'] if layer
+              != b'total']
+        print(dt)
+        ratios = np.recarray((1,), dtype=dt)
         for record in data:
             layer = record['layer'].decode('utf-8')
             if layer == 'total':
                 continue
-            flux = record['flux_method']
-            integral = record['int_method']
+            flux = record['flux_method'].magnitude
+            integral = record['int_method'].magnitude
             try:
-                ratio = np.abs(flux/integral)
-            except ZeroDivisionError:
+                if np.isfinite(flux) and np.isfinite(integral):
+                    with np.errstate(all='raise'):
+                        ratio = np.abs(flux/integral)
+                        ratio = ratio
+                else:
+                    print("FOUND NANS!!!")
+                    ratio = 1
+            except (ZeroDivisionError, FloatingPointError):
                 self.log.warning("Integral method is zero, setting rescaling factor to 1")
                 ratio = 1
             ratios[layer] = ratio
+        print(ratios)
         self.log.debug("Rescaling factors: {}".format(ratios))
+        print("Rescaling factors: {}".format(ratios))
+        self.extend_data('rescaling_factors', ratios)
         return ratios
 
     def integrate_quantity(self, q, layer=None, mask=None, **kwargs):
@@ -783,7 +818,7 @@ class Simulation:
         """
 
         if type(q) == str:
-            qarr = self.get_scalar_quantity(q)
+            qarr = self.get_quantity(q)
         else:
             qarr = q
         if layer is not None:
@@ -833,7 +868,7 @@ class Simulation:
         E_photon = ureg.planck_constant * freq
         # Unpack data for the port we passed in as an argument
         try:
-            arr = self.data['power_absorbed']
+            arr = self.get_quantity('power_absorbed')
             # port, ref, trans, absorb = arr[arr.port == port.encode('utf-8')][0]
         except KeyError:
             arr = self.power_absorbed()
@@ -858,8 +893,8 @@ class Simulation:
         # Prevent numpy scalars from being stored inside the Quantity object
         flux_jph = Q_(float(flux_jph.magnitude), flux_jph.units)
         integ_jph = Q_(float(integ_jph.magnitude), integ_jph.units)
-        self.data['jph_flux_method'] = flux_jph
-        self.data['jph_integral_method'] = integ_jph
+        self.extend_data('jph_flux_method', flux_jph)
+        self.extend_data('jph_integral_method', integ_jph)
         return flux_jph, integ_jph
 
     def plot_q_values(self):
@@ -883,7 +918,7 @@ class Simulation:
             leg_str += '{}: {:.2f} [rads/$\mu$m]\n'.format(mat, mat_q)
         leg_str = leg_str[0:-1]
         for lname, l_obj in self.layers.items():
-            qarr = self.data['{}_qvals'.format(lname)]
+            qarr = self.get_quantity('{}_qvals'.format(lname))
             max_pos_freq = np.amax(qarr.real)
             max_neg_freq = np.amin(qarr.real)
             min_pos_wv = 1e3*2*np.pi/max_pos_freq
@@ -1056,7 +1091,7 @@ class Simulation:
         title = 'Frequency = {:.4E} Hz, Wavelength = {:.2f} nm'.format(
             freq, wvlgth)
         # Get the plane we wish to plot
-        quant_arr = self.get_scalar_quantity(quantity)
+        quant_arr = self.get_quantity(quantity)
         cs = get_plane(quant_arr, plane, pval).magnitude
         self.log.info('DATA SHAPE: %s' % str(cs.shape))
         show = self.conf['General']['show_plots']
@@ -1129,7 +1164,7 @@ class Simulation:
         z = np.arange(0, self.height + self.dz, self.dz)
         points = np.array(list(product(z, x, y)))
         # Get the scalar
-        scalar = self.get_scalar_quantity(quantity)
+        scalar = self.get_quantity(quantity)
         labels = ('X [um]', 'Y [um]', 'Z [um]', quantity)
         # Now plot!
         self.scatter3d(points[:, 1], points[:, 2], points[
@@ -1142,7 +1177,7 @@ class Simulation:
         # Get the scalar values
         # Get the data on the plane with a fixed x value. These means we'll
         # have changing (y, z) points
-        quant_arr = self.get_scalar_quantity(quantity)
+        quant_arr = self.get_quantity(quantity)
         xdata = get_plane(quant_arr, 'yz', xplane)
         # z first cuz we want y to be changing before z to correspond with the
         # way numpy flattens arrays. Note this means y points will be in the
@@ -1156,7 +1191,7 @@ class Simulation:
         xplanedata[:, 2] = xplanepoints[:, 0]
         xplanedata[:, 3] = xdata
         # Same procedure for fixed y plane
-        quant_arr = self.get_scalar_quantity(quantity)
+        quant_arr = self.get_quantity(quantity)
         ydata = get_plane(quant_arr, 'xz', yplane)
         yplanepoints = np.array(list(product(z, x)))
         ydata = ydata.flatten()
@@ -1208,7 +1243,7 @@ class Simulation:
         coord2 = int(coord2)
         # Get the scalar values
         # Filter out any undesired data that isn't on the planes
-        quant_arr = self.get_scalar_quantity(quantity)
+        quant_arr = self.get_quantity(quantity)
         data = get_line(quant_arr, direction, coord1, coord2)
         if direction == 'x':
             # z along rows, y along columns
@@ -1349,12 +1384,20 @@ class SimulationGroup:
         self.log.info('Performing scalar reduction for group at %s',
                       self.results_dir)
         self.log.debug('Quantity to reduce: %s', quantity)
-        group_comb = self.sims[0].get_scalar_quantity(quantity)
+        group_comb = self.sims[0].get_quantity(quantity)
+        print(type(group_comb))
+        if np.isnan(group_comb).any():
+            print("Sim {} has NANs!".format(self.sims[0].ID))
         # self.sims[0].clear_data()
         for sim in self.sims[1:]:
+            print("-"*25)
+            print("Sim ID: {}".format(sim.ID))
             self.log.debug(sim.ID)
-            quant = sim.get_scalar_quantity(quantity)
+            quant = sim.get_quantity(quantity)
             self.log.debug(quant.dtype)
+            print(type(quant))
+            if np.isnan(quant).any():
+                print("Sim {} has NANs!".format(sim.ID))
             group_comb += quant
             sim.clear_data()
         if avg:
@@ -1362,6 +1405,8 @@ class SimulationGroup:
             fname = 'scalar_reduce_avg_%s' % quantity
         else:
             fname = 'scalar_reduce_%s' % quantity
+        if self.sims[0].use_rescale_method:
+            fname += '_rescaled'
         ftype = self.sims[0].conf['General']['save_as']
         if ftype == 'hdf5':
             self.data[fname] = group_comb
@@ -1968,9 +2013,12 @@ def execute_sim_plan(conf, outdir, proc_config, bandwidth, grouped_against=None,
     try:
         log.info("Executing Simulation plan")
         plan = proc_config['Postprocessing']['Single']
+        spectrum = proc_config['Postprocessing'].get('spectrum', 'am1.5g')
+        rescale_method = proc_config['Postprocessing'].get('rescale_method',
+                                                           False)
         sim = Simulation(outdir, bandwidth, conf=conf,
-                         spectrum=proc_config['Postprocessing']['spectrum'],
-                         rescale_method=proc_config['Postprocessing']['rescale_method'])
+                         spectrum=spectrum,
+                         rescale_method=rescale_method)
         for task_name in ('crunch', 'plot'):
             if task_name not in plan:
                 continue

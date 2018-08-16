@@ -615,6 +615,15 @@ def get_pytables_desc(data, skip_keys=[], keypath=''):
     return tb.Description(fields), meta
 
 
+def compare_pytables_desc(d1, d2):
+    """
+    Compare two pytables descriptions to determine if they are equivalent. This
+    requires that the names of the fields in the description as well as the
+    types are equivalent
+    """
+    return d1._v_dtype == d2._v_dtype
+
+
 def _recurse_row(row, base, data):
     for (key, value) in data.items():
         new = base + key

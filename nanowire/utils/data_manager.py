@@ -16,7 +16,8 @@ from nanowire.utils.utils import (
     open_atomic,
     ureg,
     Q_,
-    add_row
+    add_row,
+    get_pytables_desc
 )
 
 
@@ -442,6 +443,7 @@ class DataManager(MutableMapping, metaclass=ABCMeta):
         val = self._data[key]
         for hook in self.get_hooks.values():
             val = hook(self, key, val)
+        self._data[key] = val
         return val
 
     def __setitem__(self, key, value):
@@ -519,7 +521,8 @@ class HDF5DataManager(DataManager):
                          float: self.write_float,
                          # We write ints the same way as floats
                          int: self.write_float,
-                         pint.quantity._Quantity: self.write_pint_quantity}
+                         pint.quantity._Quantity: self.write_pint_quantity,
+                         dict: self.write_dict}
 
     def _get_writer(self, obj):
         for klass, writer in self.writable.items():
@@ -641,8 +644,7 @@ class HDF5DataManager(DataManager):
         # Filter out the original data so we don't resave it
         keys = [key for key in self._data.keys() if key not in blacklist and
                 self._updated[key]]
-        self.log.info(keys)
-        print("Saving keys {}".format(keys))
+        self.log.info("Saving keys %s", str(keys))
         for key in keys:
             obj = self._data[key]
             writer = self._get_writer(obj)
@@ -692,6 +694,31 @@ class HDF5DataManager(DataManager):
             row.append()
         table.flush()
         self._update_keys()
+        return table
+
+    def write_dict(self, d, name):
+        desc, meta = get_pytables_desc(d)
+        units_dict = {}
+        for k, v in meta.items():
+            if isinstance(v, dict) and 'units' in v:
+                units_dict[k] = v['units']
+        try:
+            table = self._dstore.get_node(self.gpath, name=name)
+            # Ensure matching descriptions
+            if not desc._v_dtype == table._v_dtype:
+                msg = "Dict {} does not match data type of existing table " \
+                      "{}".format(d, name)
+                raise ValueError(msg)
+        except tb.NoSuchNodeError:
+            if units_dict:
+                table = self._dstore.create_unit_table(self.gpath, name,
+                                                       units=units_dict,
+                                                       filters=self.filt)
+            else:
+                table = self._dstore.create_table(self.gpath, name,
+                                                  description=desc,
+                                                  filters=self.filt)
+        add_row(table, d)
         return table
 
     def write_ndarray(self, arr, name):
@@ -894,14 +921,15 @@ def create_power_rescaling_hook(power, amplitude, log):
     # Some attributes are set on this function after definition. Scroll down to
     # see where hook.log comes from
     def power_rescale_hook(power, amplitude, log, inst, key, value):
-        log.debug('Calling rescaling hook!')
+        log.debug('Calling power rescaling hook!')
         # Do not rescale twice
         if hasattr(inst, 'power_rescaled'):
             if key in inst.power_rescaled and inst.power_rescaled[key]:
-                log.debug('Key {} already scaled!'.format(key))
+                log.debug('Key %s already scaled to spectrum!', key)
                 return value
         else:
             inst.power_rescaled = {}
+        # Factors of .5 for time averaging
         if key in {'Ex', 'Ey', 'Ez'}:
             log.info('Rescaling field %s!', key)
             value = value.magnitude * amplitude
@@ -916,7 +944,6 @@ def create_power_rescaling_hook(power, amplitude, log):
             value['forward'] = [.5*el.magnitude*power for el in value['forward']]
             value['backward'] = [.5*el.magnitude*power for el in value['backward']]
             inst.power_rescaled[key] = True
-        inst[key] = value
         return value
     return partial(power_rescale_hook, power, amplitude, log)
 
@@ -949,20 +976,22 @@ def create_field_rescaling_hook(factors, layers):
     """
 
     def field_rescale_hook(ratios, layers, inst, key, value):
-        print("Inside field rescaling hook!")
+        log = logging.getLogger(__name__)
+        log.debug("Inside field rescaling hook!")
         if hasattr(inst, 'rescaled'):
+            log.debug("Rescaled dict: %s", str(inst.rescaled))
             if key in inst.rescaled and inst.rescaled[key]:
-                print('Key {} already scaled!'.format(key))
+                log.debug('Key %s already scaled!', key)
                 return value
         else:
             inst.rescaled = {}
         if key in {"Ex", "Ey", "Ez"}:
-            print("Running rescaling method!")
             for layer, factor in ratios.items():
                 layer_obj = layers[layer]
+                if inst._data['zcoords'] is None:
+                    inst._load_data('zcoords')
                 lslice = layer_obj.get_slice(inst._data['zcoords'])
                 value[lslice] *= np.sqrt(factor)
             inst.rescaled[key] = True
-            inst[key] = value
         return value
     return partial(field_rescale_hook, factors, layers)

@@ -1557,68 +1557,58 @@ class SimulationGroup:
             raise ValueError("Can only call plot_power_absorbed when "
                              "sims are grouped against a parameter")
         results_dict = {}
-        xvals = np.zeros(len(self.sims[sim_slice[0]:sim_slice[1]]))
+        units = self.sims[0].conf[self.grouped_against].units
+        xvals = Q_(np.zeros(len(self.sims[sim_slice[0]:sim_slice[1]])),
+                   units)
         for i, sim in enumerate(self.sims[sim_slice[0]:sim_slice[1]]):
             xvals[i] = sim.conf[self.grouped_against]
-            abs_arr = sim.data['abs_per_layer']
+            abs_arr = sim.data['power_absorbed']
             flux_total = 0
             integ_total = 0
-            integ_polar_total = 0
-            for (layer, flux, integ, integ_polar, diff, diff_polar) in abs_arr:
-                layer = layer.decode('utf-8')
+            for rec in abs_arr:
+                layer = rec['layer'].decode('utf-8')
+                flux = rec['flux_method'].magnitude
+                integ = rec['int_method'].magnitude
+                diff = rec['difference'].magnitude
                 if layer in results_dict:
                     results_dict[layer][0].append(flux.real)
                     results_dict[layer][1].append(integ.real)
                     results_dict[layer][2].append(diff.real)
-                    results_dict[layer][3].append(integ_polar.real)
-                    results_dict[layer][4].append(diff_polar.real)
                 else:
-                    results_dict[layer] = [[flux.real], [integ.real],
-                                           [diff.real], [integ_polar.real],
-                                           [diff_polar.real]]
+                    results_dict[layer] = [[flux.real], [integ.real], [diff.real]]
                 flux_total += flux.real
                 integ_total += integ.real
-                if layer == "NW_AlShell":
-                    integ_polar_total += integ_polar.real
-                else:
-                    integ_polar_total += integ.real
-            total_diff = np.abs(flux_total.real - integ_total.real)/np.abs(flux_total)
-            total_diff_polar = np.abs(flux_total.real - integ_polar_total.real)/np.abs(flux_total)
+            # total_diff = np.abs(flux_total.real - integ_total.real)/np.abs(flux_total)
             # total_diff = np.real(flux_total.real - integ_total.real)/flux_total.real
             # total_diff_polar = np.real(flux_total.real - integ_polar_total.real)/flux_total.real
-            if 'total' in results_dict:
-                results_dict['total'][0].append(flux_total.real)
-                results_dict['total'][1].append(integ_total.real)
-                results_dict['total'][2].append(total_diff.real)
-                results_dict['total'][3].append(integ_polar_total.real)
-                results_dict['total'][4].append(total_diff_polar.real)
-            else:
-                results_dict['total'] = [[flux_total.real], [integ_total.real],
-                                         [total_diff.real], [integ_polar_total.real],
-                                         [total_diff_polar.real]]
+            # if 'total' in results_dict:
+            #     results_dict['total'][0].append(flux_total.real)
+            #     results_dict['total'][1].append(integ_total.real)
+            #     results_dict['total'][2].append(total_diff.real)
+            # else:
+            #     results_dict['total'] = [[flux_total.real], [integ_total.real],
+            #                              [total_diff.real]]
         layers = results_dict.keys()
         if plot_layer is not None:
             layers = [l for l in layers if l == plot_layer]
 
         quants = {'fluxmethod_absorption': 0,
                   'integralmethod_absorption': 1,
-                  'relativediff': 2,
-                  'integralmethod_absorption_polar': 3,
-                  'relativediff_polar': 4}
+                  'relativediff': 2}
         if quant is not None:
             quants = {q: ind for q, ind in quants.items() if q in quant}
-        xvals = 1e9*consts.c/xvals
+        xvals.ito('nm', 'spectroscopy')
         for layer in layers:
             results = results_dict[layer]
             for name, ind in quants.items():
                 # diff = abs(results[ind][-1] - results[ind][0])/abs(results[ind][-1])
-                diff = abs(results[ind][-1] - results[ind][0])/abs(results[ind][-1])
+                # diff = abs(results[ind][-1] - results[ind][0])/abs(results[ind][-1])
                 if input_ax is None:
                     fig, ax = plt.subplots()
                 else:
                     ax = input_ax
                 pfile = osp.join(self.results_dir, '{}_{}.png'.format(layer, name))
-                ax.plot(xvals, results[ind], marker, label=leg_label)
+                ax.plot(xvals.magnitude, results[ind], marker, label=leg_label)
                 ylims = ax.get_ylim()
                 ax.set_ylim([0, ylims[-1]])
                 ax.set_xlabel(self.grouped_against[-1])
@@ -2352,10 +2342,11 @@ class Processor:
                           str(self.num_cores))
             with mp.Pool(processes=self.num_cores) as pool:
                 results = {}
-                for a, kw in zip(args_list, kwargs_list):
-                    ID = a[0].ID
+                for i, (a, kw) in enumerate(zip(args_list, kwargs_list)):
+                    # print(type(a[0]))
+                    # print(a[0][0])
                     res = pool.apply_async(func, a, kw)
-                    results[ID] = res
+                    results[i] = res
                 while results:
                     IDs = list(results.keys())
                     for ID in IDs:

@@ -2224,7 +2224,7 @@ class Processor:
     def close_all(self):
         for sim in self.sims.values():
             if isinstance(sim, Simulation):
-                self.log.info('Closing sim %s', sim.ID[0:10])
+                self.log.debug('Closing sim %s', sim.ID[0:10])
                 sim.data.close()
         for group in self.sim_groups:
             self.log.info('Closing group %s', group.ID[0:10])

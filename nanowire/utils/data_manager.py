@@ -941,8 +941,8 @@ def create_power_rescaling_hook(power, amplitude, log):
             value = value.to_base_units()
             inst.power_rescaled[key] = True
         elif key == 'fluxes':
-            value['forward'] = [.5*el.magnitude*power for el in value['forward']]
-            value['backward'] = [.5*el.magnitude*power for el in value['backward']]
+            value['forward'] = [el.magnitude*power for el in value['forward']]
+            value['backward'] = [el.magnitude*power for el in value['backward']]
             inst.power_rescaled[key] = True
         return value
     return partial(power_rescale_hook, power, amplitude, log)

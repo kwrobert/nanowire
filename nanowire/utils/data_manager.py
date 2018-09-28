@@ -741,9 +741,9 @@ class HDF5DataManager(DataManager):
         try:
             # If compatible array exists, try overwriting its data
             node = self._dstore.get_node(self.gpath, name=name)
-            if node.shape == arr.shape:
-                node[...] = arr
-                return node
+            # if node.shape == arr.shape:
+            #     node[...] = arr
+            #     return node
             # Otherwise remove it and write a new one
             self._dstore.remove_node(self.gpath, name=name)
             node = self._dstore.create_carray(self.gpath, name, obj=arr,

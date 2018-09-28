@@ -4,6 +4,7 @@ import glob
 import sys
 import time
 import copy
+import traceback
 import logging
 import pint
 import hashlib
@@ -1354,12 +1355,12 @@ class SimulationGroup:
             for sim in self.sims:
                 self.log.info("Writing data for Simulation %s", sim.ID)
                 sim.write_data()
-                sim.data.close()
 
     def clear_data(self, clear_sims=True):
         """
         Clears all the data from the self.data DataManager object to free up memory
         """
+        self.log.info("Clearing data for SimulationGroup %s", self.ID)
         if isinstance(self.data, DataManager):
             self.data.clear_data()
         else:
@@ -1368,11 +1369,13 @@ class SimulationGroup:
             for sim in self.sims:
                 self.log.info("Clearing data for Simulation %s", sim.ID)
                 sim.clear_data()
-                sim.data.close()
 
     def close(self):
-        self.clear_data()
+        self.log.info("Closing data for SimulationGroup %s", self.ID)
         self.data.close()
+        for sim in self.sims:
+            self.log.info("Closing data for Simulation %s", sim.ID)
+            sim.close()
 
     def scalar_reduce(self, quantity, avg=False):
         """
@@ -2033,12 +2036,20 @@ def execute_sim_plan(conf, outdir, proc_config, bandwidth, grouped_against=None,
             log.info("Completed %s for sim %s", task_name, sim.ID)
         log.info("Plan execution for sim %s complete", sim.ID)
         log.info("Saving and clearing data for Simulation %s", sim.ID)
+        # Write out to disk
         sim.write_data()
-        sim.clear_data()
+        # Close file handle to disk HDF5 file safely
         sim.data.close()
+        # Clear data out of memory
+        sim.clear_data()
         log.info("Data writing for Simulation %s complete!", sim.ID)
     except Exception as e:
-        log.error('Conf %s raised exception', conf.ID)
+        trace = traceback.format_exc()
+        log.error('Conf %s raised folowing exception:\n%s', conf.ID, trace)
+        try:
+            sim.close()
+        except:
+            pass
         raise
 
 
@@ -2077,13 +2088,17 @@ def execute_group_plan(sim_confs_and_dirs, base_dir, proc_config, bandwidth,
             log.info("Completed %s for group %s", task_name, sim_group.ID)
         log.info("Writing data for SimulationGroup %s", sim_group.ID)
         sim_group.write_data()
+        log.info("Closing data for SimulationGroup %s", sim_group.ID)
+        sim_group.close()
         log.info("Clearing data for SimulationGroup %s", sim_group.ID)
         sim_group.clear_data()
     except Exception as e:
         # log.error('Group {} raised exception'.format(sim_group.ID))
-        exc_type, exc_inst, trace = sys.exc_info()
+        # exc_type, exc_inst, trace = sys.exc_info()
+        trace = traceback.format_exc()
         log.error('Group %s raised exception:\n%s', sim_group.ID, trace)
-        raise exc_inst.with_traceback(trace)
+        sim_group.close()
+        raise
 
 
 class Processor:

@@ -1,5 +1,6 @@
 import os
 import os.path as osp
+import traceback
 import glob
 import sys
 import time
@@ -183,6 +184,14 @@ class Simulation:
             self.bandwidth = bandwidth.to('hertz', 'spectroscopy')
         elif isinstance(bandwidth, (float, int)):
             self.bandwidth = Q_(bandwidth, 'hertz')
+        elif isinstance(bandwidth, tuple):
+            print("SIMULATION {} RECEIVED BANDWIDTH TUPLE".format(self.conf.ID))
+            if not all(isinstance(el, pint.quantity._Quantity) for el in
+                       bandwidth):
+                msg = 'Invalid bandwidth argument: {}'.format(bandwidth)
+                raise ValueError(msg)
+            else:
+                self.bandwidth = bandwidth
         else:
             msg = 'Invalid bandwidth argument: {}'.format(bandwidth)
             raise ValueError(msg)
@@ -230,14 +239,15 @@ class Simulation:
         self.layers = get_layers(self)
         self.height = self.get_height()
         if self.use_rescale_method:
+            # A set of keys that are affected by the rescaled fields. They will
+            # be written and read by appending '_rescaled' to their name when
+            # using get_quantity and extend_data
             self.rescaled_keys = {'power_absorbed', 'normE', 'normEsquared',
                                   'genRate', 'jph_integral_method'}
-            print("GET HOOKS: ", self.data.get_hooks)
+            self.log.info("GET HOOKS: ", self.data.get_hooks)
             try:
-                print("GETTING RESCALING FACTORS")
                 factors = self.get_quantity('rescaling_factors')[0]
             except KeyError:
-                print('RECOMPUTING RESCALING FACTORS')
                 factors = self.rescaling_factors()
                 self.write_data()
             else:
@@ -245,9 +255,12 @@ class Simulation:
             hook = create_field_rescaling_hook(factors, self.layers)
             self.data.add_get_hook(hook)
             self.clear_data()
-            # A set of keys that are affected by the rescaled fields. They will
-            # be written and read by appending '_rescaled' to their name when
-            # using get_quantity and extend_data
+            # We clear the data so we don't consume a bunch of memory, but when
+            # we do that we lose the rescaled fields and fluxes, and the
+            # rescaling cache prevents us from doing it again. So, fix the
+            # cache
+            for k in ('Ex', 'Ey', 'Ez', 'fluxes'):
+                self.data.power_rescaled[k] = False
 
     def _get_data_manager(self):
         """
@@ -292,7 +305,7 @@ class Simulation:
         else:
             raise ValueError('Invalid file type in config')
 
-    def write_data(self, blacklist=('normE', 'normEsquared')):
+    def write_data(self, blacklist=()):
         """
         Writes the data. This is a simple wrapper around the write_data()
         method of the DataManager object, with some code to compute the time it
@@ -342,13 +355,12 @@ class Simulation:
             key = quantity + '_rescaled'
         else:
             key = quantity
-        self.log.debug('Retrieving scalar quantity %s', str(quantity))
+        self.log.debug('Retrieving scalar quantity %s', str(key))
+        print('Retrieving scalar quantity %s', str(key))
         try:
             return self.data[key]
         except KeyError:
-            self.log.error('You attempted to retrieve a quantity that does not'
-                           ' exist in the data dict. Attempting to calculate')
-            print("Key {} does not exist! Computing ...".format(key))
+            self.log.info("Key {} does not exist! Computing ...".format(key))
         try:
             result = getattr(self, quantity)()
             self.extend_data(key, result)
@@ -617,6 +629,9 @@ class Simulation:
 
         fluxes = self.get_quantity('fluxes')
         Esq = self.get_quantity('normEsquared')
+        print('ID: {}'.format(self.ID))
+        print("TYPE ESQ: {}".format(type(Esq)))
+        print("ESQ UNITS: {}".format(Esq.units))
         freq = self.conf['Simulation/frequency']
         # object type for pint Quantities
         dt = [('layer', 'S25'), ('flux_method', 'O'), ('int_method', 'O'),
@@ -756,7 +771,6 @@ class Simulation:
         data = self.power_absorbed()
         dt = [(layer.decode(), np.float64) for layer in data['layer'] if layer
               != b'total']
-        print(dt)
         ratios = np.recarray((1,), dtype=dt)
         for record in data:
             layer = record['layer'].decode('utf-8')
@@ -770,15 +784,14 @@ class Simulation:
                         ratio = np.abs(flux/integral)
                         ratio = ratio
                 else:
+                    self.log.critical("FOUND NANS!!!")
                     print("FOUND NANS!!!")
                     ratio = 1
             except (ZeroDivisionError, FloatingPointError):
                 self.log.warning("Integral method is zero, setting rescaling factor to 1")
                 ratio = 1
             ratios[layer] = ratio
-        print(ratios)
-        self.log.debug("Rescaling factors: {}".format(ratios))
-        print("Rescaling factors: {}".format(ratios))
+        self.log.info("Rescaling factors: {}".format(ratios))
         self.extend_data('rescaling_factors', ratios)
         return ratios
 
@@ -1291,16 +1304,16 @@ class SimulationGroup:
     that is grouped against number of basis terms also doesn't make sense.
     """
 
-    def __init__(self, base_dir, bandwidth, sims=None, sim_confs_and_dirs=None,
+    def __init__(self, base_dir, bandwidths, sims=None, sim_confs_and_dirs=None,
                  grouped_against=None, grouped_by=None):
         if sims is None and sim_confs_and_dirs is None:
             raise ValueError("Must provide a list of Simulation objects or a "
                              "list of tuples containing (Config, sim_dir)")
         if grouped_by is None and grouped_against is None:
             raise ValueError("Must know how this SimulationGroup is grouped")
+        print("SimulationGroup bandwidths: {}".format(bandwidths))
         self.log = logging.getLogger(__name__)
         self.base_dir = base_dir
-        self.bandwidth = bandwidth
         self.grouped_by = grouped_by
         self.grouped_against = grouped_against
         if sims is not None:
@@ -1308,7 +1321,7 @@ class SimulationGroup:
             self.sim_confs = [sim.conf for sim in self.sims]
         else:
             self.sim_confs = [tup[0] for tup in sim_confs_and_dirs]
-            self.sims = [Simulation(outdir, bandwidth, conf=conf) for
+            self.sims = [Simulation(outdir, bandwidths[conf.ID], conf=conf) for
                          conf, outdir in sim_confs_and_dirs]
         self.ID, self.results_dir = self.get_group_info()
         self.num_sims = len(self.sims)
@@ -1344,7 +1357,7 @@ class SimulationGroup:
                 # sim_ids.append(sim.ID)
         # self.data['sim_ids'] = sim_ids
 
-    def write_data(self, blacklist=('normE', 'normEsquared'), write_sims=False):
+    def write_data(self, blacklist=(), write_sims=False):
         """
         Writes the data. This is a simple wrapper around the write_data()
         method of the DataManager object, with some code to compute the time it
@@ -1377,7 +1390,7 @@ class SimulationGroup:
             self.log.info("Closing data for Simulation %s", sim.ID)
             sim.close()
 
-    def scalar_reduce(self, quantity, avg=False):
+    def scalar_reduce(self, quantity, avg=False, force=False):
         """
         Combine a scalar quantity across all simulations in each group. If
         avg=False then a direct sum is computed, otherwise an average is
@@ -1386,43 +1399,55 @@ class SimulationGroup:
 
         self.log.info('Performing scalar reduction for group at %s',
                       self.results_dir)
-        self.log.debug('Quantity to reduce: %s', quantity)
-        group_comb = self.sims[0].get_quantity(quantity)
-        print(type(group_comb))
-        if np.isnan(group_comb).any():
-            print("Sim {} has NANs!".format(self.sims[0].ID))
-        # self.sims[0].clear_data()
-        for sim in self.sims[1:]:
-            print("-"*25)
-            print("Sim ID: {}".format(sim.ID))
-            self.log.debug(sim.ID)
-            quant = sim.get_quantity(quantity)
-            self.log.debug(quant.dtype)
-            print(type(quant))
-            if np.isnan(quant).any():
-                print("Sim {} has NANs!".format(sim.ID))
-            group_comb += quant
-            sim.clear_data()
-        if avg:
-            group_comb = group_comb / self.num_sims
-            fname = 'scalar_reduce_avg_%s' % quantity
-        else:
-            fname = 'scalar_reduce_%s' % quantity
         if self.sims[0].use_rescale_method:
-            fname += '_rescaled'
-        ftype = self.sims[0].conf['General']['save_as']
-        if ftype == 'hdf5':
-            self.data[fname] = group_comb
-            self.data['xcoords'] = self.sims[0].data['xcoords']
-            self.data['ycoords'] = self.sims[0].data['ycoords']
-            self.data['zcoords'] = self.sims[0].data['zcoords']
-            if 'radial_coords' in self.sims[0].data:
-                self.data['radial_coords'] = self.sims[0].data['radial_coords']
-            if 'angle_coords' in self.sims[0].data:
-                self.data['angle_coords'] = self.sims[0].data['angle_coords']
+            key = 'scalar_reduce_{}_rescale'.format(quantity)
         else:
-            raise ValueError('Invalid file type in config')
-        return group_comb
+            key = 'scalar_reduce_{}'.format(quantity)
+        self.log.debug('Quantity to reduce: %s', quantity)
+        print("SCALR REDUCE KEY: {}".format(key))
+        try:
+            if force:
+                raise KeyError
+            else:
+                return self.data[key]
+        except KeyError:
+            print("KEY NOT PRESENT IN SCALAR REDUCE")
+            group_comb = self.sims[0].get_quantity(quantity)
+            print(type(group_comb))
+            if np.isnan(group_comb).any():
+                print("Sim {} has NANs!".format(self.sims[0].ID))
+            # self.sims[0].clear_data()
+            for sim in self.sims[1:]:
+                print("-"*25)
+                print("Sim ID: {}".format(sim.ID))
+                self.log.debug(sim.ID)
+                quant = sim.get_quantity(quantity)
+                self.log.debug(quant.dtype)
+                print(type(quant))
+                if np.isnan(quant).any():
+                    print("Sim {} has NANs!".format(sim.ID))
+                group_comb += quant
+                sim.clear_data()
+            if avg:
+                group_comb = group_comb / self.num_sims
+                fname = 'scalar_reduce_avg_%s' % quantity
+            else:
+                fname = 'scalar_reduce_%s' % quantity
+            if self.sims[0].use_rescale_method:
+                fname += '_rescaled'
+            ftype = self.sims[0].conf['General']['save_as']
+            if ftype == 'hdf5':
+                self.data[fname] = group_comb
+                self.data['xcoords'] = self.sims[0].data['xcoords']
+                self.data['ycoords'] = self.sims[0].data['ycoords']
+                self.data['zcoords'] = self.sims[0].data['zcoords']
+                if 'radial_coords' in self.sims[0].data:
+                    self.data['radial_coords'] = self.sims[0].data['radial_coords']
+                if 'angle_coords' in self.sims[0].data:
+                    self.data['angle_coords'] = self.sims[0].data['angle_coords']
+            else:
+                raise ValueError('Invalid file type in config')
+            return group_comb
 
     def photocurrent_density(self, method='flux', units='mA/cm^2'):
         """
@@ -2134,7 +2159,7 @@ class Processor:
         self.sim_groups = []
         self.grouped_against = None
         self.grouped_by = None
-        self.bandwidth = None
+        self.bandwidths = None
 
     def load_confs(self, *args, **kwargs):
         """
@@ -2195,31 +2220,32 @@ class Processor:
 
     def make_sims(self, *args, **kwargs):
         self.log.info("Making %i Simulation objects", len(self.sim_confs))
-        if self.bandwidth is None:
-            bandwidth = self.calculate_bandwidth()
+        if self.bandwidths is None:
+            bandwidths = self.calculate_bandwidth()
         else:
-            bandwidth = self.bandwidth
+            bandwidths = self.bandwidths
         self.sims = None
         sims = {}
         for conf, conf_path in self.sim_confs.values():
             outdir = osp.dirname(conf_path)
-            sim = Simulation(outdir, bandwidth, *args, conf=conf, **kwargs)
+            sim = Simulation(outdir, bandwidths[conf.ID], *args, conf=conf,
+                             **kwargs)
             sims[sim.ID] = sim
         self.sims = sims
         return self.sims
 
     def make_groups(self):
         self.log.info("Making SimulationGroup objects")
-        if self.bandwidth is None:
-            bandwidth = self.calculate_bandwidth()
+        if self.bandwidths is None:
+            bandwidths = self.calculate_bandwidth()
         else:
-            bandwidth = self.bandwidth
+            bandwidths = self.bandwidths
         self.sim_groups = []
         groups = []
         if self.sims:
             for conf_group in self.conf_groups:
                 sims = [self.sims[conf.ID] for conf in conf_group]
-                group = SimulationGroup(self.base_dir, bandwidth, sims=sims,
+                group = SimulationGroup(self.base_dir, bandwidths, sims=sims,
                                         grouped_against=self.grouped_against,
                                         grouped_by=self.grouped_by)
                 groups.append(group)
@@ -2227,9 +2253,8 @@ class Processor:
             for conf_group in self.conf_groups:
                 confs_and_dirs = [(conf, osp.dirname(self.sim_confs[conf.ID][1])) for conf in
                                   conf_group]
-                sim_group = SimulationGroup(confs_and_dirs,
-                                            self.base_dir,
-                                            self.bandwidth,
+                sim_group = SimulationGroup(self.base_dir, bandwidths,
+                                            sim_confs_and_dirs=confs_and_dirs,
                                             grouped_against=self.grouped_against,
                                             grouped_by=self.grouped_by)
                 groups.append(sim_group)
@@ -2394,20 +2419,48 @@ class Processor:
     def calculate_bandwidth(self):
         confs = [tup[0] for tup in self.sim_confs.values()]
         freq_groups = _group_against(confs, 'Simulation/frequency')
-        bandwidths = []
+        bandwidths = {}
         for group in freq_groups:
-            for c1, c2 in pairwise(group):
-                bandwidth = abs(c1['Simulation/frequency'] -
-                                c2['Simulation/frequency'])
-                bandwidths.append(bandwidth)
-        if not all(np.isclose(el, bandwidths[0]) for el in bandwidths[1:]):
-            msg = 'Cannot currently handle nonuniform frequency sweeps'
-            raise NotImplementedError(msg)
+            # for c1, c2 in pairwise(group):
+            #     bandwidth = abs(c1['Simulation/frequency'] -
+            #                     c2['Simulation/frequency'])
+            #     bandwidths.append(bandwidth)
+            N = len(group) - 1
+            if N == 0:
+                conf = group[0]
+                bandwidths[conf.ID] = None
+            else:
+                for i, conf in enumerate(group):
+                    center_freq = conf['Simulation/frequency']
+                    print("i = {}".format(i))
+                    if i == 0:
+                        # Left endpoint
+                        next_freq = group[i+1]['Simulation/frequency']
+                        halfwidth = (next_freq - center_freq)/2
+                        bandwidths[conf.ID] = (center_freq - halfwidth,
+                                               center_freq + halfwidth)
+                    elif i == N:
+                        # Right endpoint
+                        prev_freq = group[i-1]['Simulation/frequency']
+                        halfwidth = (center_freq - prev_freq)/2
+                        bandwidths[conf.ID] = (center_freq - halfwidth,
+                                               center_freq + halfwidth)
+                    else:
+                        # Middle frequency
+                        left_freq = group[i-1]['Simulation/frequency']
+                        right_freq = group[i+1]['Simulation/frequency']
+                        endpoints = (center_freq - (center_freq - left_freq)/2,
+                                     center_freq + (right_freq - center_freq)/2)
+                        bandwidths[conf.ID] = (endpoints)
+        print(bandwidths)
+        # if not all(np.isclose(el, bandwidths[0]) for el in bandwidths[1:]):
+        #     msg = 'Cannot currently handle nonuniform frequency sweeps'
+        #     raise NotImplementedError(msg)
         if bandwidths:
-            self.bandwidth = bandwidths[0]
-            return bandwidths[0]
+            self.bandwidths = bandwidths
+            return bandwidths
         else:
-            self.bandwidth = None
+            self.bandwidths = None
             return None
 
     def call_sim_method(self, method_name, args, parallel=True):
@@ -2430,7 +2483,7 @@ class Processor:
     def process(self, crunch=True, plot=True, gcrunch=True, gplot=True,
                 grouped_against=None, grouped_by=None, run_ids=False):
         # We need to calculate the bandwidth
-        bandwidth = self.calculate_bandwidth()
+        bandwidths = self.calculate_bandwidth()
         configs = self.make_processing_configs()
         # First process all the sims
         if crunch or plot:
@@ -2456,7 +2509,7 @@ class Processor:
             # NOTE: self.sim_confs[ID] = (Config_object, conf_path)
             args_list = [(self.sim_confs[ID][0],
                           osp.dirname(self.sim_confs[ID][1]), configs[ID],
-                          bandwidth) for ID in configs.keys()]
+                          bandwidths[ID]) for ID in configs.keys()]
             kws_list = [{'grouped_by': grouped_by, 'grouped_against':
                          grouped_against} for i in range(len(args_list))]
             self._process(execute_sim_plan, args_list, kws_list)
@@ -2481,7 +2534,7 @@ class Processor:
                 self.conf_groups[i] = [(conf,
                                        osp.dirname(self.sim_confs[conf.ID][1]))
                                       for conf in self.conf_groups[i]]
-            args_list = [(group, self.base_dir, plan, bandwidth) for group, plan in
+            args_list = [(group, self.base_dir, plan, bandwidths) for group, plan in
                          zip(self.conf_groups, group_configs)]
             kws_list = [{'grouped_by': grouped_by, 'grouped_against':
                          grouped_against} for i in range(len(args_list))]

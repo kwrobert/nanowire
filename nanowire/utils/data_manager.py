@@ -10,7 +10,7 @@ from tables.file import _checkfilters
 from tables.parameters import EXPECTED_ROWS_TABLE
 from tables.utils import lazyattr
 from tables import tableextension
-from collections import MutableMapping
+from collections import MutableMapping, OrderedDict
 from abc import ABCMeta, abstractmethod
 from nanowire.utils.utils import (
     open_atomic,
@@ -333,8 +333,8 @@ class DataManager(MutableMapping, metaclass=ABCMeta):
         self.store_path = store_path
         self._dstore = None
         self._blacklist = set()
-        self.get_hooks = get_hooks if get_hooks is not None else {}
-        self.set_hooks = set_hooks if set_hooks is not None else {}
+        self.get_hooks = OrderedDict(get_hooks) if get_hooks is not None else OrderedDict()
+        self.set_hooks = OrderedDict(set_hooks) if set_hooks is not None else OrderedDict()
 
     def add_to_blacklist(self, key):
         """
@@ -611,7 +611,7 @@ class HDF5DataManager(DataManager):
             raise
 
     def open_dstore(self, mode):
-        self._dstore = tb.open_file(self.store_path, mode)
+        self._dstore = tb.open_file(self.store_path, mode=mode)
 
     def clear_data(self, blacklist=None):
         """
@@ -628,7 +628,7 @@ class HDF5DataManager(DataManager):
             self._data[key] = None
             self._updated[key] = False
 
-    def write_data(self, blacklist=('normE', 'normEsquared')):
+    def write_data(self, blacklist=()):
         """
         Writes all necessary data out to the HDF5 file
 
@@ -991,7 +991,8 @@ def create_field_rescaling_hook(factors, layers):
                 if inst._data['zcoords'] is None:
                     inst._load_data('zcoords')
                 lslice = layer_obj.get_slice(inst._data['zcoords'])
-                value[lslice] *= np.sqrt(factor)
+                # value[lslice] *= Q_(np.sqrt(factor), value.units)
+                value[lslice] = Q_(value[lslice]*np.sqrt(factor), value.units)
             inst.rescaled[key] = True
         return value
     return partial(field_rescale_hook, factors, layers)

@@ -54,7 +54,7 @@ def get_nk(path, freq):
 
 @ureg.with_context('spectroscopy')
 @ureg.wraps(ureg.watt / ureg.meter**2,
-            (None, ureg.hertz, ureg.degrees, ureg.hertz, None))
+            (None, ureg.hertz, ureg.degrees, None, None))
 def get_incident_power(spectrum, freq, polar_angle, bandwidth, logger=None):
     """
     Returns the incident power per area (W/m^2) for a simulation depending on
@@ -131,8 +131,15 @@ def get_incident_power(spectrum, freq, polar_angle, bandwidth, logger=None):
     freq_vec = freq_vec.magnitude
     p_vec = p_vec.to('watts*meter^-2*hertz^-1').magnitude
     # Get all available power values within this bin
-    left = freq - bandwidth / 2.0
-    right = freq + bandwidth / 2.0
+    if isinstance(bandwidth, tuple):
+        assert(all(isinstance(el, pint.quantity._Quantity) for el in
+                   bandwidth))
+        left = bandwidth[0].magnitude
+        right = bandwidth[1].magnitude
+    else:
+        assert(bandwidth.units == 'hertz')
+        left = freq - bandwidth / 2.0
+        right = freq + bandwidth / 2.0
     inds = np.where((left < freq_vec) & (freq_vec < right))[0]
     # Check for edge cases
     if len(inds) == 0:

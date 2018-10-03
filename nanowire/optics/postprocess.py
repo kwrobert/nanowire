@@ -185,7 +185,6 @@ class Simulation:
         elif isinstance(bandwidth, (float, int)):
             self.bandwidth = Q_(bandwidth, 'hertz')
         elif isinstance(bandwidth, tuple):
-            print("SIMULATION {} RECEIVED BANDWIDTH TUPLE".format(self.conf.ID))
             if not all(isinstance(el, pint.quantity._Quantity) for el in
                        bandwidth):
                 msg = 'Invalid bandwidth argument: {}'.format(bandwidth)
@@ -356,7 +355,6 @@ class Simulation:
         else:
             key = quantity
         self.log.debug('Retrieving scalar quantity %s', str(key))
-        print('Retrieving scalar quantity %s', str(key))
         try:
             return self.data[key]
         except KeyError:
@@ -629,9 +627,6 @@ class Simulation:
 
         fluxes = self.get_quantity('fluxes')
         Esq = self.get_quantity('normEsquared')
-        print('ID: {}'.format(self.ID))
-        print("TYPE ESQ: {}".format(type(Esq)))
-        print("ESQ UNITS: {}".format(Esq.units))
         freq = self.conf['Simulation/frequency']
         # object type for pint Quantities
         dt = [('layer', 'S25'), ('flux_method', 'O'), ('int_method', 'O'),
@@ -1311,7 +1306,6 @@ class SimulationGroup:
                              "list of tuples containing (Config, sim_dir)")
         if grouped_by is None and grouped_against is None:
             raise ValueError("Must know how this SimulationGroup is grouped")
-        print("SimulationGroup bandwidths: {}".format(bandwidths))
         self.log = logging.getLogger(__name__)
         self.base_dir = base_dir
         self.grouped_by = grouped_by
@@ -1404,7 +1398,6 @@ class SimulationGroup:
         else:
             key = 'scalar_reduce_{}'.format(quantity)
         self.log.debug('Quantity to reduce: %s', quantity)
-        print("SCALR REDUCE KEY: {}".format(key))
         try:
             if force:
                 raise KeyError
@@ -1413,9 +1406,8 @@ class SimulationGroup:
         except KeyError:
             print("KEY NOT PRESENT IN SCALAR REDUCE")
             group_comb = self.sims[0].get_quantity(quantity)
-            print(type(group_comb))
-            if np.isnan(group_comb).any():
-                print("Sim {} has NANs!".format(self.sims[0].ID))
+            # if np.isnan(group_comb).any():
+            #     print("Sim {} has NANs!".format(self.sims[0].ID))
             # self.sims[0].clear_data()
             for sim in self.sims[1:]:
                 print("-"*25)
@@ -1423,7 +1415,6 @@ class SimulationGroup:
                 self.log.debug(sim.ID)
                 quant = sim.get_quantity(quantity)
                 self.log.debug(quant.dtype)
-                print(type(quant))
                 if np.isnan(quant).any():
                     print("Sim {} has NANs!".format(sim.ID))
                 group_comb += quant
@@ -2383,8 +2374,6 @@ class Processor:
             with mp.Pool(processes=self.num_cores) as pool:
                 results = {}
                 for i, (a, kw) in enumerate(zip(args_list, kwargs_list)):
-                    # print(type(a[0]))
-                    # print(a[0][0])
                     res = pool.apply_async(func, a, kw)
                     results[i] = res
                 while results:
@@ -2432,7 +2421,6 @@ class Processor:
             else:
                 for i, conf in enumerate(group):
                     center_freq = conf['Simulation/frequency']
-                    print("i = {}".format(i))
                     if i == 0:
                         # Left endpoint
                         next_freq = group[i+1]['Simulation/frequency']
@@ -2452,7 +2440,6 @@ class Processor:
                         endpoints = (center_freq - (center_freq - left_freq)/2,
                                      center_freq + (right_freq - center_freq)/2)
                         bandwidths[conf.ID] = (endpoints)
-        print(bandwidths)
         # if not all(np.isclose(el, bandwidths[0]) for el in bandwidths[1:]):
         #     msg = 'Cannot currently handle nonuniform frequency sweeps'
         #     raise NotImplementedError(msg)

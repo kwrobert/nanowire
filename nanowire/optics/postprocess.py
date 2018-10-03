@@ -530,67 +530,77 @@ class Simulation:
         # Left-Right extensions. This indexing madness extracts the slice we
         # want, flips it along the correct dimension then sticks in the correct
         # spot in the extended array
-        ext_vals[:, x_inds:-x_inds, 0:y_inds] = quant[:, :, 0:y_inds][:, :, ::-1]
-        ext_vals[:, x_inds:-x_inds, - y_inds:] = quant[:, :, -y_inds:][:, :, ::-1]
+        ext_vals[:, x_inds:-x_inds, 0:y_inds] = quant[:, :, -y_inds:]
+        ext_vals[:, x_inds:-x_inds, -y_inds:] = quant[:, :, 0:y_inds]
         # Top-Bottom extensions
-        ext_vals[:, 0:x_inds, y_inds:- y_inds] = quant[:, 0:x_inds, :][:, ::-1, :]
-        ext_vals[:, -x_inds:, y_inds:- y_inds] = quant[:, -x_inds:, :][:, ::-1, :]
+        ext_vals[:, 0:x_inds, y_inds:-y_inds] = quant[:, -x_inds:, :]
+        ext_vals[:, -x_inds:, y_inds:- y_inds] = quant[:, 0:x_inds:, :]
         # Corners, slightly trickier
         # Top left
-        ext_vals[:, 0:x_inds, 0:y_inds] = ext_vals[
-            :, x_inds:2 * x_inds, 0:y_inds][:, ::-1, :]
+        ext_vals[:, 0:x_inds, 0:y_inds] = quant[:, -x_inds:, -y_inds:]
         # Bottom left
-        ext_vals[:, -x_inds:, 0:y_inds] = ext_vals[:, -2 * x_inds:-x_inds, 0:y_inds][:, ::-1, :]
+        ext_vals[:, -x_inds:, 0:y_inds] = quant[:, 0:x_inds, -y_inds:]
         # Top right
-        ext_vals[:, 0:x_inds, -y_inds:] = ext_vals[:, 0:x_inds, -2 * y_inds:-y_inds][:, :, ::-1]
+        ext_vals[:, 0:x_inds, -y_inds:] = quant[:, -x_inds:, -y_inds:]
         # Bottom right
-        ext_vals[:, -x_inds:, -y_inds:] = ext_vals[:, - x_inds:, -2 * y_inds:-y_inds][:, :, ::-1]
+        ext_vals[:, -x_inds:, -y_inds:] = ext_vals[:, 0:x_inds, 0:y_inds]
         # Now the center
         ext_vals[:, x_inds:-x_inds, y_inds:-y_inds] = quant[:, :, :]
-        # Extend the points arrays to include these new regions
-        pts_left = Q_(np.array([dx_mag * i for i in range(-x_inds, 0)]),
-                      dx_units)
-        pts_right = Q_(np.array([self.X[-1].magnitude + dx_mag * i for i in range(1, x_inds + 1)]),
-                       dx_units)
-        x = np.concatenate((pts_left, self.X, pts_right))
-        pts_bot = Q_(np.array([dy_mag * i for i in range(-y_inds, 0)]),
-                     dy_units)
-        pts_top = Q_(np.array([self.Y[-1].magnitude + dy_mag * i for i in range(1, y_inds + 1)]),
-                     dy_units)
-        y = np.concatenate((pts_bot, self.Y, pts_top))
-        # The points on which we have data
-        points = (x, y)
-        # The points corresponding to "rings" in cylindrical coordinates. Note
-        # we construct these rings around the origin so we have to shift them
-        # to actually correspond to the center of the nanowire
-        rvec = Q_(np.linspace(0, rmax.magnitude, rsamp), rmax.units)
-        thvec = Q_(np.linspace(0, 2 * np.pi, thsamp), 'radians')
+        # Anna's method
+        midpoint = (int(ext_vals.shape[1]/2), int(ext_vals.shape[2]/2))
+        middle_slice = ext_vals[:, midpoint[0]:, midpoint[1]]
+        full_diag = np.diagonal(ext_vals, axis1=1, axis2=2)
+        corner_slice = full_diag[:, midpoint[0]:]
+        print('MIDDLE SLICE SHAPE: {}'.format(middle_slice.shape))
+        print("CORNER SLICE SHAPE: {}".format(corner_slice.shape))
+        avg = (middle_slice + corner_slice)/2
+        rvec = Q_(np.linspace(0, rmax.magnitude, len(avg)), rmax.units)
         self.extend_data('radial_coords', rvec)
-        self.extend_data('angle_coords', thvec)
-        cyl_coords = Q_(np.zeros((len(rvec) * len(thvec), 2)), rmax.units)
-        start = 0
-        for r in rvec:
-            xring = r * np.cos(thvec)
-            yring = r * np.sin(thvec)
-            cyl_coords[start:start + len(thvec), 0] = xring
-            cyl_coords[start:start + len(thvec), 1] = yring
-            start += len(thvec)
-        cyl_coords += period / 2.0
-        # For every z layer in the 3D matrix of our quantity
-        avgs = np.zeros((ext_vals.shape[0], len(rvec)))
-        i = 0
-        for layer in ext_vals:
-            interp_vals = interpolate.interpn(
-                points, layer, cyl_coords, method='linear')
-            rings = interp_vals.reshape((len(rvec), len(thvec)))
-            avg = np.average(rings, axis=1)
-            avgs[i, :] = avg
-            i += 1
-        avgs = avgs[:, ::-1]
+
+        # # Extend the points arrays to include these new regions
+        # pts_left = Q_(np.array([dx_mag * i for i in range(-x_inds, 0)]),
+        #               dx_units)
+        # pts_right = Q_(np.array([self.X[-1].magnitude + dx_mag * i for i in range(1, x_inds + 1)]),
+        #                dx_units)
+        # x = np.concatenate((pts_left, self.X, pts_right))
+        # pts_bot = Q_(np.array([dy_mag * i for i in range(-y_inds, 0)]),
+        #              dy_units)
+        # pts_top = Q_(np.array([self.Y[-1].magnitude + dy_mag * i for i in range(1, y_inds + 1)]),
+        #              dy_units)
+        # y = np.concatenate((pts_bot, self.Y, pts_top))
+        # # The points on which we have data
+        # points = (x, y)
+        # # The points corresponding to "rings" in cylindrical coordinates. Note
+        # # we construct these rings around the origin so we have to shift them
+        # # to actually correspond to the center of the nanowire
+        # rvec = Q_(np.linspace(0, rmax.magnitude, rsamp), rmax.units)
+        # thvec = Q_(np.linspace(0, 2 * np.pi, thsamp), 'radians')
+        # self.extend_data('radial_coords', rvec)
+        # self.extend_data('angle_coords', thvec)
+        # cyl_coords = Q_(np.zeros((len(rvec) * len(thvec), 2)), rmax.units)
+        # start = 0
+        # for r in rvec:
+        #     xring = r * np.cos(thvec)
+        #     yring = r * np.sin(thvec)
+        #     cyl_coords[start:start + len(thvec), 0] = xring
+        #     cyl_coords[start:start + len(thvec), 1] = yring
+        #     start += len(thvec)
+        # cyl_coords += period / 2.0
+        # # For every z layer in the 3D matrix of our quantity
+        # avgs = np.zeros((ext_vals.shape[0], len(rvec)))
+        # i = 0
+        # for layer in ext_vals:
+        #     interp_vals = interpolate.interpn(
+        #         points, layer, cyl_coords, method='linear')
+        #     rings = interp_vals.reshape((len(rvec), len(thvec)))
+        #     avg = np.average(rings, axis=1)
+        #     avgs[i, :] = avg
+        #     i += 1
+        # avgs = avgs[:, ::-1]
         # Save to avgs dict for this sim
         key = quantity + '_angularAvg'
-        self.extend_data(key, avgs)
-        return avgs
+        self.extend_data(key, avg)
+        return avg
 
     def power_absorbed(self, per_area=True, order=(0, 1, 2)):
         """

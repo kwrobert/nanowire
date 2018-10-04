@@ -548,14 +548,26 @@ class Simulation:
         ext_vals[:, x_inds:-x_inds, y_inds:-y_inds] = quant[:, :, :]
         # Anna's method
         midpoint = (int(ext_vals.shape[1]/2), int(ext_vals.shape[2]/2))
-        middle_slice = ext_vals[:, midpoint[0]:, midpoint[1]]
+        # Average the left and right slices
+        right_edge_slice = ext_vals[:, midpoint[0]:, midpoint[1]]
+        left_edge_slice = np.fliplr(ext_vals[:, 0:midpoint[0], midpoint[1]])
+        edge_slice = (left_edge_slice + right_edge_slice)/2
         full_diag = np.diagonal(ext_vals, axis1=1, axis2=2)
-        corner_slice = full_diag[:, midpoint[0]:]
-        print('MIDDLE SLICE SHAPE: {}'.format(middle_slice.shape))
-        print("CORNER SLICE SHAPE: {}".format(corner_slice.shape))
-        avg = (middle_slice + corner_slice)/2
-        rvec = Q_(np.linspace(0, rmax.magnitude, len(avg)), rmax.units)
-        self.extend_data('radial_coords', rvec)
+        right_corner_slice = full_diag[:, midpoint[0]:]
+        left_corner_slice = np.fliplr(full_diag[:, 0:midpoint[0]])
+        corner_slice = (right_corner_slice + left_corner_slice)/2
+        # Corner slice has different radial coordinates than the edge slice.
+        # Need to interpolate onto the edge coordinates
+        edge_rvec = Q_(np.linspace(0, rmax.magnitude, edge_slice.shape[1]),
+                       rmax.units)
+        rtot = (period / np.sqrt(2)) + (np.sqrt(2) * delta)
+        corner_rvec = Q_(np.linspace(0, rtot.magnitude, corner_slice.shape[1]),
+                         rmax.units)
+        interp_coords = cartesian_product((self.Z, edge_rvec))
+        corner_vals = interpolate.interpn((self.Z, corner_rvec), corner_slice,
+                                          interp_coords).reshape(edge_slice.shape)
+        avg = (edge_slice + corner_vals)/2
+        self.extend_data('radial_coords', edge_rvec)
 
         # # Extend the points arrays to include these new regions
         # pts_left = Q_(np.array([dx_mag * i for i in range(-x_inds, 0)]),
@@ -1403,6 +1415,7 @@ class SimulationGroup:
 
         self.log.info('Performing scalar reduction for group at %s',
                       self.results_dir)
+        print("REDUCING {}".format(quantity))
         if self.sims[0].use_rescale_method:
             key = 'scalar_reduce_{}_rescale'.format(quantity)
         else:
@@ -1838,11 +1851,15 @@ def integrate1d(arr, xvals, meth=intg.trapz):
     return x_integral
 
 
-@ureg.wraps('=A*B**2', ('=A', '=B', '=B'))
-def integrate2d(arr, xvals, yvals, meth=intg.trapz):
-    x_integral = meth(arr, x=xvals, axis=0)
-    y_integral = meth(x_integral, x=yvals, axis=0)
-    return y_integral
+# @ureg.wraps('=A*B**2', ('=A', '=B', '=B'))
+def integrate2d(qarr, qax0, qax1, meth=intg.trapz):
+    arr = qarr.magnitude
+    ax0 = qax0.magnitude
+    ax1 = qax1.magnitude
+    x_integral = meth(arr, x=ax0, axis=0)
+    y_integral = meth(x_integral, x=ax1, axis=0)
+    units = qarr.units*qax0.units*qax1.units
+    return Q_(y_integral, units)
 
 
 # @ureg.wraps('=A*B**3', ('=A', '=B', '=B', '=B'))

@@ -242,7 +242,9 @@ class Simulation:
             # be written and read by appending '_rescaled' to their name when
             # using get_quantity and extend_data
             self.rescaled_keys = {'power_absorbed', 'normE', 'normEsquared',
-                                  'genRate', 'jph_integral_method'}
+                                  'genRate', 'jph_integral_method',
+                                  'normE_angularAvg', 'normEsquared_angularAvg',
+                                  'genRate_angularAvg'}
             self.log.info("GET HOOKS: ", self.data.get_hooks)
             try:
                 factors = self.get_quantity('rescaling_factors')[0]
@@ -355,6 +357,7 @@ class Simulation:
         else:
             key = quantity
         self.log.debug('Retrieving scalar quantity %s', str(key))
+        print('Retrieving scalar quantity %s'%str(key))
         try:
             return self.data[key]
         except KeyError:
@@ -1322,7 +1325,7 @@ class SimulationGroup:
     """
 
     def __init__(self, base_dir, bandwidths, sims=None, sim_confs_and_dirs=None,
-                 grouped_against=None, grouped_by=None):
+                 grouped_against=None, grouped_by=None, rescale_method=False):
         if sims is None and sim_confs_and_dirs is None:
             raise ValueError("Must provide a list of Simulation objects or a "
                              "list of tuples containing (Config, sim_dir)")
@@ -1337,7 +1340,8 @@ class SimulationGroup:
             self.sim_confs = [sim.conf for sim in self.sims]
         else:
             self.sim_confs = [tup[0] for tup in sim_confs_and_dirs]
-            self.sims = [Simulation(outdir, bandwidths[conf.ID], conf=conf) for
+            self.sims = [Simulation(outdir, bandwidths[conf.ID], conf=conf,
+                                    rescale_method=rescale_method) for
                          conf, outdir in sim_confs_and_dirs]
         self.ID, self.results_dir = self.get_group_info()
         self.num_sims = len(self.sims)
@@ -1417,7 +1421,8 @@ class SimulationGroup:
                       self.results_dir)
         print("REDUCING {}".format(quantity))
         if self.sims[0].use_rescale_method:
-            key = 'scalar_reduce_{}_rescale'.format(quantity)
+            print("USING RESCALED DATA")
+            key = 'scalar_reduce_{}_rescaled'.format(quantity)
         else:
             key = 'scalar_reduce_{}'.format(quantity)
         self.log.debug('Quantity to reduce: %s', quantity)
@@ -1450,6 +1455,7 @@ class SimulationGroup:
             if self.sims[0].use_rescale_method:
                 fname += '_rescaled'
             ftype = self.sims[0].conf['General']['save_as']
+            print("FNAME = {}".format(fname))
             if ftype == 'hdf5':
                 self.data[fname] = group_comb
                 self.data['xcoords'] = self.sims[0].data['xcoords']
@@ -2099,10 +2105,13 @@ def execute_sim_plan(conf, outdir, proc_config, bandwidth, grouped_against=None,
 def execute_group_plan(sim_confs_and_dirs, base_dir, proc_config, bandwidth,
                        grouped_by=None, grouped_against=None):
     log = logging.getLogger(__name__)
+    rescale_method = proc_config['Postprocessing'].get('rescale_method',
+                                                       False)
     sim_group = SimulationGroup(base_dir, bandwidth,
                                 sim_confs_and_dirs=sim_confs_and_dirs,
                                 grouped_by=grouped_by,
-                                grouped_against=grouped_against)
+                                grouped_against=grouped_against,
+                                rescale_method=rescale_method)
     plan = proc_config['Postprocessing']['Group']
     try:
         log.info("Executing SimulationGroup plan")
@@ -2260,12 +2269,15 @@ class Processor:
             bandwidths = self.bandwidths
         self.sim_groups = []
         groups = []
+        rescale_method = self.template['Postprocessing'].get('rescale_method',
+                                                             False)
         if self.sims:
             for conf_group in self.conf_groups:
                 sims = [self.sims[conf.ID] for conf in conf_group]
                 group = SimulationGroup(self.base_dir, bandwidths, sims=sims,
                                         grouped_against=self.grouped_against,
-                                        grouped_by=self.grouped_by)
+                                        grouped_by=self.grouped_by,
+                                        rescale_method=rescale_method)
                 groups.append(group)
         else:
             for conf_group in self.conf_groups:
@@ -2274,7 +2286,8 @@ class Processor:
                 sim_group = SimulationGroup(self.base_dir, bandwidths,
                                             sim_confs_and_dirs=confs_and_dirs,
                                             grouped_against=self.grouped_against,
-                                            grouped_by=self.grouped_by)
+                                            grouped_by=self.grouped_by,
+                                            rescale_method=rescale_method)
                 groups.append(sim_group)
         self.sim_groups = groups
         return self.sim_groups

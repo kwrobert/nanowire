@@ -159,6 +159,8 @@ class Simulation:
         self.spectrum = spectrum
         self.skip_power_rescale_hook = skip_power_rescale_hook
         self.use_rescale_method = rescale_method
+        print("SIMULATION {} RESCALE: {}".format(conf.ID,
+                                                 self.use_rescale_method))
         if conf is None and simulator is None:
             raise ValueError('Must pass in either a Config object or a'
                              ' Simulator object')
@@ -248,6 +250,8 @@ class Simulation:
             self.log.info("GET HOOKS: ", self.data.get_hooks)
             try:
                 factors = self.get_quantity('rescaling_factors')[0]
+                print("DATA KEYS: {}".format(list(self.data.keys())))
+                self.write_data()
             except KeyError:
                 factors = self.rescaling_factors()
                 self.write_data()
@@ -363,8 +367,15 @@ class Simulation:
         except KeyError:
             self.log.info("Key {} does not exist! Computing ...".format(key))
         try:
-            result = getattr(self, quantity)()
-            self.extend_data(key, result)
+            method_name = quantity
+            if '_rescaled' == method_name[-9:]:
+                method_name = method_name[0:-9]
+            if 'angularAvg' in method_name:
+                q, _ = method_name.split('_')
+                result = self.angularAvg(q)
+            else:
+                result = getattr(self, method_name)()
+            # self.extend_data(key, result)
             return result
         except:
             self.log.error('Unable to calculate following quantity: %s',
@@ -788,6 +799,7 @@ class Simulation:
         return reflectance, transmission, absorbance
 
     def rescaling_factors(self):
+        print("CALLING RESCALING_FACTORS")
         data = self.power_absorbed()
         dt = [(layer.decode(), np.float64) for layer in data['layer'] if layer
               != b'total']
@@ -1335,6 +1347,7 @@ class SimulationGroup:
         self.base_dir = base_dir
         self.grouped_by = grouped_by
         self.grouped_against = grouped_against
+        self.rescale_method = rescale_method
         if sims is not None:
             self.sims = sims
             self.sim_confs = [sim.conf for sim in self.sims]
@@ -2025,7 +2038,9 @@ def _call_func(quantity, obj, args):
     return result
 
 
-def execute_sim_plan(conf, outdir, proc_config, bandwidth, grouped_against=None, grouped_by=None):
+def execute_sim_plan(conf, outdir, proc_config, bandwidth,
+                     grouped_against=None, grouped_by=None,
+                     rescale_method=False):
     """
     Executes the given plan for the given Config object or list/tuple of Config
     objects. If conf is a single Config object, a Simulation object will
@@ -2057,7 +2072,7 @@ def execute_sim_plan(conf, outdir, proc_config, bandwidth, grouped_against=None,
         plan = proc_config['Postprocessing']['Single']
         spectrum = proc_config['Postprocessing'].get('spectrum', 'am1.5g')
         rescale_method = proc_config['Postprocessing'].get('rescale_method',
-                                                           False)
+                                                           False) or rescale_method
         sim = Simulation(outdir, bandwidth, conf=conf,
                          spectrum=spectrum,
                          rescale_method=rescale_method)
@@ -2103,10 +2118,11 @@ def execute_sim_plan(conf, outdir, proc_config, bandwidth, grouped_against=None,
 
 
 def execute_group_plan(sim_confs_and_dirs, base_dir, proc_config, bandwidth,
-                       grouped_by=None, grouped_against=None):
+                       grouped_by=None, grouped_against=None,
+                       rescale_method=False):
     log = logging.getLogger(__name__)
     rescale_method = proc_config['Postprocessing'].get('rescale_method',
-                                                       False)
+                                                       False) or rescale_method
     sim_group = SimulationGroup(base_dir, bandwidth,
                                 sim_confs_and_dirs=sim_confs_and_dirs,
                                 grouped_by=grouped_by,
@@ -2159,7 +2175,8 @@ class Processor:
     SimulationGroups
     """
 
-    def __init__(self, db, template, base_dir='', num_cores=0):
+    def __init__(self, db, template, base_dir='', num_cores=0,
+                 rescale_method=False):
         if not osp.isfile(db):
             raise ValueError("Path {} to conf file doesn't "
                              "exist".format(db))
@@ -2175,6 +2192,8 @@ class Processor:
         #     msg = "Must pass in either path to a config file or a Config " \
         #           "object"
         #     raise ValueError(msg)
+        self.rescale_method = rescale_method
+        print('PROCESSOR RESCALE: {}'.format(self.rescale_method))
         self.template = Config.fromFile(template)
         self.base_dir = base_dir if base_dir else osp.dirname(db)
         self.log = logging.getLogger(__name__)
@@ -2256,7 +2275,7 @@ class Processor:
         for conf, conf_path in self.sim_confs.values():
             outdir = osp.dirname(conf_path)
             sim = Simulation(outdir, bandwidths[conf.ID], *args, conf=conf,
-                             **kwargs)
+                             rescale_method=self.rescale_method, **kwargs)
             sims[sim.ID] = sim
         self.sims = sims
         return self.sims
@@ -2270,7 +2289,7 @@ class Processor:
         self.sim_groups = []
         groups = []
         rescale_method = self.template['Postprocessing'].get('rescale_method',
-                                                             False)
+                                                             False) or self.rescale_method
         if self.sims:
             for conf_group in self.conf_groups:
                 sims = [self.sims[conf.ID] for conf in conf_group]
@@ -2537,8 +2556,9 @@ class Processor:
             args_list = [(self.sim_confs[ID][0],
                           osp.dirname(self.sim_confs[ID][1]), configs[ID],
                           bandwidths[ID]) for ID in configs.keys()]
-            kws_list = [{'grouped_by': grouped_by, 'grouped_against':
-                         grouped_against} for i in range(len(args_list))]
+            kws_list = [{'grouped_by': grouped_by,
+                         'grouped_against': grouped_against,
+                         'rescale_method': self.rescale_method} for i in range(len(args_list))]
             self._process(execute_sim_plan, args_list, kws_list)
         else:
             self.log.info("No processing to do for individual simulations!")
@@ -2563,8 +2583,9 @@ class Processor:
                                       for conf in self.conf_groups[i]]
             args_list = [(group, self.base_dir, plan, bandwidths) for group, plan in
                          zip(self.conf_groups, group_configs)]
-            kws_list = [{'grouped_by': grouped_by, 'grouped_against':
-                         grouped_against} for i in range(len(args_list))]
+            kws_list = [{'grouped_by': grouped_by,
+                         'grouped_against': grouped_against,
+                         'rescale_method': self.rescale_method} for i in range(len(args_list))]
             self._process(execute_group_plan, args_list, kws_list)
         else:
             if not self.conf_groups:

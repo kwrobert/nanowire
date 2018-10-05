@@ -1,6 +1,7 @@
 import os
 import warnings
 import posixpath
+import filelock
 import logging
 import pint
 import numpy as np
@@ -600,8 +601,8 @@ class HDF5DataManager(DataManager):
             pass
         # Check the attributes of the group
         try:
-            self.log.info('The node you requested does not exist in the '
-                          'HDF5 file, checking group attributes')
+            self.log.info('The node {} does not exist in the '
+                          'HDF5 file, checking group attributes'.format(key))
             item = self.gobj._v_attrs[key]
             self._data[key] = item
         except KeyError as e:
@@ -645,12 +646,24 @@ class HDF5DataManager(DataManager):
         keys = [key for key in self._data.keys() if key not in blacklist and
                 self._updated[key]]
         self.log.info("Saving keys %s", str(keys))
-        for key in keys:
-            obj = self._data[key]
-            writer = self._get_writer(obj)
-            writer(obj, key)
-            # Flush to disk after every write operation, HDF5 has no journaling
-            self._dstore.flush()
+        print("Saving keys %s", str(keys))
+        # HDF5 supports multiple readers, but does not support multiple
+        # writers. We need to acquire an interprocess lock before attempting to
+        # write. We'll wait 10 minutes for the lock before timing out
+        lock_path = self.store_path + '.lock'
+        lock = filelock.FileLock(lock_path, timeout=600)
+        with lock:
+            for key in keys:
+                obj = self._data[key]
+                writer = self._get_writer(obj)
+                writer(obj, key)
+                # Flush to disk after every write operation, HDF5 has no
+                # journaling
+                self._dstore.flush()
+        try:
+            os.remove(lock.lock_file)
+        except FileNotFoundError:
+            pass
 
     def write_struct_array(self, recarr, name):
         """

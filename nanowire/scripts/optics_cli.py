@@ -218,6 +218,8 @@ def run_all(db, exec_mode, base_dir, params, query, update,
 @click.option('--gplot/--no-gplot', default=True,
               help="Peform/do not perform global plotting operations. Useful "
                    "when you only want to crunch your data without plotting")
+@click.option('--rescale/--no-rescale', default=False,
+              help="Use/do not use rescaling procedure when postprocessing")
 @click.option('-gb', '--group-by', type=click.STRING,
               help="The parameter you would like to group simulations by, "
                    "specified as a forward slash separated path to the key "
@@ -237,7 +239,7 @@ def run_all(db, exec_mode, base_dir, params, query, update,
 @click.option('--run-ids', type=exist_read_path,
               help="File of IDs of simulations to be processed, one per line")
 def postprocess(db, template, base_dir, params, query, table_name,
-                crunch, gcrunch, plot, gplot, group_by, group_against,
+                crunch, gcrunch, plot, gplot, rescale, group_by, group_against,
                 num_cores, print_ids, log_level, run_ids=None):
     """
     Postprocess all simulations matching QUERY located in the HDF5 DB
@@ -255,7 +257,8 @@ def postprocess(db, template, base_dir, params, query, table_name,
     #     raise ValueError('Must have only 1 set of unique parameters for the '
     #                      'manager configuration')
     # conf = parsed_dicts[0]
-    proc = post.Processor(db, template, base_dir=base_dir, num_cores=num_cores)
+    proc = post.Processor(db, template, base_dir=base_dir, num_cores=num_cores,
+                          rescale_method=rescale)
     proc.load_confs(base_dir=base_dir, query=query,
                     table_name=table_name)
     if group_against:

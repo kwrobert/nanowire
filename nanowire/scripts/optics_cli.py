@@ -165,9 +165,12 @@ h4 = "Name of the table at the end of table_path for storing configurations"
 @click.option('--print-ids', is_flag=True, default=False,
               help="Print IDs of simulations to be processed, without running "
                    "anything")
+@click.option('--run-ids', type=exist_read_path,
+              help="File of IDs of simulations to be processed, one per line")
 
 def run_all(db, exec_mode, base_dir, params, query, update,
-            table_name, nodes, ip_addr, num_cores, log_level, print_ids):
+            table_name, nodes, ip_addr, num_cores, log_level, print_ids,
+            run_ids):
     """
     Run all simulations matching QUERY located in the HDF5 DB
 
@@ -181,6 +184,16 @@ def run_all(db, exec_mode, base_dir, params, query, update,
                                       num_cores=num_cores,
                                       log_level=log_level.upper())
     manager.load_confs(base_dir=base_dir, query=query, table_name=table_name)
+    if run_ids is not None:
+        to_run = set()
+        with open(run_ids, 'r') as f:
+            for line in f.readlines():
+                to_run.add(line.strip())
+        existing_ids = list(manager.sim_confs.keys())
+        for ID in existing_ids:
+            if ID not in to_run:
+                del manager.sim_confs[ID]
+        manager.log.info("Will run %i simulations", len(to_run))
     if print_ids:
         count = 0
         for ID in manager.sim_confs.keys():
@@ -220,6 +233,9 @@ def run_all(db, exec_mode, base_dir, params, query, update,
                    "when you only want to crunch your data without plotting")
 @click.option('--rescale/--no-rescale', default=False,
               help="Use/do not use rescaling procedure when postprocessing")
+@click.option('--power-rescale/--no-power-rescale', default=True,
+              help="Do/do not rescale field amplitudes and power fluxes using "
+                   "the power contained in the incident spectrum")
 @click.option('-gb', '--group-by', type=click.STRING,
               help="The parameter you would like to group simulations by, "
                    "specified as a forward slash separated path to the key "
@@ -239,8 +255,8 @@ def run_all(db, exec_mode, base_dir, params, query, update,
 @click.option('--run-ids', type=exist_read_path,
               help="File of IDs of simulations to be processed, one per line")
 def postprocess(db, template, base_dir, params, query, table_name,
-                crunch, gcrunch, plot, gplot, rescale, group_by, group_against,
-                num_cores, print_ids, log_level, run_ids=None):
+                crunch, gcrunch, plot, gplot, rescale, power_rescale, group_by,
+                group_against, num_cores, print_ids, log_level, run_ids=None):
     """
     Postprocess all simulations matching QUERY located in the HDF5 DB
 
@@ -257,8 +273,9 @@ def postprocess(db, template, base_dir, params, query, table_name,
     #     raise ValueError('Must have only 1 set of unique parameters for the '
     #                      'manager configuration')
     # conf = parsed_dicts[0]
+    print("OPTICS CLI POWER RESCALE: {}".format(power_rescale))
     proc = post.Processor(db, template, base_dir=base_dir, num_cores=num_cores,
-                          rescale_method=rescale)
+                          rescale_method=rescale, power_rescale=power_rescale)
     proc.load_confs(base_dir=base_dir, query=query,
                     table_name=table_name)
     if group_against:

@@ -122,6 +122,11 @@ def handle_exception(exc_type, exc_value, exc_traceback):
 sys.excepthook = handle_exception
 
 
+def get_actual_numbasis(sim):
+    node = sim.data._dstore.get_node('/sim_{}/Substrate_qvals'.format(sim.ID))
+    return int(node.shape[0]/2)
+
+
 class Simulation:
     """
     An object that represents a completed simulation and it used for
@@ -151,13 +156,13 @@ class Simulation:
     """
 
     def __init__(self, outdir, bandwidth, spectrum='am1.5g', conf=None,
-                 simulator=None, skip_power_rescale_hook=False,
+                 simulator=None, power_rescale_hook=True,
                  rescale_method=False):
         """
         :param :class:`~utils.config.Config`: Config object for this simulation
         """
         self.spectrum = spectrum
-        self.skip_power_rescale_hook = skip_power_rescale_hook
+        self.power_rescale_hook = power_rescale_hook
         self.use_rescale_method = rescale_method
         print("SIMULATION {} RESCALE: {}".format(conf.ID,
                                                  self.use_rescale_method))
@@ -181,7 +186,7 @@ class Simulation:
         # else:
         if bandwidth is None:
             self.bandwidth = None
-            self.skip_power_rescale_hook = True
+            self.power_rescale_hook = False
         elif isinstance(bandwidth, pint.quantity._Quantity):
             self.bandwidth = bandwidth.to('hertz', 'spectroscopy')
         elif isinstance(bandwidth, (float, int)):
@@ -274,11 +279,7 @@ class Simulation:
         """
 
         ftype = self.conf['General']['save_as'].lower()
-        if self.skip_power_rescale_hook:
-            self.log.warning("Rescaling to unit spectrum!!!")
-            power = Q_(1.0, ureg.watt / ureg.meter**2)
-            amplitude = Q_(1.0, ureg.volts / ureg.meter)
-        else:
+        if self.power_rescale_hook:
             amplitude = get_incident_amplitude(
                 self.spectrum,
                 self.conf['Simulation/frequency'],
@@ -293,6 +294,11 @@ class Simulation:
                 self.bandwidth,
                 logger=self.log
             )
+        else:
+            self.log.warning("!!! Skipping rescale to incident spectrum !!!")
+            print("!!! Skipping rescale to incident spectrum for sim {}!!!".format(self.ID))
+            power = Q_(1.0, ureg.watt / ureg.meter**2)
+            amplitude = Q_(1.0, ureg.volts / ureg.meter)
         hook = create_power_rescaling_hook(power, amplitude, self.log)
         # Create the rescaling hook for the data manager that rescales all
         # powers and fields using the power/amplitude of the incident spectrum
@@ -1337,7 +1343,8 @@ class SimulationGroup:
     """
 
     def __init__(self, base_dir, bandwidths, sims=None, sim_confs_and_dirs=None,
-                 grouped_against=None, grouped_by=None, rescale_method=False):
+                 grouped_against=None, grouped_by=None, rescale_method=False,
+                 power_rescale=True):
         if sims is None and sim_confs_and_dirs is None:
             raise ValueError("Must provide a list of Simulation objects or a "
                              "list of tuples containing (Config, sim_dir)")
@@ -1348,13 +1355,15 @@ class SimulationGroup:
         self.grouped_by = grouped_by
         self.grouped_against = grouped_against
         self.rescale_method = rescale_method
+        self.power_rescale = power_rescale
         if sims is not None:
             self.sims = sims
             self.sim_confs = [sim.conf for sim in self.sims]
         else:
             self.sim_confs = [tup[0] for tup in sim_confs_and_dirs]
             self.sims = [Simulation(outdir, bandwidths[conf.ID], conf=conf,
-                                    rescale_method=rescale_method) for
+                                    rescale_method=rescale_method,
+                                    power_rescale_hook=power_rescale) for
                          conf, outdir in sim_confs_and_dirs]
         self.ID, self.results_dir = self.get_group_info()
         self.num_sims = len(self.sims)
@@ -1848,6 +1857,83 @@ class SimulationGroup:
             plt.savefig(plot_path)
             plt.close()
 
+    def genRate_convergence(self):
+        """
+        Compute how carrier generation relocates with increasing basis terms
+        measured relative to the highest basis term simulation available in
+        the group at a single incident frequency (because we grouped against
+        number of basis terms). Computes
+
+        ..math::
+
+            \Delta = \frac{\int |G^{max}(\vec{r}) - G^{(i)}(\vec{r})| dV}{\int
+            |G^{max}(\vec{r})| dV}
+
+        where :math:`G^{max}` is the simulation with maximal basis terms and
+        :math:`G^{(i)}` is some lower basis term simulation with :math:`i`
+        basis terms.
+        """
+
+        if not self.grouped_against == 'Simulation/numbasis':
+            raise ValueError('Can only compute genRate convergence when '
+                             'grouped against numbasis')
+        print('Computing genRate convergence')
+        refer_sim = self.sims[-1]
+        refer_gen = refer_sim.get_quantity('genRate')
+        x = refer_sim.data['xcoords']
+        y = refer_sim.data['ycoords']
+        z = refer_sim.data['zcoords']
+        refer_integral = integrate3d(np.abs(refer_gen), z, x, y)
+        ratios = np.zeros(len(self.sims[:-1]))
+        numbasis = np.zeros(len(self.sims[:-1]))
+        for i, sim in enumerate(self.sims[:-1]):
+            print('Retrieving genRate for sim {}'.format(sim.ID))
+            gen = sim.get_quantity('genRate')
+            abs_diff = np.abs(refer_gen - gen)
+            diff_integral = integrate3d(abs_diff, z, x, y)
+            ratio = diff_integral / refer_integral
+            ratios[i] = ratio
+            numbasis[i] = get_actual_numbasis(sim)
+            sim.clear_data()
+        ratios *= .5
+        if self.sims[0].use_rescale_method:
+            key = 'genRate_convergence_rescaled'
+        else:
+            key = 'genRate_convergence'
+        self.data[key] = ratios
+        return numbasis, ratios
+
+    def plot_genRate_convergence(self):
+        if not self.grouped_against == 'Simulation/numbasis':
+            raise ValueError('Can only plot genRate convergence when '
+                             'grouped against numbasis')
+        if self.sims[0].use_rescale_method:
+            key = 'genRate_convergence_rescaled'
+        else:
+            key = 'genRate_convergence'
+        try:
+            data = self.data[key]
+            basis_terms = [get_actual_numbasis(s) for s in self.sims[:-1]]
+        except KeyError:
+            basis_terms, data = self.genRate_convergence()
+
+        freq = self.sims[0].conf['Simulation/frequency']
+        wv = freq.to('nanometer', 'spectroscopy')
+        ng_max = get_actual_numbasis(self.sims[-1])
+        plt.figure()
+        plt.plot(basis_terms, data, '-o')
+        title = 'Frequency = {:~.3E}, Wavelength = {:~.2f}\n$N_{{G,max}}$ = {}'.format(freq, wv, ng_max)
+        plt.title(title)
+        plt.xlabel('Number of Basis Terms')
+        ylab = r'$\frac{\int |G^{max}(\vec{r}) - G^{(i)}(\vec{r})| dV}{\int |G^{max}(\vec{r})| dV}$'
+        plt.ylabel(ylab)
+        fig_path = os.path.join(self.results_dir,
+                                '{}_freq_{}.png'.format(key, freq.magnitude))
+        print("SAVING GENRATE CONVERGENCE TO {}".format(fig_path))
+        plt.tight_layout()
+        plt.savefig(fig_path)
+        plt.close()
+
 
 def scatter3d(x, y, z, cs=None, colorsMap='jet'):
     fig = plt.figure()
@@ -2040,7 +2126,7 @@ def _call_func(quantity, obj, args):
 
 def execute_sim_plan(conf, outdir, proc_config, bandwidth,
                      grouped_against=None, grouped_by=None,
-                     rescale_method=False):
+                     rescale_method=False, power_rescale=True):
     """
     Executes the given plan for the given Config object or list/tuple of Config
     objects. If conf is a single Config object, a Simulation object will
@@ -2075,7 +2161,8 @@ def execute_sim_plan(conf, outdir, proc_config, bandwidth,
                                                            False) or rescale_method
         sim = Simulation(outdir, bandwidth, conf=conf,
                          spectrum=spectrum,
-                         rescale_method=rescale_method)
+                         rescale_method=rescale_method,
+                         power_rescale_hook=power_rescale)
         for task_name in ('crunch', 'plot'):
             if task_name not in plan:
                 continue
@@ -2086,6 +2173,8 @@ def execute_sim_plan(conf, outdir, proc_config, bandwidth,
                     continue
                 else:
                     argsets = data['args']
+                log.info("Calling %s with args %s for sim %s", func, argsets,
+                         sim.ID)
                 if argsets and isinstance(argsets[0], list):
                     for argset in argsets:
                         if argset:
@@ -2119,7 +2208,7 @@ def execute_sim_plan(conf, outdir, proc_config, bandwidth,
 
 def execute_group_plan(sim_confs_and_dirs, base_dir, proc_config, bandwidth,
                        grouped_by=None, grouped_against=None,
-                       rescale_method=False):
+                       rescale_method=False, power_rescale=True):
     log = logging.getLogger(__name__)
     rescale_method = proc_config['Postprocessing'].get('rescale_method',
                                                        False) or rescale_method
@@ -2127,7 +2216,8 @@ def execute_group_plan(sim_confs_and_dirs, base_dir, proc_config, bandwidth,
                                 sim_confs_and_dirs=sim_confs_and_dirs,
                                 grouped_by=grouped_by,
                                 grouped_against=grouped_against,
-                                rescale_method=rescale_method)
+                                rescale_method=rescale_method,
+                                power_rescale=power_rescale)
     plan = proc_config['Postprocessing']['Group']
     try:
         log.info("Executing SimulationGroup plan")
@@ -2176,7 +2266,7 @@ class Processor:
     """
 
     def __init__(self, db, template, base_dir='', num_cores=0,
-                 rescale_method=False):
+                 rescale_method=False, power_rescale=True):
         if not osp.isfile(db):
             raise ValueError("Path {} to conf file doesn't "
                              "exist".format(db))
@@ -2193,7 +2283,9 @@ class Processor:
         #           "object"
         #     raise ValueError(msg)
         self.rescale_method = rescale_method
+        self.power_rescale = power_rescale
         print('PROCESSOR RESCALE: {}'.format(self.rescale_method))
+        print('PROCESSOR POWER RESCALE: {}'.format(self.power_rescale))
         self.template = Config.fromFile(template)
         self.base_dir = base_dir if base_dir else osp.dirname(db)
         self.log = logging.getLogger(__name__)
@@ -2275,7 +2367,9 @@ class Processor:
         for conf, conf_path in self.sim_confs.values():
             outdir = osp.dirname(conf_path)
             sim = Simulation(outdir, bandwidths[conf.ID], *args, conf=conf,
-                             rescale_method=self.rescale_method, **kwargs)
+                             rescale_method=self.rescale_method,
+                             power_rescale_hook=self.power_rescale,
+                             **kwargs)
             sims[sim.ID] = sim
         self.sims = sims
         return self.sims
@@ -2296,7 +2390,8 @@ class Processor:
                 group = SimulationGroup(self.base_dir, bandwidths, sims=sims,
                                         grouped_against=self.grouped_against,
                                         grouped_by=self.grouped_by,
-                                        rescale_method=rescale_method)
+                                        rescale_method=rescale_method,
+                                        power_rescale=self.power_rescale)
                 groups.append(group)
         else:
             for conf_group in self.conf_groups:
@@ -2366,6 +2461,7 @@ class Processor:
         confs = [tup[0] for tup in self.sim_confs.values()]
         self.conf_groups = _group_against(confs, key, **kwargs)
         self.grouped_against = key
+        self.sim_groups = {}
 
     def group_by(self, key, **kwargs):
         """
@@ -2399,6 +2495,7 @@ class Processor:
         confs = [tup[0] for tup in self.sim_confs.values()]
         self.conf_groups = _group_by(confs, key, **kwargs)
         self.grouped_by = key
+        self.sim_groups = {}
 
     def param_vals(self, parseq):
         """
@@ -2558,7 +2655,8 @@ class Processor:
                           bandwidths[ID]) for ID in configs.keys()]
             kws_list = [{'grouped_by': grouped_by,
                          'grouped_against': grouped_against,
-                         'rescale_method': self.rescale_method} for i in range(len(args_list))]
+                         'rescale_method': self.rescale_method,
+                         'power_rescale': self.power_rescale} for i in range(len(args_list))]
             self._process(execute_sim_plan, args_list, kws_list)
         else:
             self.log.info("No processing to do for individual simulations!")
@@ -2585,10 +2683,55 @@ class Processor:
                          zip(self.conf_groups, group_configs)]
             kws_list = [{'grouped_by': grouped_by,
                          'grouped_against': grouped_against,
-                         'rescale_method': self.rescale_method} for i in range(len(args_list))]
+                         'rescale_method': self.rescale_method,
+                         'power_rescale': self.power_rescale} for i in range(len(args_list))]
             self._process(execute_group_plan, args_list, kws_list)
         else:
             if not self.conf_groups:
                 self.log.info("No available simulation groups to process!")
             else:
                 self.log.info("No processing to do for simulation groups!")
+
+    def genRate_convergence(self):
+        self.group_against('Simulation/frequency',
+                           sort_key='Simulation/numbasis')
+        self.make_sims()
+        self.make_groups()
+        key = 'scalar_reduce_genRate'
+        if self.rescale_method:
+            key += '_rescaled'
+        refer_group = self.sim_groups[-1]
+        refer_gen = refer_group.data[key]
+        x = refer_group.sims[0].data['xcoords']
+        y = refer_group.sims[0].data['ycoords']
+        z = refer_group.sims[0].data['zcoords']
+        refer_integral = integrate3d(np.abs(refer_gen), z, x, y)
+        ratios = np.zeros(len(self.sim_groups[:-1]))
+        for i, group in enumerate(self.sim_groups[:-1]):
+            print('Retrieving spectrally integrated genRate for group {}'.format(group.ID))
+            gen = group.data[key]
+            abs_diff = np.abs(refer_gen - gen)
+            diff_integral = integrate3d(abs_diff, z, x, y)
+            ratio = diff_integral / refer_integral
+            ratios[i] = ratio
+            group.clear_data()
+        ratios *= .5
+        basis_terms = [get_actual_numbasis(g.sims[0]) for g in
+                       self.sim_groups[:-1]]
+        ng_max = self.sim_groups[-1].sims[0].conf['Simulation/numbasis']
+        return basis_terms, ratios, ng_max
+
+    def plot_genRate_convergence(self):
+        basis_terms, ratios, ng_max = self.genRate_convergence()
+        plt.figure()
+        plt.plot(basis_terms, ratios, '-o')
+        title = '$N_{{G,max}}$ = {}'.format(ng_max)
+        plt.title(title)
+        plt.xlabel('Number of Basis Terms')
+        ylab = r'$\frac{\int |G^{max}(\vec{r}) - G^{(i)}(\vec{r})| dV}{\int |G^{max}(\vec{r})| dV}$'
+        plt.ylabel(ylab)
+        fig_path = 'genRate_convergence_spectrally_integrated.png'
+        print("SAVING GENRATE CONVERGENCE TO {}".format(fig_path))
+        plt.tight_layout()
+        plt.savefig(fig_path)
+        plt.close()

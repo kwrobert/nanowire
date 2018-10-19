@@ -544,28 +544,27 @@ class Simulation:
         x_inds = int(np.ceil(delta / self.dx))
         y_inds = int(np.ceil(delta / self.dy))
         # Use periodic BCs to extend the data in the x-y plane
-        ext_vals = np.zeros((quant.shape[0], quant.shape[1] +
-                             2 * x_inds, quant.shape[2] + 2 * y_inds),
-                            dtype=quant.dtype)
+        ext_vals = np.zeros((quant.shape[0], quant.shape[1]+2*y_inds,
+                             quant.shape[2]+2*x_inds), dtype=quant.dtype)
         # Left-Right extensions. This indexing madness extracts the slice we
         # want, flips it along the correct dimension then sticks in the correct
         # spot in the extended array
-        ext_vals[:, x_inds:-x_inds, 0:y_inds] = quant[:, :, -y_inds:]
-        ext_vals[:, x_inds:-x_inds, -y_inds:] = quant[:, :, 0:y_inds]
+        ext_vals[:, y_inds:-y_inds, 0:x_inds] = quant[:, :, -x_inds:]
+        ext_vals[:, y_inds:-y_inds, -x_inds:] = quant[:, :, 0:x_inds]
         # Top-Bottom extensions
-        ext_vals[:, 0:x_inds, y_inds:-y_inds] = quant[:, -x_inds:, :]
-        ext_vals[:, -x_inds:, y_inds:- y_inds] = quant[:, 0:x_inds:, :]
+        ext_vals[:, 0:y_inds, x_inds:-x_inds] = quant[:, -y_inds:, :]
+        ext_vals[:, -y_inds:, x_inds:-x_inds] = quant[:, 0:y_inds:, :]
         # Corners, slightly trickier
         # Top left
-        ext_vals[:, 0:x_inds, 0:y_inds] = quant[:, -x_inds:, -y_inds:]
+        ext_vals[:, 0:y_inds, 0:x_inds] = quant[:, -y_inds:, -x_inds:]
         # Bottom left
-        ext_vals[:, -x_inds:, 0:y_inds] = quant[:, 0:x_inds, -y_inds:]
+        ext_vals[:, -y_inds:, 0:x_inds] = quant[:, 0:y_inds, -x_inds:]
         # Top right
-        ext_vals[:, 0:x_inds, -y_inds:] = quant[:, -x_inds:, -y_inds:]
+        ext_vals[:, 0:y_inds, -x_inds:] = quant[:, -y_inds:, -x_inds:]
         # Bottom right
-        ext_vals[:, -x_inds:, -y_inds:] = ext_vals[:, 0:x_inds, 0:y_inds]
+        ext_vals[:, -y_inds:, -x_inds:] = ext_vals[:, 0:y_inds, 0:x_inds]
         # Now the center
-        ext_vals[:, x_inds:-x_inds, y_inds:-y_inds] = quant[:, :, :]
+        ext_vals[:, y_inds:-y_inds, x_inds:-x_inds] = quant[:, :, :]
         # Anna's method
         midpoint = (int(ext_vals.shape[1]/2), int(ext_vals.shape[2]/2))
         # Average the left and right slices
@@ -719,7 +718,7 @@ class Simulation:
             start, end = layer_obj.get_inds(self.Z)
             integrand = n_mat*k_mat*Esq[start:end, :, :]
             z = self.Z[start:end]
-            y_integral = integrate3d(integrand, z, self.X, self.Y)
+            y_integral = integrate3d(integrand, z, self.Y, self.X)
             # 2\pi for conversion to angular frequency
             # epsilon_0 comes out of dielectric constant
             self.log.info("Pabs Pure Integral Result: {}".format(y_integral))
@@ -881,7 +880,7 @@ class Simulation:
                 mask = mask[l.get_slice(self.Z)]
         else:
             z_vals = self.Z
-        result = integrate3d(q, z_vals, self.X, self.Y, mask=mask, **kwargs)
+        result = integrate3d(q, z_vals, self.Y, self.X, mask=mask, **kwargs)
         return result
 
     def photocurrent_density(self):
@@ -1131,9 +1130,6 @@ class Simulation:
         """Plots a heatmap of a fixed 2D plane"""
         self.log.info('Plotting plane')
         pval = int(pval)
-        # x = np.arange(0, self.period, self.dx)
-        # y = np.arange(0, self.period, self.dy)
-        # z = np.arange(0, self.height + self.dz, self.dz)
         x = self.X.magnitude
         y = self.Y.magnitude
         z = self.Z.magnitude
@@ -1883,14 +1879,14 @@ class SimulationGroup:
         x = refer_sim.data['xcoords']
         y = refer_sim.data['ycoords']
         z = refer_sim.data['zcoords']
-        refer_integral = integrate3d(np.abs(refer_gen), z, x, y)
+        refer_integral = integrate3d(np.abs(refer_gen), z, y, x)
         ratios = np.zeros(len(self.sims[:-1]))
         numbasis = np.zeros(len(self.sims[:-1]))
         for i, sim in enumerate(self.sims[:-1]):
             print('Retrieving genRate for sim {}'.format(sim.ID))
             gen = sim.get_quantity('genRate')
             abs_diff = np.abs(refer_gen - gen)
-            diff_integral = integrate3d(abs_diff, z, x, y)
+            diff_integral = integrate3d(abs_diff, z, y, x)
             ratio = diff_integral / refer_integral
             ratios[i] = ratio
             numbasis[i] = get_actual_numbasis(sim)
@@ -1984,8 +1980,8 @@ def integrate3d(qarr, qax0, qax1, qax2, order=(0, 1, 2), mask=None,
 
     arr : np.ndarray
         The 3D numpy array to be integrated. Must have shape
-        (len(ax0), len(ax1), len(ax2))
-    ax0, ax1, ax2 : np.ndarray
+        (len(qax0), len(qax1), len(qax2))
+    qax0, qax1, qax2 : np.ndarray
         1D numpy arrays specifying the spatial coordinates of each axis
     method : function
         The integration method to use.
@@ -2034,13 +2030,15 @@ def get_plane(arr, plane, pval):
 
     plane : str
         Any of 'xy', 'yz', or 'xz'. Determines the plane along which the
-        slice is taken
+        slice is taken. The two coordinates specified will vary, and the
+        unspecified coordinate will be fixed at the value corresponding to the
+        `pval` index
     pval : int
-        The index along the final unspecified direction. If plane='xy' then
-        index would index along the z direction.
+        The index along the fixed coordinate. If plane='xy' then
+        index would specify at which z value to take the xy cut.
 
     quantity : str
-        The quantity whose data array you wish to take a line cut through
+        The quantity whose data array you wish to take a cut through
 
     Returns
     -------
@@ -2051,10 +2049,10 @@ def get_plane(arr, plane, pval):
 
     if plane == 'yz' or plane == 'zy':
         # z along rows, y along columns
-        return arr[:, pval, :]
+        return arr[:, :, pval]
     elif plane == 'xz' or plane == 'zx':
         # x along columns, z along rows
-        return arr[:, :, pval]
+        return arr[:, pval, :]
     elif plane == 'xy' or plane == 'yx':
         # x along rows, y along columns
         return arr[pval, :, :]
@@ -2072,8 +2070,9 @@ def get_line(arr, line_dir, c1, c2):
         line cut is taken, the other two coordinates remain fixed and are
         specified by c1 and c2.
     c1 : int
-        The integer index for the first fixed coordinate.  Indexes are in
-        x,y,z order so if line_dir='z' then c1 corresponds to x
+        The integer index for the first fixed coordinate.  Indexes are assumed
+        to be passed in in x,y,z order so if line_dir='z' then c1 corresponds
+        to x and c2 corresponds to y
     c2 : int
         The integer index for the second coordinate.
     quantity : str
@@ -2088,13 +2087,13 @@ def get_line(arr, line_dir, c1, c2):
 
     if line_dir == 'x':
         # z along rows, y along columns
-        return arr[c2, :, c1]
+        return arr[c2, c1, :]
     elif line_dir == 'y':
         # x along columns, z along rows
-        return arr[c2, c1, :]
+        return arr[c2, :, c1]
     elif line_dir == 'z':
         # x along rows, y along columns
-        return arr[:, c1, c2]
+        return arr[:, c2, c1]
 
 
 def counted(fn):
@@ -2705,13 +2704,13 @@ class Processor:
         x = refer_group.sims[0].data['xcoords']
         y = refer_group.sims[0].data['ycoords']
         z = refer_group.sims[0].data['zcoords']
-        refer_integral = integrate3d(np.abs(refer_gen), z, x, y)
+        refer_integral = integrate3d(np.abs(refer_gen), z, y, x)
         ratios = np.zeros(len(self.sim_groups[:-1]))
         for i, group in enumerate(self.sim_groups[:-1]):
             print('Retrieving spectrally integrated genRate for group {}'.format(group.ID))
             gen = group.data[key]
             abs_diff = np.abs(refer_gen - gen)
-            diff_integral = integrate3d(abs_diff, z, x, y)
+            diff_integral = integrate3d(abs_diff, z, y, x)
             ratio = diff_integral / refer_integral
             ratios[i] = ratio
             group.clear_data()

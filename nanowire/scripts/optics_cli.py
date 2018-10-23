@@ -97,36 +97,6 @@ def run(config, output_dir):
     simul.run_sim(conf, output_dir)
     return None
 
-h1 = "The directory to dump all configs into. Defaults to " \
-     "the same directory as the provided DB file"
-@optics.command()
-@click.argument('db', type=exist_read_path)
-@click.option('-o', '--output-dir', type=exist_read_dir, default=None, help=h1)
-@click.option('-i', '--id', type=click.STRING , multiple=True,
-              help="Only dump these IDs. Can be specified multiple times")
-def dump_configs(db, output_dir, id):
-    """
-    Dump all configs stored in DB to files
-
-    DB must be a path to an UnQLite file containing the database of simulation
-    configs. All configs in the database are dumped to YAML files on disk, with
-    the files stored in subdirectories named using the first 10 characters of
-    the config ID
-    """
-
-    from nanowire.utils.config import dump_configs
-
-    if output_dir is None:
-        output_dir = os.path.dirname(db)
-    def get_fname(row):
-        ID = row['ID'].decode()
-        outdir = os.path.join(ID[0:10], 'sim_conf.yml')
-        return outdir
-    click.secho('Dumping configs ...')
-    paths, db = dump_configs(db, outdir=output_dir, IDs=id,
-                             fname=get_fname)
-    db.close()
-    return None
 
 h0 = "Base directory that all simulations will dump their output data to. " \
      "If not specified, defaults to the directory of the input database"

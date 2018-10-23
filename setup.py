@@ -76,6 +76,7 @@ setup(
     entry_points='''
         [console_scripts]
         optics=nanowire.scripts.optics_cli:optics
+        opticsdb=nanowire.scripts.db_cli:opticsdb
     ''',
     keywords=['', ],
     include_package_data=True,

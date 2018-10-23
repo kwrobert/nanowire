@@ -1531,7 +1531,8 @@ class SimulationGroup:
                              'grouped against frequency')
 
         base = self.results_dir
-        self.log.info('Computing photocurrent density for group at %s', base)
+        self.log.info('Computing photocurrent density for group at %s using '
+                      '%s method', method, base)
         jph_vals = Q_(np.zeros(self.num_sims), units)
         freqs = Q_(np.zeros(self.num_sims), 'hertz')
         # for i, sim in enumerate(self.sims):
@@ -1746,7 +1747,7 @@ class SimulationGroup:
                 self.sims[0].heatmap2d(sim, x, y, cs, labels, plane, pval,
                                save_path=p, show=show, draw=draw, fixed=fixed)
 
-    def get_transmission_data(self, port='Substrate_bottom', method='flux'):
+    def transmission_data(self, port='Substrate_bottom', method='flux'):
         if not self.grouped_against == 'Simulation/frequency':
             raise ValueError('Can only retrieve transmission data when '
                              'grouped against frequency')

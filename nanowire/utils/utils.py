@@ -12,6 +12,7 @@ import warnings
 import time
 import psutil
 import pint
+import unqlite
 import tempfile as tmp
 import numpy as np
 import tables as tb
@@ -45,6 +46,60 @@ def do_profile(follow=[], out=''):
                     profiler.print_stats()
         return profiled_func
     return inner
+
+
+def update_retry(db_col, doc_id, record, num_tries=3):
+    """
+    Retry loop for updating a document in an UnQLite document collection
+
+    db_col : unqlite.Collection
+        The UnQLite document Collection object containing the record to be
+        updates
+    doc_id : int
+        The document ID (not config ID) of the record in the document
+        collection that will be updated
+    record : dict
+        The new record that will replace the old record
+    num_tries : int (default: 3)
+        The number of attempts that will be made to update the collection
+
+    Returns
+    -------
+    success : bool
+        Whether or not the update was successful
+    """
+
+    success = db_col.update(doc_id, record)
+    attempts = 0
+    while success is False and attempts < num_tries:
+        success = db_col.update(doc_id, record)
+    return success
+
+
+def store_retry(db_col, record, num_tries=3):
+    """
+    Retry loop for updating a document in an UnQLite document collection
+
+    db_col : unqlite.Collection
+        The UnQLite document Collection object to store the record in
+    record : dict
+        The new record to store in the db
+    num_tries : int (default: 3)
+        The number of attempts that will be made to store the record
+
+    Returns
+    -------
+
+    doc_id : int or bool
+        The document ID of the stored record. If unsuccessful, will return
+        False
+    """
+
+    success = db_col.store(record)
+    attempts = 0
+    while success is False and attempts < num_tries:
+        success = db_col.store(record)
+    return success
 
 
 def is_iterable(arg):

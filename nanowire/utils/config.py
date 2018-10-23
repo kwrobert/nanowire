@@ -25,6 +25,8 @@ from nanowire.utils.utils import (
     find_keypaths,
     decode_bytes,
     make_filter,
+    update_retry,
+    store_retry
 )
 from nanowire.utils.logging import add_logger
 
@@ -249,15 +251,11 @@ class Config(MutableMapping):
         write_dict = {'ID': self.ID, 'skip_keys': self.skip_keys, '_d': self._d}
         write_dict = prepare_for_db(write_dict)
         with db.transaction():
-            success = col.update(doc_id, write_dict)
+            success = update_retry(col, doc_id, write_dict)
             print("DB Return Code: {}".format(success))
             if success is False:
-                for i in range(3):
-                    success = col.update(doc_id, write_dict)
-                    if success:
-                        break
-                else:
-                    raise Exception("Unable to update collection")
+                msg = "Unable to update Config {} in collection".format(self.ID)
+                raise RuntimeError(msg)
             db[self.ID] = pickle.dumps(self)
         return success
 
@@ -266,15 +264,11 @@ class Config(MutableMapping):
         write_dict = {'ID': self.ID, 'skip_keys': self.skip_keys, '_d': self._d}
         write_dict = prepare_for_db(write_dict)
         with db.transaction():
-            success = col.store(write_dict)
+            success = store_retry(col, write_dict)
             print("DB Return Code: {}".format(success))
             if success is False:
-                for i in range(3):
-                    success = col.update(doc_id, write_dict)
-                    if success:
-                        break
-                else:
-                    raise Exception("Unable to update collection")
+                msg = "Unable to store Config {} collection".format(self.ID)
+                raise RuntimeError(msg)
             db[self.ID] = pickle.dumps(self)
             db['{}_docid'.format(self.ID)] = success
         return success
@@ -681,24 +675,22 @@ def load_confs(db, base_dir='', query='', table_name='simulations', IDs=None):
     return confs, t_sweeps, db
 
 
-def dump_configs(db, table_name='simulations',
+def dump_configs(db, col_name='simulations',
                  outdir='', fname=None, IDs=None):
     """
-    Dump all the Configs in an HDF5 database to YAML files
+    Dump all the Configs in an UnQLite database to YAML files
 
     Parameters
     ----------
 
     db : str, :py:class:`tb.file.File`
-        Either a string path to an HDF5 file containing the database of
-        simulation configs, or a PyTables file handle
-    table_path : str, optional
-        Path to the group containing the database table. Default: '/'
-    table_name : str, optional
-        Name of the database table. Default: 'simulations'
+        A string path to an UnQLite file containing the database of
+        simulation configs
+    col_name : str, optional
+        Name of the database collection of configs. Default: 'simulations'
     outdir : str, optional
         Directory to dump the config files into. Defaults to the same directory
-        as the HDF5 file. If you pass in a path that does not exist, it is
+        as the DB file. If you pass in a path that does not exist, it is
         created.
     fname : callable, optional
         A callable that determines the location of the outputted files beneath
@@ -729,7 +721,7 @@ def dump_configs(db, table_name='simulations',
     if not os.path.isdir(outdir):
         os.makedirs(outdir)
     db = unqlite.UnQLite(db)
-    col = db.collection(table_name)
+    col = db.collection(col_name)
     col.create()
     paths = []
     for doc in col.all():

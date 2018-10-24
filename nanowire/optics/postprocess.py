@@ -1545,7 +1545,7 @@ class SimulationGroup:
             freqs[i] = freq
             E_photon = ureg.planck_constant * freq
             try:
-                abs_arr = sim.data['power_absorbed']
+                abs_arr = sim.get_quantity('power_absorbed')
             except KeyError:
                 abs_arr = sim.power_absorbed()
             if method == 'flux':
@@ -1930,6 +1930,22 @@ class SimulationGroup:
         plt.tight_layout()
         plt.savefig(fig_path)
         plt.close()
+
+    def plot_runtimes(self):
+        x_data = np.zeros(len(self.sims))
+        times = np.zeros(len(self.sims))
+        for i, sim in enumerate(self.sims):
+            x_data[i] = sim.conf['Simulation/numbasis']
+            times[i] = sim.data['runtime']
+        freq = self.sims[0].conf['Simulation/frequency']
+        plt.figure()
+        plt.plot(x_data, times, '--o')
+        plt.xlabel(r'$N_G$')
+        plt.ylabel("Run Time (s)")
+        fig_path = os.path.join(self.results_dir,
+                                'runtime_vs_basisterms_freq_{}.png'.format(freq.magnitude))
+        print("Saving runtime to {}".format(fig_path))
+        plt.savefig(fig_path, bbox_inches='tight')
 
 
 def scatter3d(x, y, z, cs=None, colorsMap='jet'):
@@ -2735,3 +2751,5 @@ class Processor:
         plt.tight_layout()
         plt.savefig(fig_path)
         plt.close()
+
+

@@ -1456,7 +1456,7 @@ class Simulator:
         elif self.conf['General']['save_as'] == 'hdf5':
             start = time.time()
             self.save_time()
-            self.data.write_data()
+            self.data.write_data(blacklist=('Ex', 'Ey', 'Ez'))
             end = time.time()
             self.log.info('Write time: %.2f seconds', end - start)
         else:
@@ -1576,15 +1576,15 @@ class Simulator:
         if update:
             self.update_thicknesses()
         self.save_conf()
-        self.load_state()
+        # self.load_state()
         self.get_fluxes()
         # Save state as soon as possible. We need to request something in every
         # layer before we have the full solution, flux computation is much
         # faster than field computation so we do that first
-        self.save_state()
+        # self.save_state()
         self.get_field()
-        self.get_fourier_coefficients()
-        self.get_q_values()
+        # self.get_fourier_coefficients()
+        # self.get_q_values()
         if self.conf['General']['dielectric_profile']:
             self.compute_dielectric_profile()
         end = time.time()

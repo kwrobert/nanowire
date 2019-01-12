@@ -157,15 +157,13 @@ class Simulation:
 
     def __init__(self, outdir, bandwidth, spectrum='am1.5g', conf=None,
                  simulator=None, power_rescale_hook=True,
-                 rescale_method=False):
+                 rescale_method=False, validate=False):
         """
         :param :class:`~utils.config.Config`: Config object for this simulation
         """
         self.spectrum = spectrum
         self.power_rescale_hook = power_rescale_hook
         self.use_rescale_method = rescale_method
-        print("SIMULATION {} RESCALE: {}".format(conf.ID,
-                                                 self.use_rescale_method))
         if conf is None and simulator is None:
             raise ValueError('Must pass in either a Config object or a'
                              ' Simulator object')
@@ -244,6 +242,8 @@ class Simulation:
         self.period = self.conf['Simulation/array_period']
         self.layers = get_layers(self)
         self.height = self.get_height()
+        if validate:
+            self._validate_existing_data()
         if self.use_rescale_method:
             # A set of keys that are affected by the rescaled fields. They will
             # be written and read by appending '_rescaled' to their name when
@@ -315,6 +315,36 @@ class Simulation:
             return manager
         else:
             raise ValueError('Invalid file type in config')
+
+    def _validate_existing_data(self):
+        """
+        This validates that the shapes of the coordinate arrays and raw field
+        arrays match the shape of calculated arrays. If we rerun simulations
+        using a new sampling scheme after postprocessing with an old sampling
+        scheme, the calculated arrays and raw/coordinate arrays will have
+        incompatible shapes and chaos ensues.
+
+        So, we just delete any calculated arrays with the wrong shapes before
+        doing anything
+        """
+
+        # Partial strings that will be in the key name of the arrays we need to
+        # validate
+        substrs = ('normE', 'genRate')
+        correct_3d_shape = self.data['Ex'].shape
+        to_check = [k for k in self.data.keys() for s in substrs if s in k]
+        for k in to_check:
+            dshape = self.data[k].shape
+            if len(self.data[k].shape) == 3 and dshape != correct_3d_shape:
+                del self.data[k]
+                self.data.remove_key(k)
+                msg = "Key %s has incorrect shape %s, removing"
+                self.log.warning(msg, k, str(dshape))
+            if 'angularAvg' in k and dshape[0] != correct_3d_shape[0]:
+                del self.data[k]
+                self.data.remove_key(k)
+                msg = "Key %s has incorrect shape %s, removing"
+                self.log.warning(msg, k, str(dshape))
 
     def write_data(self, blacklist=()):
         """
@@ -565,11 +595,22 @@ class Simulation:
         ext_vals[:, -y_inds:, -x_inds:] = ext_vals[:, 0:y_inds, 0:x_inds]
         # Now the center
         ext_vals[:, y_inds:-y_inds, x_inds:-x_inds] = quant[:, :, :]
-        # Anna's method
-        midpoint = (int(ext_vals.shape[1]/2), int(ext_vals.shape[2]/2))
-        # Average the left and right slices
+        # Anna's method. Ceil call is needed to make sure subsequent indexing
+        # works out.
+        midpoint = (int(np.ceil(ext_vals.shape[1]/2)),
+                    int(np.ceil(ext_vals.shape[2]/2)))
+        # Average the left and right slices. If we have an odd number of
+        # samplings points in the plane, there is a slice right through the
+        # center of the unit cell. If we have an even number, there isn't and
+        # we need to interpolate onto the true center and make sure the slices both
+        # have the right shape
+        edge_rvec = Q_(np.linspace(0, rmax.magnitude, edge_slice.shape[1]),
+                       rmax.units)
         right_edge_slice = ext_vals[:, midpoint[0]:, midpoint[1]]
-        left_edge_slice = np.fliplr(ext_vals[:, 0:midpoint[0], midpoint[1]])
+        if ext_vals.shape[1] % 2 == 0:
+            left_edge_slice = np.fliplr(ext_vals[:, 0:midpoint[0], midpoint[1]])
+        else:
+            left_edge_slice = np.fliplr(ext_vals[:, 0:midpoint[0]+1, midpoint[1]])
         edge_slice = (left_edge_slice + right_edge_slice)/2
         full_diag = np.diagonal(ext_vals, axis1=1, axis2=2)
         right_corner_slice = full_diag[:, midpoint[0]:]
@@ -577,8 +618,6 @@ class Simulation:
         corner_slice = (right_corner_slice + left_corner_slice)/2
         # Corner slice has different radial coordinates than the edge slice.
         # Need to interpolate onto the edge coordinates
-        edge_rvec = Q_(np.linspace(0, rmax.magnitude, edge_slice.shape[1]),
-                       rmax.units)
         rtot = (period / np.sqrt(2)) + (np.sqrt(2) * delta)
         corner_rvec = Q_(np.linspace(0, rtot.magnitude, corner_slice.shape[1]),
                          rmax.units)
@@ -1487,6 +1526,58 @@ class SimulationGroup:
                 raise ValueError('Invalid file type in config')
             return group_comb
 
+    def total_power_absorbed(self, method='flux', units='watts/meter^2',
+                             layer='total'):
+        """
+        """
+
+        if method not in ('flux', 'integral'):
+            msg = 'Invalid method {} for computing total power absorbed'.format(method)
+            raise ValueError(msg)
+
+        if not self.grouped_against == 'Simulation/frequency':
+            raise ValueError('Can only compute power absorbed when '
+                             'grouped against frequency')
+
+        base = self.results_dir
+        self.log.info('Computing total power absorbed for group at %s using '
+                      '%s method', base, method)
+        jph_vals = Q_(np.zeros(self.num_sims), units)
+        in_power_vals = Q_(np.zeros(self.num_sims), units)
+        freqs = Q_(np.zeros(self.num_sims), 'hertz')
+        # for i, sim in enumerate(self.sims):
+        #     freqs[i] = freq
+        # Assuming the sims have been grouped by frequency, sum over all of
+        # them
+        for i, sim in enumerate(self.sims):
+            # freq = sim.conf['Simulation']['params']['frequency']
+            freq = sim.conf['Simulation/frequency']
+            angle = sim.conf['Simulation/polar_angle']
+            freqs[i] = freq
+            try:
+                abs_arr = sim.get_quantity('power_absorbed')
+            except KeyError:
+                abs_arr = sim.power_absorbed()
+            if method == 'flux':
+                # arr = sim.data['transmission_data']
+                # _, ref, trans, absorb = arr[arr.port == port.encode('utf-8')][0]
+                # incident_power = get_incident_power(sim)
+                # jph_vals[i] = incident_power * absorb / E_photon
+                key = 'flux_method'
+            else:
+                key = 'int_method'
+            row = get_record(abs_arr, 'layer', layer)[0]
+            absorbed_power = row[key]
+            jph_vals[i] = absorbed_power
+            Pin = get_incident_power('am1.5g', freq, angle, sim.bandwidth)
+            in_power_vals[i] = Pin
+            sim.clear_data()
+        # factor of 1/10 to convert A*m^-2 to mA*cm^-2
+        Jph = np.sum(jph_vals)
+        total_in = np.sum(in_power_vals)
+        self.log.info('Total Power Absorbed = {}'.format(Jph))
+        return Jph, total_in, jph_vals, in_power_vals
+
     def photocurrent_density(self, method='flux', units='mA/cm^2'):
         """
         Computes photocurrent density assuming perfect carrier collection,
@@ -1532,7 +1623,7 @@ class SimulationGroup:
 
         base = self.results_dir
         self.log.info('Computing photocurrent density for group at %s using '
-                      '%s method', method, base)
+                      '%s method', base, method)
         jph_vals = Q_(np.zeros(self.num_sims), units)
         freqs = Q_(np.zeros(self.num_sims), 'hertz')
         # for i, sim in enumerate(self.sims):
@@ -1558,6 +1649,9 @@ class SimulationGroup:
                 key = 'int_method'
             row = get_record(abs_arr, 'layer', 'total')[0]
             absorbed_power = row[key]
+            print("#"*25)
+            print("absorbed_power = {}".format(absorbed_power))
+            print("#"*25)
             jph_vals[i] = ureg.elementary_charge * absorbed_power / E_photon
             sim.clear_data()
         # factor of 1/10 to convert A*m^-2 to mA*cm^-2
@@ -2736,6 +2830,37 @@ class Processor:
                        self.sim_groups[:-1]]
         ng_max = self.sim_groups[-1].sims[0].conf['Simulation/numbasis']
         return basis_terms, ratios, ng_max
+
+    def power_absorbed_convergence(self, layer='total'):
+        self.group_against('Simulation/frequency',
+                           sort_key='Simulation/numbasis')
+        self.make_sims()
+        self.make_groups()
+        flux_method_vals = []
+        int_method_vals = []
+        int_method_vals_nocvf = []
+        for i, group in enumerate(self.sim_groups):
+            print('Retrieving total power absorbed for group {}'.format(group.ID))
+            print("NG = {}".format(group.sims[0].conf['Simulation/numbasis']))
+            print("Weismann = {}".format(group.sims[0].conf['Solver/WeismannFormulation']))
+            flux_power_abs, flux_input_pwer, _, _ = group.total_power_absorbed(method='flux',
+                                                                    layer=layer)
+            int_power_abs, int_input_pwer, _, _ = group.total_power_absorbed(method='integral',
+                                                                   layer=layer)
+            A_flux = flux_power_abs/flux_input_pwer
+            A_int = int_power_abs/int_input_pwer
+            if group.sims[0].conf['Solver/WeismannFormulation']:
+                # flux_method_vals.append(flux_power_abs.magnitude)
+                # int_method_vals.append(int_power_abs.magnitude)
+                flux_method_vals.append(A_flux.magnitude)
+                int_method_vals.append(A_int.magnitude)
+            else:
+                int_method_vals_nocvf.append(A_int.magnitude)
+            group.clear_data()
+        basis_terms = [get_actual_numbasis(g.sims[0]) for g in
+                       self.sim_groups]
+        basis_terms = sorted(list(set(basis_terms)))
+        return basis_terms, flux_method_vals, int_method_vals, int_method_vals_nocvf
 
     def plot_genRate_convergence(self):
         basis_terms, ratios, ng_max = self.genRate_convergence()

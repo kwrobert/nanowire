@@ -418,6 +418,12 @@ class DataManager(MutableMapping, metaclass=ABCMeta):
         store, without actually pulling the data items into memory
         """
 
+    @abstractmethod
+    def remove_key(self, key):
+        """
+        Remove data item corresponding to `key` from the underlying data store
+        """
+
     def _check_equal(self, key, value):
         """
         Check the equality of a given value and the object located at
@@ -614,6 +620,14 @@ class HDF5DataManager(DataManager):
     def open_dstore(self, mode):
         self._dstore = tb.open_file(self.store_path, mode=mode)
 
+    def remove_key(self, key):
+        """
+        Remove data specified by `key` from the underlying HDF5 file
+        """
+
+        nodepath = posixpath.join(self.gpath, key)
+        self._dstore.remove_node(nodepath)
+
     def clear_data(self, blacklist=None):
         """
         Clears loaded data from memory without writing it to disk
@@ -651,8 +665,8 @@ class HDF5DataManager(DataManager):
         # writers. We need to acquire an interprocess lock before attempting to
         # write. We'll wait 10 minutes for the lock before timing out
         lock_path = self.store_path + '.lock'
-        lock = filelock.FileLock(lock_path, timeout=600)
-        with lock:
+        lock = filelock.FileLock(lock_path)
+        with lock.acquire(timeout=600):
             for key in keys:
                 obj = self._data[key]
                 writer = self._get_writer(obj)

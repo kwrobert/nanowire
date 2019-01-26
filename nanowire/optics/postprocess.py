@@ -157,7 +157,7 @@ class Simulation:
 
     def __init__(self, outdir, bandwidth, spectrum='am1.5g', conf=None,
                  simulator=None, power_rescale_hook=True,
-                 rescale_method=False, validate=False):
+                 rescale_method=False, validate=True):
         """
         :param :class:`~utils.config.Config`: Config object for this simulation
         """
@@ -331,20 +331,20 @@ class Simulation:
         # Partial strings that will be in the key name of the arrays we need to
         # validate
         substrs = ('normE', 'genRate')
-        correct_3d_shape = self.data['Ex'].shape
+        correct_3d_shape = self.data.get_shape('Ex')
         to_check = [k for k in self.data.keys() for s in substrs if s in k]
         for k in to_check:
-            dshape = self.data[k].shape
-            if len(self.data[k].shape) == 3 and dshape != correct_3d_shape:
-                del self.data[k]
-                self.data.remove_key(k)
+            dshape = self.data.get_shape(k)
+            if len(dshape) == 3 and dshape != correct_3d_shape:
                 msg = "Key %s has incorrect shape %s, removing"
                 self.log.warning(msg, k, str(dshape))
+                del self.data[k]
+                self.data.remove_key(k)
             if 'angularAvg' in k and dshape[0] != correct_3d_shape[0]:
+                msg = "Key %s has incorrect shape %s along z, removing"
+                self.log.warning(msg, k, str(dshape))
                 del self.data[k]
                 self.data.remove_key(k)
-                msg = "Key %s has incorrect shape %s, removing"
-                self.log.warning(msg, k, str(dshape))
 
     def write_data(self, blacklist=()):
         """
@@ -597,6 +597,8 @@ class Simulation:
         ext_vals[:, y_inds:-y_inds, x_inds:-x_inds] = quant[:, :, :]
         # Anna's method. Ceil call is needed to make sure subsequent indexing
         # works out.
+        un_midpoint = (ext_vals.shape[1]/2,
+                       ext_vals.shape[2]/2)
         midpoint = (int(np.ceil(ext_vals.shape[1]/2)),
                     int(np.ceil(ext_vals.shape[2]/2)))
         # Average the left and right slices. If we have an odd number of
@@ -604,18 +606,40 @@ class Simulation:
         # center of the unit cell. If we have an even number, there isn't and
         # we need to interpolate onto the true center and make sure the slices both
         # have the right shape
-        edge_rvec = Q_(np.linspace(0, rmax.magnitude, edge_slice.shape[1]),
-                       rmax.units)
-        right_edge_slice = ext_vals[:, midpoint[0]:, midpoint[1]]
+        print("quant.shape = {}".format(quant.shape))
+        print("ext_vals.shape = {}".format(ext_vals.shape))
+        print("un_midpoint = {}".format(un_midpoint))
+        print("midpoint = {}".format(midpoint))
+        # Current does not handle when number of points along x and y have
+        # different parity
+        both_even = ext_vals.shape[1] % 2 == 0 and ext_vals.shape[2] % 2 == 0
+        both_odd = ext_vals.shape[1] % 2 != 0 and ext_vals.shape[2] % 2 != 0
+        if not (both_even or both_odd):
+            raise ValueError("Cannot handle shapes with different parity!")
         if ext_vals.shape[1] % 2 == 0:
+            right_edge_slice = ext_vals[:, midpoint[0]:, midpoint[1]]
             left_edge_slice = np.fliplr(ext_vals[:, 0:midpoint[0], midpoint[1]])
         else:
-            left_edge_slice = np.fliplr(ext_vals[:, 0:midpoint[0]+1, midpoint[1]])
+            # The -1 is needed to actually include the center
+            # point in right_edge_slice. Midpoint doesnt account for zero
+            # indexing
+            right_edge_slice = ext_vals[:, midpoint[0]-1:, midpoint[1]]
+            left_edge_slice = np.fliplr(ext_vals[:, 0:midpoint[0], midpoint[1]])
+        print("right_edge_slice.shape = {}".format(right_edge_slice.shape))
+        print("left_edge_slice.shape = {}".format(left_edge_slice.shape))
         edge_slice = (left_edge_slice + right_edge_slice)/2
         full_diag = np.diagonal(ext_vals, axis1=1, axis2=2)
-        right_corner_slice = full_diag[:, midpoint[0]:]
-        left_corner_slice = np.fliplr(full_diag[:, 0:midpoint[0]])
+        if ext_vals.shape[1] % 2 == 0:
+            right_corner_slice = full_diag[:, midpoint[0]:]
+            left_corner_slice = np.fliplr(full_diag[:, 0:midpoint[0]])
+        else:
+            right_corner_slice = full_diag[:, midpoint[0]-1:]
+            left_corner_slice = np.fliplr(full_diag[:, 0:midpoint[0]])
+        print("right_corner_slice.shape = {}".format(right_corner_slice.shape))
+        print("left_corner_slice.shape = {}".format(left_corner_slice.shape))
         corner_slice = (right_corner_slice + left_corner_slice)/2
+        edge_rvec = Q_(np.linspace(0, rmax.magnitude, edge_slice.shape[1]),
+                       rmax.units)
         # Corner slice has different radial coordinates than the edge slice.
         # Need to interpolate onto the edge coordinates
         rtot = (period / np.sqrt(2)) + (np.sqrt(2) * delta)

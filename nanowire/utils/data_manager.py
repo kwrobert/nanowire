@@ -617,6 +617,19 @@ class HDF5DataManager(DataManager):
             e.args = e.args + (msg,)
             raise
 
+    def get_shape(self, key):
+        """
+        Get the shape of a key without reading the entire array into memory
+        """
+
+        nodepath = posixpath.join(self.gpath, key)
+        node = self._dstore.get_node(nodepath)
+        if isinstance(node, (tb.Table, UnitTable)):
+            msg = ("Requested shape of Table node from get_shape. Shape of a "
+                   "table can be misleading!")
+            self.log.warning(msg)
+        return node.shape
+
     def open_dstore(self, mode):
         self._dstore = tb.open_file(self.store_path, mode=mode)
 

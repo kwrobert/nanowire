@@ -419,8 +419,8 @@ class SimulationManager:
                                        **kwargs,
                                        callback=callback)
                 results[ind] = res
-            # self.log.debug('Closing pool')
-            # pool.close()
+            self.log.debug('Closing pool')
+            pool.close()
             self.log.debug("Waiting on results")
             self.log.debug('Results before wait loop: %s',
                            str(list(results.keys())))
@@ -461,8 +461,8 @@ class SimulationManager:
                 # res.get(99999999)
                 # self.log.debug('Number of items in queue: %i',
                 #                self.write_queue.qsize())
-            self.log.debug('Closing pool')
-            pool.close()
+            # self.log.debug('Closing pool')
+            # pool.close()
             self.log.debug('Finished waiting')
             self.log.debug('Joining pool')
             pool.join()

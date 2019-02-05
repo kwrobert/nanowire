@@ -606,6 +606,7 @@ class Simulation:
         # center of the unit cell. If we have an even number, there isn't and
         # we need to interpolate onto the true center and make sure the slices both
         # have the right shape
+        # TODO: Add proper interpolation in the case of even sampling
         print("quant.shape = {}".format(quant.shape))
         print("ext_vals.shape = {}".format(ext_vals.shape))
         print("un_midpoint = {}".format(un_midpoint))

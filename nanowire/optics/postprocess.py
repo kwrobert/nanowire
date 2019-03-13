@@ -2683,7 +2683,7 @@ class Processor:
                             else:
                                 self.log.warning('Sim %s raised exception!',
                                                  ID)
-                                res.wait(10)
+                                res.get()
                             del results[ID]
                         else:
                             self.log.debug('Sim %s not ready', ID)

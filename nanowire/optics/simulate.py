@@ -443,7 +443,7 @@ class SimulationManager:
                         else:
                             self.log.warning('Sim #%i raised exception!',
                                              ind)
-                            res.wait(10)
+                            res.get()
                             # try:
                             #     res.get(100)
                             # except Exception as e:

@@ -1,0 +1,7 @@
+#!/bin/bash
+
+python ~/software/nanowire/nanowire/scripts/check_data.py $1
+
+if [ "$?" -ne "0" ]; then
+    echo $1
+fi

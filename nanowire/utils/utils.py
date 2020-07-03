@@ -971,7 +971,7 @@ def decode_bytes(d, skip_paths=None, encoding='utf-8'):
     return remap(d, visit=partial(visit, encoding))
 
 
-def make_filter(query):
+def make_filter(query, path_prefix="_d"):
     """
     Build an return a function that will evaluate a query string on a nested
     mapping object. The query string must be a valid python conditional in
@@ -998,7 +998,7 @@ def make_filter(query):
     """
     pat = re.compile('(/(\w+)(/\w+)*/?)')
     paths = [match[0] for match in re.findall(pat, query)]
-    path_tups = [tuple(path.strip('/').split('/')) for path in paths]
+    path_tups = [(path_prefix,) + tuple(path.strip('/').split('/')) for path in paths]
     expr = query
     for path, tup in zip(paths, path_tups):
         expr = re.sub(path, 'get_path(record, {})'.format(str(tup)), expr)

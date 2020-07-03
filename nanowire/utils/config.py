@@ -14,7 +14,7 @@ try:
 except ImportError:
     from yaml import Loader, Dumper
 import tables as tb
-from boltons.iterutils import remap, default_enter
+from boltons.iterutils import remap, default_enter, get_path
 from dicthash import generate_hash_from_dict
 from collections import MutableMapping, OrderedDict, ItemsView
 from nanowire.utils.utils import (
@@ -594,7 +594,7 @@ def load_confs(db, base_dir='', query='', table_name='simulations', IDs=None):
     if query:
         filter_func = make_filter(query)
         for doc in col.filter(filter_func):
-            ID = doc['ID'].decode()
+            ID = doc['ID']
             short_id = ID[0:10]
             conf_path = os.path.join(base_dir, short_id, 'sim_conf.yml')
             if IDs and ID not in IDs:
@@ -609,7 +609,7 @@ def load_confs(db, base_dir='', query='', table_name='simulations', IDs=None):
             confs_list.append(conf)
     else:
         for doc in col.all():
-            ID = doc['ID'].decode()
+            ID = doc['ID']
             short_id = ID[0:10]
             pkl_data = db[ID]
             conf_path = os.path.join(base_dir, short_id, 'sim_conf.yml')

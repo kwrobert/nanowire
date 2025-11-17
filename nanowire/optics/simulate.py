@@ -171,6 +171,7 @@ def run_sim(conf, output_dir):
         conf = Config.fromYAML(conf)
     log = logging.getLogger(__name__)
     start = time.time()
+    print("INSTANTIATING SIMULATOR")
     sim = Simulator(conf, output_dir)
     try:
         sim.setup()
@@ -711,6 +712,7 @@ class Simulator:
         Runs all the necessary setup functions so one can begin running the
         simulation and collecting data
         """
+        print("INSIDE SIMULATION SETUP")
         try:
             os.makedirs(self.path)
         except OSError:
@@ -1014,8 +1016,11 @@ class Simulator:
             self.s4.SetLayerThickness(Layer=layer, Thickness=thickness)
 
     # @do_profile(out='$nano/tests/profile_writing/line_profiler.txt', follow=[])
-    @ureg.wraps(('', '', ''),
-                None)
+    @ureg.wraps(
+            ('', '', ''),
+            None,
+            False
+            )
     def compute_fields(self, zvals=None):
         """
         Constructs and returns a full 3D numpy array for each vector component
